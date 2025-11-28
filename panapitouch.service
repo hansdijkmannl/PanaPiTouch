@@ -1,0 +1,22 @@
+[Unit]
+Description=PanaPiTouch - Panasonic PTZ Camera Monitor
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=admin
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/admin/.Xauthority
+Environment=QT_QPA_PLATFORM=xcb
+WorkingDirectory=/home/admin/PanaPiTouch
+ExecStart=/home/admin/PanaPiTouch/venv/bin/python /home/admin/PanaPiTouch/main.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical.target
+
+
+
+

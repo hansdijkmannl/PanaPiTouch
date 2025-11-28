@@ -1,0 +1,25 @@
+# PanaPiTouch - Panasonic PTZ Camera Touchscreen Monitor
+# Python 3.9+
+
+# GUI Framework
+PyQt6>=6.4.0
+PyQt6-WebEngine>=6.4.0
+
+# Video Processing
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# Network & Camera Discovery
+zeroconf>=0.80.0
+requests>=2.31.0
+aiohttp>=3.9.0
+
+# ATEM Control
+PyATEMMax>=1.0b9
+
+# Async support
+qasync>=0.27.0
+
+# Configuration
+pyyaml>=6.0.1
+

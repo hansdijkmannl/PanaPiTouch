@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=PanaPiTouch
+Comment=Panasonic PTZ Camera Touchscreen Monitor
+Exec=/home/admin/PanaPiTouch/start.sh
+Icon=/home/admin/PanaPiTouch/icon.png
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;
+StartupNotify=true
+StartupWMClass=PanaPiTouch
+
+
+
+
