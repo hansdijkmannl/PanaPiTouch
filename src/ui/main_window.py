@@ -859,12 +859,17 @@ class MainWindow(QMainWindow):
         for name, hex_color, bgr_color in frame_colors:
             color_btn = QPushButton()
             color_btn.setFixedSize(28, 28)
-            color_btn.setToolTip(name)
+            color_btn.setMinimumSize(28, 28)
+            color_btn.setMaximumSize(28, 28)
             color_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {hex_color};
                     border: 2px solid #444;
                     border-radius: 4px;
+                    min-width: 28px;
+                    max-width: 28px;
+                    min-height: 28px;
+                    max-height: 28px;
                 }}
                 QPushButton:hover {{
                     border: 2px solid #888;
@@ -1227,6 +1232,8 @@ class MainWindow(QMainWindow):
                         background-color: {btn_hex};
                         border: 3px solid {COLORS['primary']};
                         border-radius: 4px;
+                        min-width: 28px; max-width: 28px;
+                        min-height: 28px; max-height: 28px;
                     }}
                 """)
             else:
@@ -1236,6 +1243,8 @@ class MainWindow(QMainWindow):
                         background-color: {btn_hex};
                         border: 2px solid #444;
                         border-radius: 4px;
+                        min-width: 28px; max-width: 28px;
+                        min-height: 28px; max-height: 28px;
                     }}
                     QPushButton:hover {{
                         border: 2px solid #888;
