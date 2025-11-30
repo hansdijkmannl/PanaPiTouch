@@ -841,63 +841,11 @@ class MainWindow(QMainWindow):
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
-        # Custom ratio input row
-        custom_row = QHBoxLayout()
-        custom_row.setSpacing(6)
-        
-        from PyQt6.QtWidgets import QLineEdit
-        custom_input_style = f"""
-            QLineEdit {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 6px 8px;
-                color: {COLORS['text']};
-                font-size: 14px;
-            }}
-        """
-        self.custom_width_input = QLineEdit()
-        self.custom_width_input.setPlaceholderText("W")
-        self.custom_width_input.setFixedHeight(36)
-        self.custom_width_input.setStyleSheet(custom_input_style)
-        custom_row.addWidget(self.custom_width_input, 1)
-        
-        colon_label = QLabel(":")
-        colon_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 16px; font-weight: bold; background: transparent; border: none;")
-        custom_row.addWidget(colon_label)
-        
-        self.custom_height_input = QLineEdit()
-        self.custom_height_input.setPlaceholderText("H")
-        self.custom_height_input.setFixedHeight(36)
-        self.custom_height_input.setStyleSheet(custom_input_style)
-        custom_row.addWidget(self.custom_height_input, 1)
-        
-        frame_guide_layout.addLayout(custom_row)
-        
-        # Apply button - full width below inputs
-        apply_ratio_btn = QPushButton("Apply Custom Ratio")
-        apply_ratio_btn.setFixedHeight(36)
-        apply_ratio_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['primary']};
-                border: none;
-                border-radius: 6px;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-            }}
-            QPushButton:pressed {{
-                background-color: #FF9500;
-            }}
-        """)
-        apply_ratio_btn.clicked.connect(self._apply_custom_ratio)
-        frame_guide_layout.addWidget(apply_ratio_btn)
-        
-        # Drag mode toggle
-        self.drag_mode_btn = QPushButton("✋ Drag to Resize")
+        # Custom Frame button - drag to create custom frame
+        self.drag_mode_btn = QPushButton("✋ Custom Frame")
         self.drag_mode_btn.setObjectName("overlayButton")
         self.drag_mode_btn.setCheckable(True)
-        self.drag_mode_btn.setFixedHeight(32)
+        self.drag_mode_btn.setFixedHeight(36)
         self.drag_mode_btn.clicked.connect(self._toggle_drag_mode)
         frame_guide_layout.addWidget(self.drag_mode_btn)
         
@@ -1163,18 +1111,6 @@ class MainWindow(QMainWindow):
         category = self.frame_category_combo.currentText()
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
             self.preview_widget.frame_guide.enabled = True
-    
-    def _apply_custom_ratio(self):
-        """Apply custom aspect ratio from input fields"""
-        try:
-            width = float(self.custom_width_input.text())
-            height = float(self.custom_height_input.text())
-            
-            if width > 0 and height > 0:
-                self.preview_widget.frame_guide.set_custom_ratio(width, height)
-                self.preview_widget.frame_guide.enabled = True
-        except ValueError:
-            pass  # Invalid input, ignore
     
     def _toggle_drag_mode(self):
         """Toggle drag/resize mode for frame guide"""
