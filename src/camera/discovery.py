@@ -30,6 +30,10 @@ class DiscoveredCamera:
     subnet_mask: str = ""
     gateway: str = ""
     dhcp_enabled: bool = False
+    # New fields from EasyIPSetupToolPlus research
+    status: str = "Unknown"  # "Power ON", "Standby", "Offline", "Auth Required"
+    auth_required: bool = False
+    reachable: bool = False
 
 
 class CameraDiscovery:
@@ -51,6 +55,122 @@ class CameraDiscovery:
         self._running = False
         self._lock = threading.Lock()
         self._progress_callback: Optional[Callable[[str], None]] = None
+        self._selected_adapter: Optional[str] = None  # Network adapter IP to use
+    
+    @staticmethod
+    def get_network_adapters() -> List[Dict[str, str]]:
+        """
+        Get list of available network adapters with their IP addresses.
+        Similar to EasyIPSetupToolPlus network pulldown.
+        
+        Returns:
+            List of dicts with 'name', 'ip', 'netmask' keys
+        """
+        adapters = []
+        try:
+            import netifaces
+            for iface in netifaces.interfaces():
+                addrs = netifaces.ifaddresses(iface)
+                if netifaces.AF_INET in addrs:
+                    for addr in addrs[netifaces.AF_INET]:
+                        ip = addr.get('addr', '')
+                        netmask = addr.get('netmask', '')
+                        if ip and not ip.startswith('127.'):
+                            adapters.append({
+                                'name': iface,
+                                'ip': ip,
+                                'netmask': netmask
+                            })
+        except ImportError:
+            # Fallback if netifaces not available
+            try:
+                hostname = socket.gethostname()
+                local_ip = socket.gethostbyname(hostname)
+                if local_ip and not local_ip.startswith('127.'):
+                    adapters.append({
+                        'name': 'default',
+                        'ip': local_ip,
+                        'netmask': '255.255.255.0'
+                    })
+            except:
+                pass
+            # Also try socket method
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                if local_ip and not any(a['ip'] == local_ip for a in adapters):
+                    adapters.append({
+                        'name': 'default',
+                        'ip': local_ip,
+                        'netmask': '255.255.255.0'
+                    })
+            except:
+                pass
+        return adapters
+    
+    def set_network_adapter(self, adapter_ip: Optional[str]):
+        """Set which network adapter to use for discovery"""
+        self._selected_adapter = adapter_ip
+    
+    @staticmethod
+    def identify_camera(ip_address: str, username: str = "admin", password: str = "12345", duration: int = 5) -> bool:
+        """
+        Make camera LED blink rapidly to identify it physically.
+        Similar to EasyIPSetupToolPlus Identify feature.
+        
+        Args:
+            ip_address: Camera IP address
+            username: Camera username
+            password: Camera password  
+            duration: How long to blink in seconds (default 5)
+            
+        Returns:
+            True if command was sent successfully
+        """
+        try:
+            auth = (username, password) if username else None
+            base_url = f"http://{ip_address}"
+            
+            # Panasonic identify commands - try multiple formats
+            identify_commands = [
+                # XSF command for LED control (common on newer models)
+                f"{base_url}/cgi-bin/aw_cam?cmd=XSF:01&res=1",
+                # Alternative LED blink command
+                f"{base_url}/cgi-bin/aw_cam?cmd=%23LED1&res=1",
+                # Power indicator high-speed blink
+                f"{base_url}/cgi-bin/aw_cam?cmd=%23D11&res=1",
+            ]
+            
+            for cmd_url in identify_commands:
+                try:
+                    response = requests.get(cmd_url, auth=auth, timeout=2)
+                    if response.status_code == 200:
+                        # Success - LED should be blinking
+                        # Schedule turning it off after duration
+                        def stop_identify():
+                            time.sleep(duration)
+                            try:
+                                # Turn off identify
+                                requests.get(f"{base_url}/cgi-bin/aw_cam?cmd=XSF:00&res=1", 
+                                           auth=auth, timeout=2)
+                                requests.get(f"{base_url}/cgi-bin/aw_cam?cmd=%23LED0&res=1",
+                                           auth=auth, timeout=2)
+                                requests.get(f"{base_url}/cgi-bin/aw_cam?cmd=%23D10&res=1",
+                                           auth=auth, timeout=2)
+                            except:
+                                pass
+                        
+                        threading.Thread(target=stop_identify, daemon=True).start()
+                        return True
+                except:
+                    continue
+            
+            return False
+        except Exception as e:
+            print(f"[Discovery] Identify error: {e}")
+            return False
     
     def set_progress_callback(self, callback: Callable[[str], None]):
         """Set callback for progress updates"""
@@ -88,22 +208,80 @@ class CameraDiscovery:
                 return False
     
     def _get_camera_info_http(self, camera: DiscoveredCamera):
-        """Get additional camera info via Panasonic HTTP API"""
+        """Get additional camera info via Panasonic HTTP API with auth detection"""
         try:
             base_url = f"http://{camera.ip_address}"
-            auth = ('admin', 'admin')
+            # Try both common default credentials
+            credentials_to_try = [
+                ('admin', '12345'),  # Newer Panasonic default
+                ('admin', 'admin'),  # Older default
+                (None, None),        # No auth
+            ]
             timeout = 2
+            working_auth = None
             
-            # Try to get model/OID
+            # First, test connectivity and auth
+            for auth_pair in credentials_to_try:
+                try:
+                    auth = auth_pair if auth_pair[0] else None
+                    url = f"{base_url}/cgi-bin/aw_cam?cmd=QID&res=1"
+                    response = requests.get(url, timeout=timeout, auth=auth)
+                    
+                    if response.status_code == 200:
+                        camera.reachable = True
+                        camera.auth_required = (auth is not None)
+                        working_auth = auth
+                        text = response.text.strip()
+                        if 'OID:' in text:
+                            camera.model = text.split('OID:')[1].strip()[:30]
+                        break
+                    elif response.status_code == 401:
+                        camera.reachable = True
+                        camera.auth_required = True
+                        camera.status = "Auth Required"
+                        # Continue trying other credentials
+                        continue
+                    elif response.status_code == 403:
+                        camera.reachable = True
+                        camera.auth_required = True
+                        camera.status = "Auth Required"
+                        continue
+                except requests.exceptions.ConnectTimeout:
+                    camera.status = "Offline"
+                    camera.reachable = False
+                    return
+                except requests.exceptions.ConnectionError:
+                    camera.status = "Offline"
+                    camera.reachable = False
+                    return
+                except:
+                    continue
+            
+            # If no working auth found but camera responded with 401, mark as auth required
+            if not working_auth and camera.auth_required:
+                camera.status = "Auth Required"
+                if not camera.name:
+                    camera.name = f"Camera ({camera.ip_address})"
+                return
+            
+            # Continue fetching info with working credentials
+            auth = working_auth
+            
+            # Try to get power status (similar to EasyIPSetupToolPlus)
             try:
-                url = f"{base_url}/cgi-bin/aw_cam?cmd=QID&res=1"
+                url = f"{base_url}/cgi-bin/aw_cam?cmd=O&res=1"
                 response = requests.get(url, timeout=timeout, auth=auth)
                 if response.status_code == 200:
-                    text = response.text.strip()
-                    if 'OID:' in text:
-                        camera.model = text.split('OID:')[1].strip()[:30]
+                    text = response.text.strip().upper()
+                    if 'P1' in text or 'O1' in text:
+                        camera.status = "Power ON"
+                    elif 'P0' in text or 'O0' in text:
+                        camera.status = "Standby"
+                    else:
+                        camera.status = "Power ON"  # Assume on if responding
             except:
-                pass
+                if camera.reachable:
+                    camera.status = "Power ON"
             
             # Try to get serial number
             try:
@@ -145,11 +323,16 @@ class CameraDiscovery:
                 camera.name = camera.model or f"Camera ({camera.ip_address})"
                 
         except Exception as e:
+            camera.status = "Offline"
             if not camera.name:
                 camera.name = f"Camera ({camera.ip_address})"
     
     def _get_local_ip(self) -> Optional[str]:
-        """Get local IP address"""
+        """Get local IP address, using selected adapter if set"""
+        # If a specific adapter is selected, use its IP
+        if self._selected_adapter:
+            return self._selected_adapter
+        
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -349,6 +532,94 @@ class CameraDiscovery:
         thread = threading.Thread(target=_discover_thread, daemon=True)
         thread.start()
         return thread
+    
+    @staticmethod
+    def get_camera_thumbnail(ip_address: str, username: str = "admin", password: str = "12345", 
+                             size: tuple = (160, 90)) -> Optional[bytes]:
+        """
+        Get a thumbnail image from a camera for preview.
+        
+        Args:
+            ip_address: Camera IP address
+            username: Camera username
+            password: Camera password
+            size: Desired thumbnail size (width, height)
+            
+        Returns:
+            JPEG image bytes or None if failed
+        """
+        try:
+            import cv2
+            import numpy as np
+            
+            auth = (username, password) if username else None
+            
+            # Try snapshot endpoint first (faster)
+            snapshot_urls = [
+                f"http://{ip_address}/cgi-bin/mjpeg?resolution={size[0]}x{size[1]}",
+                f"http://{ip_address}/cgi-bin/camera?resolution={size[0]}x{size[1]}",
+                f"http://{ip_address}/snapshot.jpg",
+            ]
+            
+            for url in snapshot_urls:
+                try:
+                    response = requests.get(url, auth=auth, timeout=3, stream=True)
+                    if response.status_code == 200:
+                        img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
+                        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                        if img is not None:
+                            # Resize if needed
+                            if img.shape[1] != size[0] or img.shape[0] != size[1]:
+                                img = cv2.resize(img, size, interpolation=cv2.INTER_AREA)
+                            _, jpeg = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                            return jpeg.tobytes()
+                except:
+                    continue
+            
+            return None
+        except Exception as e:
+            print(f"[Discovery] Thumbnail error for {ip_address}: {e}")
+            return None
+    
+    @staticmethod
+    def check_camera_status(ip_address: str, username: str = "admin", password: str = "12345") -> str:
+        """
+        Quick check of camera status without full discovery.
+        
+        Args:
+            ip_address: Camera IP address
+            username: Camera username
+            password: Camera password
+            
+        Returns:
+            Status string: "Power ON", "Standby", "Auth Required", "Offline"
+        """
+        try:
+            auth = (username, password) if username else None
+            
+            # Try power status command
+            url = f"http://{ip_address}/cgi-bin/aw_cam?cmd=O&res=1"
+            response = requests.get(url, auth=auth, timeout=2)
+            
+            if response.status_code == 200:
+                text = response.text.strip().upper()
+                if 'P1' in text or 'O1' in text:
+                    return "Power ON"
+                elif 'P0' in text or 'O0' in text:
+                    return "Standby"
+                else:
+                    return "Power ON"  # Responding = online
+            elif response.status_code in (401, 403):
+                return "Auth Required"
+            else:
+                return "Offline"
+                
+        except requests.exceptions.ConnectTimeout:
+            return "Offline"
+        except requests.exceptions.ConnectionError:
+            return "Offline"
+        except:
+            return "Unknown"
     
     # Legacy methods for compatibility
     def start_continuous_discovery(self, callback: Callable[[DiscoveredCamera], None]):

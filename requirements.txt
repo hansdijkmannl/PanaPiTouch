@@ -13,6 +13,7 @@ numpy>=1.24.0
 zeroconf>=0.80.0
 requests>=2.31.0
 aiohttp>=3.9.0
+netifaces>=0.11.0
 
 # ATEM Control
 PyATEMMax>=1.0b9

@@ -26,12 +26,17 @@ class DiscoveryWorker(QThread):
     progress_value = pyqtSignal(int)  # 0-100
     finished_signal = pyqtSignal(int)  # Total count
     
-    def __init__(self):
+    def __init__(self, adapter_ip: str = None):
         super().__init__()
         self.discovery = CameraDiscovery()
+        self._adapter_ip = adapter_ip
     
     def run(self):
         """Run Panasonic UDP discovery in background thread"""
+        # Set network adapter if specified
+        if self._adapter_ip:
+            self.discovery.set_network_adapter(self._adapter_ip)
+        
         self.discovery.set_progress_callback(self._on_progress)
         self.progress_value.emit(10)
         cameras = self.discovery.discover()
@@ -49,13 +54,15 @@ class DiscoveryWorker(QThread):
 
 
 class DiscoveredCameraCard(QFrame):
-    """Enhanced card widget for discovered cameras"""
+    """Enhanced card widget for discovered cameras with status, identify, and preview"""
     
     add_clicked = pyqtSignal(object)  # DiscoveredCamera
+    identify_clicked = pyqtSignal(str)  # IP address
     
     def __init__(self, camera: DiscoveredCamera, parent=None):
         super().__init__(parent)
         self.camera = camera
+        self._thumbnail_label = None
         self._setup_ui()
     
     def _setup_ui(self):
@@ -64,65 +71,119 @@ class DiscoveredCameraCard(QFrame):
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
-                padding: 10px;
             }
             QFrame:hover {
                 border-color: #00b4d8;
             }
         """)
         
-        layout = QVBoxLayout(self)
-        layout.setSpacing(6)
+        layout = QHBoxLayout(self)
+        layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Header row with name/model
+        # Left side: Thumbnail preview
+        self._thumbnail_label = QLabel()
+        self._thumbnail_label.setFixedSize(80, 45)
+        self._thumbnail_label.setStyleSheet("""
+            QLabel {
+                background-color: #0a0a0f;
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+            }
+        """)
+        self._thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._thumbnail_label.setText("📷")
+        layout.addWidget(self._thumbnail_label)
+        
+        # Center: Camera info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(2)
+        info_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Name/model row with status
         header_layout = QHBoxLayout()
-        header_layout.setSpacing(8)
+        header_layout.setSpacing(6)
         name_label = QLabel(self.camera.name or self.camera.model or "Unknown Camera")
-        name_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff;")
+        name_label.setStyleSheet("font-size: 12px; font-weight: 600; color: #ffffff;")
         name_label.setWordWrap(False)
-        name_label.setMaximumWidth(200)  # Prevent excessive width
+        name_label.setMaximumWidth(140)
         header_layout.addWidget(name_label)
+        
+        # Status indicator with color based on status
+        status = getattr(self.camera, 'status', 'Unknown')
+        status_colors = {
+            "Power ON": "#22c55e",      # Green
+            "Standby": "#eab308",       # Yellow
+            "Auth Required": "#f97316", # Orange
+            "Offline": "#ef4444",       # Red
+            "Unknown": "#6b7280",       # Gray
+        }
+        status_color = status_colors.get(status, "#6b7280")
+        status_label = QLabel(f"● {status}")
+        status_label.setStyleSheet(f"font-size: 9px; color: {status_color}; font-weight: 500;")
+        header_layout.addWidget(status_label)
         header_layout.addStretch()
         
-        # Status indicator
-        status_dot = QLabel("●")
-        status_dot.setStyleSheet("font-size: 10px; color: #22c55e;")
-        status_dot.setFixedSize(10, 10)
-        header_layout.addWidget(status_dot)
-        
-        layout.addLayout(header_layout)
+        info_layout.addLayout(header_layout)
         
         # IP address
-        ip_label = QLabel(f"📍 {self.camera.ip_address}")
+        ip_label = QLabel(f"{self.camera.ip_address}")
         ip_label.setStyleSheet("font-size: 11px; color: #888898;")
         ip_label.setWordWrap(False)
-        layout.addWidget(ip_label)
+        info_layout.addWidget(ip_label)
         
-        # MAC address if available
-        if self.camera.mac_address:
-            mac_label = QLabel(f"🔗 {self.camera.mac_address}")
-            mac_label.setStyleSheet("font-size: 10px; color: #666676;")
-            mac_label.setWordWrap(False)
-            layout.addWidget(mac_label)
-        
-        # Model info if available
+        # Model and MAC on same row
+        details = []
         if self.camera.model and self.camera.model != (self.camera.name or ""):
-            model_label = QLabel(f"📷 {self.camera.model}")
-            model_label.setStyleSheet("font-size: 10px; color: #666676;")
-            model_label.setWordWrap(False)
-            layout.addWidget(model_label)
+            details.append(self.camera.model)
+        if self.camera.mac_address:
+            details.append(self.camera.mac_address[:8] + "...")
+        if details:
+            details_label = QLabel(" | ".join(details))
+            details_label.setStyleSheet("font-size: 9px; color: #666676;")
+            details_label.setWordWrap(False)
+            info_layout.addWidget(details_label)
+        
+        info_layout.addStretch()
+        layout.addLayout(info_layout, 1)
+        
+        # Right side: Buttons
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(4)
+        btn_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Identify button (blink LED)
+        identify_btn = QPushButton("💡")
+        identify_btn.setFixedSize(32, 28)
+        identify_btn.setToolTip("Identify camera (blink LED)")
+        identify_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: none;
+                border-radius: 6px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+            }
+            QPushButton:pressed {
+                background-color: #4a4a58;
+            }
+        """)
+        identify_btn.clicked.connect(lambda: self.identify_clicked.emit(self.camera.ip_address))
+        btn_layout.addWidget(identify_btn)
         
         # Add button
-        add_btn = QPushButton("➕ Add to Form")
-        add_btn.setFixedHeight(28)
+        add_btn = QPushButton("➕")
+        add_btn.setFixedSize(32, 28)
+        add_btn.setToolTip("Add to form")
         add_btn.setStyleSheet("""
             QPushButton {
                 background-color: #00b4d8;
                 border: none;
                 border-radius: 6px;
                 color: #0a0a0f;
-                font-size: 11px;
+                font-size: 12px;
                 font-weight: 600;
             }
             QPushButton:hover {
@@ -133,13 +194,24 @@ class DiscoveredCameraCard(QFrame):
             }
         """)
         add_btn.clicked.connect(lambda: self.add_clicked.emit(self.camera))
-        layout.addWidget(add_btn)
+        btn_layout.addWidget(add_btn)
+        
+        layout.addLayout(btn_layout)
+    
+    def set_thumbnail(self, pixmap: 'QPixmap'):
+        """Set the thumbnail image"""
+        if self._thumbnail_label and pixmap:
+            scaled = pixmap.scaled(80, 45, Qt.AspectRatioMode.KeepAspectRatio, 
+                                   Qt.TransformationMode.SmoothTransformation)
+            self._thumbnail_label.setPixmap(scaled)
+            self._thumbnail_label.setText("")
 
 
 class CameraListItem(QFrame):
     """Enhanced camera list item with status indicators and actions"""
     
     edit_clicked = pyqtSignal(int)
+    identify_clicked = pyqtSignal(str, str, str)  # ip, username, password
     selection_changed = pyqtSignal(int, bool)  # camera_id, selected
     
     def __init__(self, camera: CameraConfig, atem_input: int, parent=None):
@@ -251,9 +323,38 @@ class CameraListItem(QFrame):
         
         layout.addLayout(info_layout, stretch=1)
         
+        # Button container for Identify and Edit
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        # Identify button - blink camera LED
+        identify_btn = QPushButton("💡")
+        identify_btn.setFixedSize(40, 40)
+        identify_btn.setToolTip("Identify camera (blink LED)")
+        identify_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: none;
+                border-radius: 6px;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+            }
+            QPushButton:pressed {
+                background-color: #4a4a58;
+            }
+        """)
+        identify_btn.clicked.connect(lambda: self.identify_clicked.emit(
+            self.camera.ip_address, 
+            self.camera.username or "admin", 
+            self.camera.password or "12345"
+        ))
+        btn_layout.addWidget(identify_btn)
+        
         # Edit button - centered vertically
         edit_btn = QPushButton("Edit")
-        edit_btn.setFixedSize(80, 40)
+        edit_btn.setFixedSize(60, 40)
         edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #00b4d8;
@@ -263,9 +364,14 @@ class CameraListItem(QFrame):
                 font-size: 13px;
                 font-weight: 600;
             }
+            QPushButton:hover {
+                background-color: #0099bb;
+            }
         """)
         edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.camera.id))
-        layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        btn_layout.addWidget(edit_btn)
+        
+        layout.addLayout(btn_layout)
         
         self.setStyleSheet("""
             CameraListItem {
@@ -469,6 +575,59 @@ class CameraPage(QWidget):
         """)
         add_camera_layout = QVBoxLayout(add_camera_group)
         add_camera_layout.setSpacing(12)
+        
+        # Network adapter selector row
+        adapter_layout = QHBoxLayout()
+        adapter_layout.setSpacing(8)
+        
+        adapter_label = QLabel("🌐 Network:")
+        adapter_label.setStyleSheet("color: #888898; font-size: 11px;")
+        adapter_layout.addWidget(adapter_label)
+        
+        self.adapter_combo = QComboBox()
+        self.adapter_combo.setFixedHeight(28)
+        self.adapter_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                color: #ffffff;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                color: #ffffff;
+            }
+        """)
+        self._populate_network_adapters()
+        adapter_layout.addWidget(self.adapter_combo, 1)
+        
+        # Refresh adapters button
+        refresh_adapter_btn = QPushButton("⟳")
+        refresh_adapter_btn.setFixedSize(28, 28)
+        refresh_adapter_btn.setToolTip("Refresh network adapters")
+        refresh_adapter_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+            }
+        """)
+        refresh_adapter_btn.clicked.connect(self._populate_network_adapters)
+        adapter_layout.addWidget(refresh_adapter_btn)
+        
+        add_camera_layout.addLayout(adapter_layout)
         
         # Top buttons row: Scan Network and Add Manually toggle
         top_buttons_layout = QHBoxLayout()
@@ -1079,6 +1238,7 @@ class CameraPage(QWidget):
             item = CameraListItem(camera, atem_input)
             item.edit_clicked.connect(self._edit_camera)
             item.selection_changed.connect(self._on_camera_selection_changed)
+            item.identify_clicked.connect(self._on_identify_configured_camera)
             self._camera_items[camera.id] = item
             self.camera_list_layout.addWidget(item)
             
@@ -1285,8 +1445,11 @@ class CameraPage(QWidget):
         self.discovery_progress.show()
         self.discovery_progress.setValue(0)
         
+        # Get selected network adapter
+        adapter_ip = self.adapter_combo.currentData()  # Returns None for "Auto"
+        
         # Create and start worker thread
-        self._discovery_worker = DiscoveryWorker()
+        self._discovery_worker = DiscoveryWorker(adapter_ip)
         self._discovery_worker.camera_found.connect(self._on_camera_discovered)
         self._discovery_worker.progress.connect(self._on_discovery_progress)
         self._discovery_worker.progress_value.connect(self.discovery_progress.setValue)
@@ -1309,6 +1472,7 @@ class CameraPage(QWidget):
         # Create and add card
         card = DiscoveredCameraCard(camera)
         card.add_clicked.connect(self._on_discovered_card_add_clicked)
+        card.identify_clicked.connect(self._on_identify_camera)
         self._discovered_cards[camera.ip_address] = card
         
         # Add card to layout (before empty state if it exists)
@@ -1318,10 +1482,18 @@ class CameraPage(QWidget):
         else:
             self.discovered_layout.addWidget(card)
         
+        # Fetch thumbnail for this camera in background
+        self._fetch_discovery_thumbnail(camera.ip_address, card)
+        
         # Update status
         count = len(self._discovered_cameras)
-        self.discovery_status.setText(f"✅ Found {count} camera(s)...")
-        self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+        status = getattr(camera, 'status', 'Unknown')
+        if status == "Auth Required":
+            self.discovery_status.setText(f"✅ Found {count} camera(s) - Some require authentication")
+            self.discovery_status.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
+        else:
+            self.discovery_status.setText(f"✅ Found {count} camera(s)...")
+            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
     
     @pyqtSlot(str)
     def _on_discovery_progress(self, message: str):
@@ -1353,6 +1525,123 @@ class CameraPage(QWidget):
             self.discovery_status.setText(f"✅ Discovery complete: Found {count} camera(s)")
             self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
             # Empty state should already be hidden if cameras were found
+    
+    def _populate_network_adapters(self):
+        """Populate the network adapter dropdown"""
+        from src.camera.discovery import CameraDiscovery
+        
+        self.adapter_combo.clear()
+        self.adapter_combo.addItem("Auto (Default)", None)
+        
+        adapters = CameraDiscovery.get_network_adapters()
+        for adapter in adapters:
+            display = f"{adapter['name']} ({adapter['ip']})"
+            self.adapter_combo.addItem(display, adapter['ip'])
+    
+    def _on_identify_camera(self, ip_address: str):
+        """Handle identify camera button - make LED blink"""
+        from src.camera.discovery import CameraDiscovery
+        
+        # Get credentials from form if available
+        username = self.camera_user_input.text().strip() or "admin"
+        password = self.camera_pass_input.text().strip() or "12345"
+        
+        # Update status
+        self.discovery_status.setText(f"💡 Identifying camera at {ip_address}...")
+        self.discovery_status.setStyleSheet("color: #eab308; font-size: 12px; padding: 4px;")
+        
+        # Run identify in background
+        def identify_task():
+            success = CameraDiscovery.identify_camera(ip_address, username, password, duration=5)
+            return success
+        
+        def on_identify_complete(future):
+            try:
+                success = future.result()
+                if success:
+                    QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, True))
+                else:
+                    QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, False))
+            except:
+                QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, False))
+        
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(identify_task)
+        future.add_done_callback(on_identify_complete)
+    
+    def _show_identify_result(self, ip_address: str, success: bool):
+        """Show result of identify command"""
+        if success:
+            self.discovery_status.setText(f"💡 Camera {ip_address} LED is blinking for 5 seconds")
+            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+        else:
+            self.discovery_status.setText(f"⚠️ Could not identify camera {ip_address}")
+            self.discovery_status.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
+        
+        # Clear status after a few seconds
+        QTimer.singleShot(6000, lambda: self._reset_discovery_status())
+    
+    def _reset_discovery_status(self):
+        """Reset discovery status to default"""
+        count = len(self._discovered_cameras)
+        if count > 0:
+            self.discovery_status.setText(f"✅ {count} camera(s) found")
+            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+        else:
+            self.discovery_status.setText("Ready to scan or add manually")
+            self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+    
+    def _on_identify_configured_camera(self, ip_address: str, username: str, password: str):
+        """Handle identify button click on configured camera list item"""
+        from src.camera.discovery import CameraDiscovery
+        
+        # Run identify in background
+        def identify_task():
+            success = CameraDiscovery.identify_camera(ip_address, username, password, duration=5)
+            return success
+        
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        executor.submit(identify_task)
+        # Fire and forget - visual feedback is on the camera itself
+    
+    def _fetch_discovery_thumbnail(self, ip_address: str, card: 'DiscoveredCameraCard'):
+        """Fetch thumbnail for discovered camera in background"""
+        from src.camera.discovery import CameraDiscovery
+        from PyQt6.QtGui import QPixmap, QImage
+        
+        def fetch_task():
+            username = "admin"
+            password = "12345"
+            jpeg_data = CameraDiscovery.get_camera_thumbnail(ip_address, username, password, (160, 90))
+            return jpeg_data
+        
+        def on_fetch_complete(future):
+            try:
+                jpeg_data = future.result()
+                if jpeg_data:
+                    # Convert to QPixmap on main thread
+                    QTimer.singleShot(0, lambda: self._set_card_thumbnail(card, jpeg_data))
+            except:
+                pass
+        
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(fetch_task)
+        future.add_done_callback(on_fetch_complete)
+    
+    def _set_card_thumbnail(self, card: 'DiscoveredCameraCard', jpeg_data: bytes):
+        """Set thumbnail on card (must be called from main thread)"""
+        from PyQt6.QtGui import QPixmap, QImage
+        
+        try:
+            qimage = QImage.fromData(jpeg_data)
+            if not qimage.isNull():
+                pixmap = QPixmap.fromImage(qimage)
+                card.set_thumbnail(pixmap)
+        except Exception as e:
+            print(f"[CameraPage] Error setting thumbnail: {e}")
     
     def _on_discovered_card_add_clicked(self, camera: DiscoveredCamera):
         """Handle add button click on discovered camera card"""
