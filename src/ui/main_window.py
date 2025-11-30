@@ -890,9 +890,10 @@ class MainWindow(QMainWindow):
         }
         
         color_row = QWidget()
-        color_row.setFixedHeight(33)  # 25px button + 4px margin top/bottom
+        color_row.setMinimumHeight(35)
+        color_row.setMaximumHeight(35)
         color_row_layout = QHBoxLayout(color_row)
-        color_row_layout.setContentsMargins(0, 4, 0, 4)
+        color_row_layout.setContentsMargins(0, 5, 0, 5)
         color_row_layout.setSpacing(6)
         color_row_layout.addStretch()
         
@@ -923,6 +924,7 @@ class MainWindow(QMainWindow):
         # Default to white selected
         self._color_buttons["White"].setChecked(True)
         frame_guide_layout.addWidget(color_row)
+        frame_guide_layout.addSpacing(4)  # Space after color buttons
         
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
