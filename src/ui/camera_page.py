@@ -1711,12 +1711,8 @@ class CameraPage(QWidget):
         self._validate_form()
         self._form_has_changes = False
         
-        # Scroll to make the Add Camera section visible and focus the name field
+        # Make the Add Camera section visible (don't focus to avoid keyboard popup)
         self.add_camera_group.setVisible(True)
-        self.camera_name_input.setFocus()
-        
-        # Use QTimer to ensure the scroll happens after layout updates
-        QTimer.singleShot(100, lambda: self.add_camera_group.ensurePolished())
     
     def _cancel_edit(self):
         """Cancel camera edit"""

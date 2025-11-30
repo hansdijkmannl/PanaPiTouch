@@ -373,7 +373,7 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"""
             QScrollArea {{
                 background: transparent;
@@ -890,6 +890,7 @@ class MainWindow(QMainWindow):
         }
         
         color_row = QWidget()
+        color_row.setFixedHeight(33)  # 25px button + 4px margin top/bottom
         color_row_layout = QHBoxLayout(color_row)
         color_row_layout.setContentsMargins(0, 4, 0, 4)
         color_row_layout.setSpacing(6)
