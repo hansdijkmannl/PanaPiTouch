@@ -1155,24 +1155,113 @@ class SettingsPage(QWidget):
             
             interface = interfaces[0]
             
+            # Try multiple network configuration methods
+            success = False
+            method_used = None
+            
+            # Method 1: NetworkManager (nmcli)
             try:
                 cidr = self._subnet_to_cidr(subnet)
                 subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface, 
-                               f'ipv4.addresses', f'{ip}/{cidr}'], check=True)
+                               f'ipv4.addresses', f'{ip}/{cidr}'], check=True, 
+                               capture_output=True)
                 subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface,
-                               'ipv4.gateway', gateway], check=True)
+                               'ipv4.gateway', gateway], check=True, capture_output=True)
                 subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface,
-                               'ipv4.method', 'manual'], check=True)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'down', interface], check=False)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'up', interface], check=True)
-                
-                QMessageBox.information(self, "Success", 
-                    f"Network settings applied to {interface}.")
-                self._set_network_status(f"Applied to {interface}", "success")
-                
+                               'ipv4.method', 'manual'], check=True, capture_output=True)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'down', interface], 
+                               check=False, capture_output=True)
+                subprocess.run(['sudo', 'nmcli', 'connection', 'up', interface], 
+                               check=True, capture_output=True)
+                success = True
+                method_used = "NetworkManager"
             except (subprocess.CalledProcessError, FileNotFoundError):
-                QMessageBox.warning(self, "NetworkManager Not Available",
-                    "NetworkManager (nmcli) not found.\nPlease configure network manually.")
+                pass
+            
+            # Method 2: dhcpcd (common on Raspberry Pi)
+            if not success:
+                try:
+                    dhcpcd_conf = Path(f"/etc/dhcpcd.conf")
+                    if dhcpcd_conf.exists():
+                        # Backup original config
+                        backup_path = Path(f"/etc/dhcpcd.conf.backup.{int(datetime.now().timestamp())}")
+                        shutil.copy(dhcpcd_conf, backup_path)
+                        
+                        # Read current config
+                        with open(dhcpcd_conf, 'r') as f:
+                            lines = f.readlines()
+                        
+                        # Remove old static IP config for this interface
+                        new_lines = []
+                        skip_until_blank = False
+                        for i, line in enumerate(lines):
+                            if f'interface {interface}' in line:
+                                skip_until_blank = True
+                            elif skip_until_blank and line.strip() == '':
+                                skip_until_blank = False
+                            
+                            if not skip_until_blank:
+                                new_lines.append(line)
+                        
+                        # Add new static IP config
+                        new_lines.append(f'\n# Static IP configuration for {interface}\n')
+                        new_lines.append(f'interface {interface}\n')
+                        new_lines.append(f'static ip_address={ip}/{cidr}\n')
+                        new_lines.append(f'static routers={gateway}\n')
+                        new_lines.append(f'static domain_name_servers={gateway} 8.8.8.8\n')
+                        
+                        # Write new config
+                        with open(dhcpcd_conf, 'w') as f:
+                            f.writelines(new_lines)
+                        
+                        # Restart dhcpcd
+                        subprocess.run(['sudo', 'systemctl', 'restart', 'dhcpcd'], 
+                                       check=True, capture_output=True)
+                        success = True
+                        method_used = "dhcpcd"
+                except Exception as e:
+                    print(f"dhcpcd method failed: {e}")
+            
+            # Method 3: systemd-networkd
+            if not success:
+                try:
+                    netdev_file = Path(f"/etc/systemd/network/10-{interface}.network")
+                    netdev_file.parent.mkdir(parents=True, exist_ok=True)
+                    
+                    cidr = self._subnet_to_cidr(subnet)
+                    config = f"""[Match]
+Name={interface}
+
+[Network]
+Address={ip}/{cidr}
+Gateway={gateway}
+DNS={gateway} 8.8.8.8
+"""
+                    with open(netdev_file, 'w') as f:
+                        f.write(config)
+                    
+                    subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-networkd'], 
+                                   check=True, capture_output=True)
+                    success = True
+                    method_used = "systemd-networkd"
+                except Exception as e:
+                    print(f"systemd-networkd method failed: {e}")
+            
+            if success:
+                QMessageBox.information(self, "Success", 
+                    f"Network settings applied to {interface} using {method_used}.\n\n"
+                    "The connection may be temporarily interrupted.")
+                self._set_network_status(f"Applied to {interface}", "success")
+            else:
+                QMessageBox.warning(self, "Network Configuration Failed",
+                    "Could not configure network automatically.\n\n"
+                    "Please configure manually via:\n"
+                    "- NetworkManager: sudo nmcli\n"
+                    "- dhcpcd: Edit /etc/dhcpcd.conf\n"
+                    "- systemd-networkd: Edit /etc/systemd/network/\n\n"
+                    "Or install NetworkManager:\n"
+                    "  sudo apt install network-manager")
+                self._set_network_status("Configuration failed", "error")
                     
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to apply settings:\n{str(e)}")
