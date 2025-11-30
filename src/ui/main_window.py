@@ -1144,12 +1144,10 @@ class MainWindow(QMainWindow):
         if not template_name or template_name == "(No custom guides)":
             return
         
-        # Don't auto-enable frame guides - user must explicitly enable them
-        # This prevents demo mode or other actions from automatically showing frame guides
         category = self.frame_category_combo.currentText()
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
-            # Only enable if user explicitly wants it (don't auto-enable)
-            # User can enable via toggle or other explicit action
+            # Enable frame guide when user explicitly selects from dropdown
+            self.preview_widget.frame_guide.enabled = True
             # Update Custom Frame button state based on whether guide has custom_rect
             if self.preview_widget.frame_guide.drag_mode:
                 self.drag_mode_btn.setChecked(True)
