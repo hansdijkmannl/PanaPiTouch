@@ -136,13 +136,14 @@ class FrameGuideOverlay:
             for guide in templates[category]:
                 if guide.name == name:
                     self.active_guide = guide
-                    # If guide has a custom_rect, restore it and enable drag mode
+                    # If guide has a custom_rect, restore it but DON'T enable drag mode
+                    # (user wants to view it, not resize it)
                     if guide.custom_rect is not None:
                         self.custom_rect = guide.custom_rect
-                        self.drag_mode = True
                     else:
-                        self.drag_mode = False
                         self.custom_rect = None
+                    # Always disable drag mode when recalling a guide
+                    self.drag_mode = False
                     return True
         return False
     

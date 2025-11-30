@@ -895,6 +895,9 @@ class MainWindow(QMainWindow):
         
         frame_guide_layout.addLayout(btn_row)
         
+        # Add spacing at bottom
+        frame_guide_layout.addSpacing(8)
+        
         self.frame_guide_panel.setVisible(False)
         layout.addWidget(self.frame_guide_panel)
         
@@ -989,6 +992,9 @@ class MainWindow(QMainWindow):
         self.split_enable_btn.setStyleSheet(action_btn_style)
         self.split_enable_btn.clicked.connect(self._toggle_split_view)
         split_layout.addWidget(self.split_enable_btn)
+        
+        # Add spacing at bottom
+        split_layout.addSpacing(8)
         
         self.split_panel.setVisible(False)
         layout.addWidget(self.split_panel)
@@ -1114,6 +1120,8 @@ class MainWindow(QMainWindow):
     
     def _on_frame_category_changed(self, category: str):
         """Handle frame guide category change"""
+        # Block signals to prevent auto-enabling frame guides when populating dropdown
+        self.frame_template_combo.blockSignals(True)
         self.frame_template_combo.clear()
         
         templates = self.preview_widget.frame_guide.get_all_templates()
@@ -1127,15 +1135,21 @@ class MainWindow(QMainWindow):
                 self.frame_template_combo.addItem(guide.name)
             if not custom_guides:
                 self.frame_template_combo.addItem("(No custom guides)")
+        
+        # Unblock signals
+        self.frame_template_combo.blockSignals(False)
     
     def _on_frame_template_changed(self, template_name: str):
         """Handle frame guide template selection"""
         if not template_name or template_name == "(No custom guides)":
             return
         
+        # Don't auto-enable frame guides - user must explicitly enable them
+        # This prevents demo mode or other actions from automatically showing frame guides
         category = self.frame_category_combo.currentText()
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
-            self.preview_widget.frame_guide.enabled = True
+            # Only enable if user explicitly wants it (don't auto-enable)
+            # User can enable via toggle or other explicit action
             # Update Custom Frame button state based on whether guide has custom_rect
             if self.preview_widget.frame_guide.drag_mode:
                 self.drag_mode_btn.setChecked(True)
@@ -1198,11 +1212,18 @@ class MainWindow(QMainWindow):
         """Toggle split screen view"""
         enabled = self.split_enable_btn.isChecked()
         
+        # Update button text
+        if enabled:
+            self.split_enable_btn.setText("Disable")
+        else:
+            self.split_enable_btn.setText("Enable")
+        
         if enabled:
             # Get selected camera
             camera_id = self.split_camera_combo.currentData()
             if camera_id is None:
                 self.split_enable_btn.setChecked(False)
+                self.split_enable_btn.setText("Enable")
                 return
             
             # Start split view
