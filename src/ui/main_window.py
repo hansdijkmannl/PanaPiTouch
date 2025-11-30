@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
     QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
 from PyQt6.QtGui import QFont
 
 from ..config.settings import Settings
@@ -821,11 +821,19 @@ class MainWindow(QMainWindow):
                 color: {COLORS['text']};
                 selection-background-color: {COLORS['primary']};
                 padding: 2px;
+                outline: none;
             }}
             QComboBox QAbstractItemView::item {{
                 min-height: 36px;
                 padding: 6px 8px;
                 font-size: 11px;
+                background-color: {COLORS['surface']};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {COLORS['primary']};
+            }}
+            QComboBox QListView {{
+                background-color: {COLORS['surface']};
             }}
         """
         self.frame_category_combo = QComboBox()
@@ -842,10 +850,44 @@ class MainWindow(QMainWindow):
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
-        # Color picker dropdown for frame guide color
+        # Color picker dropdown for frame guide color - with color strips
+        from PyQt6.QtGui import QPixmap, QIcon, QColor
+        
         self.frame_color_combo = QComboBox()
         self.frame_color_combo.setFixedHeight(32)
-        self.frame_color_combo.setStyleSheet(touch_combo_style)
+        self.frame_color_combo.setIconSize(QSize(120, 28))
+        
+        # Custom style for color dropdown
+        color_combo_style = f"""
+            QComboBox {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 2px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                padding: 2px;
+                outline: none;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 28px;
+                padding: 0px;
+                background-color: {COLORS['surface']};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {COLORS['surface_light']};
+            }}
+            QComboBox QListView {{
+                background-color: {COLORS['surface']};
+            }}
+        """
+        self.frame_color_combo.setStyleSheet(color_combo_style)
         
         # Store color data for lookup
         self._frame_colors = {
@@ -856,10 +898,16 @@ class MainWindow(QMainWindow):
             "Yellow": ((0, 255, 255), "#FFFF00"), # BGR for OpenCV
         }
         
-        for name in self._frame_colors.keys():
-            self.frame_color_combo.addItem(name)
+        # Add color strips as icons
+        for name, (bgr, hex_color) in self._frame_colors.items():
+            pixmap = QPixmap(120, 28)
+            pixmap.fill(QColor(hex_color))
+            icon = QIcon(pixmap)
+            self.frame_color_combo.addItem(icon, "")
+            # Store color name as item data
+            self.frame_color_combo.setItemData(self.frame_color_combo.count() - 1, name)
         
-        self.frame_color_combo.currentTextChanged.connect(self._on_frame_color_changed)
+        self.frame_color_combo.currentIndexChanged.connect(self._on_frame_color_index_changed)
         frame_guide_layout.addWidget(self.frame_color_combo)
         
         # Button style for Save/Clear/Custom Frame
@@ -1186,9 +1234,10 @@ class MainWindow(QMainWindow):
         else:
             self.preview_widget.frame_guide.disable_drag_mode()
     
-    def _on_frame_color_changed(self, color_name: str):
+    def _on_frame_color_index_changed(self, index: int):
         """Handle frame guide color selection from dropdown"""
-        if color_name in self._frame_colors:
+        color_name = self.frame_color_combo.itemData(index)
+        if color_name and color_name in self._frame_colors:
             bgr_color, hex_color = self._frame_colors[color_name]
             self.preview_widget.frame_guide.line_color = bgr_color
     
