@@ -842,6 +842,44 @@ class MainWindow(QMainWindow):
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
+        # Color picker row for frame guide color
+        color_row = QHBoxLayout()
+        color_row.setSpacing(4)
+        color_row.setContentsMargins(0, 4, 0, 4)
+        
+        self.frame_color_buttons = {}
+        frame_colors = [
+            ("White", "#FFFFFF", (255, 255, 255)),
+            ("Red", "#FF0000", (0, 0, 255)),      # BGR for OpenCV
+            ("Green", "#00FF00", (0, 255, 0)),    # BGR for OpenCV
+            ("Blue", "#0000FF", (255, 0, 0)),     # BGR for OpenCV
+            ("Yellow", "#FFFF00", (0, 255, 255)), # BGR for OpenCV
+        ]
+        
+        for name, hex_color, bgr_color in frame_colors:
+            color_btn = QPushButton()
+            color_btn.setFixedSize(28, 28)
+            color_btn.setToolTip(name)
+            color_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {hex_color};
+                    border: 2px solid #444;
+                    border-radius: 4px;
+                }}
+                QPushButton:hover {{
+                    border: 2px solid #888;
+                }}
+                QPushButton:pressed {{
+                    border: 2px solid {COLORS['primary']};
+                }}
+            """)
+            color_btn.clicked.connect(lambda checked, c=bgr_color, h=hex_color: self._set_frame_guide_color(c, h))
+            self.frame_color_buttons[name] = color_btn
+            color_row.addWidget(color_btn)
+        
+        color_row.addStretch()
+        frame_guide_layout.addLayout(color_row)
+        
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
             QPushButton {{
@@ -1165,6 +1203,44 @@ class MainWindow(QMainWindow):
             self.preview_widget.frame_guide.enabled = True
         else:
             self.preview_widget.frame_guide.disable_drag_mode()
+    
+    def _set_frame_guide_color(self, bgr_color: tuple, hex_color: str):
+        """Set the frame guide color"""
+        self.preview_widget.frame_guide.line_color = bgr_color
+        self._selected_frame_color = hex_color
+        
+        # Update button borders to show selected color
+        color_hex_map = {
+            "White": "#FFFFFF",
+            "Red": "#FF0000",
+            "Green": "#00FF00",
+            "Blue": "#0000FF",
+            "Yellow": "#FFFF00",
+        }
+        
+        for name, btn in self.frame_color_buttons.items():
+            btn_hex = color_hex_map.get(name, "#FFFFFF")
+            if btn_hex == hex_color:
+                # This is the selected color - highlight it
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {btn_hex};
+                        border: 3px solid {COLORS['primary']};
+                        border-radius: 4px;
+                    }}
+                """)
+            else:
+                # Reset to normal border
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {btn_hex};
+                        border: 2px solid #444;
+                        border-radius: 4px;
+                    }}
+                    QPushButton:hover {{
+                        border: 2px solid #888;
+                    }}
+                """)
     
     def _save_custom_frame_guide(self):
         """Save current frame guide as custom preset"""
