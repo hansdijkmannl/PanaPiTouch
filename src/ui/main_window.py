@@ -810,6 +810,7 @@ class MainWindow(QMainWindow):
             QComboBox::drop-down {{
                 border: none;
                 width: 24px;
+                background-color: {COLORS['surface']};
             }}
             QComboBox::down-arrow {{
                 width: 12px;
@@ -828,11 +829,19 @@ class MainWindow(QMainWindow):
                 padding: 6px 8px;
                 font-size: 11px;
                 background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background-color: {COLORS['surface_light']};
             }}
             QComboBox QAbstractItemView::item:selected {{
                 background-color: {COLORS['primary']};
             }}
             QComboBox QListView {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+            }}
+            QComboBox QFrame {{
                 background-color: {COLORS['surface']};
             }}
         """
@@ -851,11 +860,12 @@ class MainWindow(QMainWindow):
         frame_guide_layout.addWidget(self.frame_template_combo)
         
         # Color picker dropdown for frame guide color - with color strips
-        from PyQt6.QtGui import QPixmap, QIcon, QColor
+        from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen, QPainterPath
+        from PyQt6.QtCore import QRectF
         
         self.frame_color_combo = QComboBox()
         self.frame_color_combo.setFixedHeight(32)
-        self.frame_color_combo.setIconSize(QSize(120, 28))
+        self.frame_color_combo.setIconSize(QSize(140, 24))
         
         # Custom style for color dropdown
         color_combo_style = f"""
@@ -863,24 +873,27 @@ class MainWindow(QMainWindow):
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                padding: 2px;
+                padding: 2px 4px;
             }}
             QComboBox::drop-down {{
                 border: none;
-                width: 24px;
+                width: 20px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                padding: 2px;
+                padding: 4px;
                 outline: none;
             }}
             QComboBox QAbstractItemView::item {{
                 min-height: 28px;
-                padding: 0px;
+                padding: 2px;
                 background-color: {COLORS['surface']};
             }}
             QComboBox QAbstractItemView::item:selected {{
+                background-color: {COLORS['surface_light']};
+            }}
+            QComboBox QAbstractItemView::item:hover {{
                 background-color: {COLORS['surface_light']};
             }}
             QComboBox QListView {{
@@ -898,10 +911,20 @@ class MainWindow(QMainWindow):
             "Yellow": ((0, 255, 255), "#FFFF00"), # BGR for OpenCV
         }
         
-        # Add color strips as icons
+        # Add color strips as icons with rounded corners
         for name, (bgr, hex_color) in self._frame_colors.items():
-            pixmap = QPixmap(120, 28)
-            pixmap.fill(QColor(hex_color))
+            # Create pixmap with transparent background
+            pixmap = QPixmap(140, 24)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            
+            # Draw rounded rectangle
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QBrush(QColor(hex_color)))
+            painter.setPen(QPen(QColor("#444444"), 1))
+            painter.drawRoundedRect(QRectF(0, 0, 139, 23), 4, 4)
+            painter.end()
+            
             icon = QIcon(pixmap)
             self.frame_color_combo.addItem(icon, "")
             # Store color name as item data
