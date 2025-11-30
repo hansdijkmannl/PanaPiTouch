@@ -576,59 +576,6 @@ class CameraPage(QWidget):
         add_camera_layout = QVBoxLayout(add_camera_group)
         add_camera_layout.setSpacing(12)
         
-        # Network adapter selector row
-        adapter_layout = QHBoxLayout()
-        adapter_layout.setSpacing(8)
-        
-        adapter_label = QLabel("🌐 Network:")
-        adapter_label.setStyleSheet("color: #888898; font-size: 11px;")
-        adapter_layout.addWidget(adapter_label)
-        
-        self.adapter_combo = QComboBox()
-        self.adapter_combo.setFixedHeight(28)
-        self.adapter_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-                color: #ffffff;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                color: #ffffff;
-            }
-        """)
-        self._populate_network_adapters()
-        adapter_layout.addWidget(self.adapter_combo, 1)
-        
-        # Refresh adapters button
-        refresh_adapter_btn = QPushButton("⟳")
-        refresh_adapter_btn.setFixedSize(28, 28)
-        refresh_adapter_btn.setToolTip("Refresh network adapters")
-        refresh_adapter_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: none;
-                border-radius: 4px;
-                font-size: 12px;
-                color: #ffffff;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
-            }
-        """)
-        refresh_adapter_btn.clicked.connect(self._populate_network_adapters)
-        adapter_layout.addWidget(refresh_adapter_btn)
-        
-        add_camera_layout.addLayout(adapter_layout)
-        
         # Top buttons row: Scan Network and Add Manually toggle
         top_buttons_layout = QHBoxLayout()
         top_buttons_layout.setSpacing(8)
@@ -888,6 +835,9 @@ class CameraPage(QWidget):
         self.camera_atem_combo.currentIndexChanged.connect(self._on_form_changed)
         atem_container.addWidget(self.camera_atem_combo)
         manual_layout.addLayout(atem_container)
+        
+        # Add spacing below ATEM dropdown for dropdown list to expand
+        manual_layout.addSpacing(60)
         
         # Form validation message
         self.form_error_label = QLabel("")
@@ -1445,11 +1395,8 @@ class CameraPage(QWidget):
         self.discovery_progress.show()
         self.discovery_progress.setValue(0)
         
-        # Get selected network adapter
-        adapter_ip = self.adapter_combo.currentData()  # Returns None for "Auto"
-        
         # Create and start worker thread
-        self._discovery_worker = DiscoveryWorker(adapter_ip)
+        self._discovery_worker = DiscoveryWorker()
         self._discovery_worker.camera_found.connect(self._on_camera_discovered)
         self._discovery_worker.progress.connect(self._on_discovery_progress)
         self._discovery_worker.progress_value.connect(self.discovery_progress.setValue)
@@ -1525,18 +1472,6 @@ class CameraPage(QWidget):
             self.discovery_status.setText(f"✅ Discovery complete: Found {count} camera(s)")
             self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
             # Empty state should already be hidden if cameras were found
-    
-    def _populate_network_adapters(self):
-        """Populate the network adapter dropdown"""
-        from src.camera.discovery import CameraDiscovery
-        
-        self.adapter_combo.clear()
-        self.adapter_combo.addItem("Auto (Default)", None)
-        
-        adapters = CameraDiscovery.get_network_adapters()
-        for adapter in adapters:
-            display = f"{adapter['name']} ({adapter['ip']})"
-            self.adapter_combo.addItem(display, adapter['ip'])
     
     def _on_identify_camera(self, ip_address: str):
         """Handle identify camera button - make LED blink"""
