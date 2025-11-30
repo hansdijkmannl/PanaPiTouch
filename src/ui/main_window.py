@@ -111,6 +111,8 @@ class MainWindow(QMainWindow):
         self.preview_page = self._create_preview_page()
         self.camera_page = CameraPage(self.settings)
         self.companion_page = CompanionPage(self.settings.companion_url)
+        self.companion_page.update_available.connect(self._on_companion_update_available)
+        self.companion_page.update_cleared.connect(self._on_companion_update_cleared)
         self.settings_page = SettingsPage(self.settings)
         
         self.page_stack.addWidget(self.preview_page)       # 0
@@ -185,6 +187,32 @@ class MainWindow(QMainWindow):
         self.nav_button_group.idClicked.connect(self._on_nav_clicked)
         
         layout.addWidget(nav_buttons_container)
+        
+        # Companion update button (hidden by default, shown when update available)
+        self.companion_update_btn = QPushButton("⬆️ Update")
+        self.companion_update_btn.setFixedHeight(50)
+        self.companion_update_btn.setToolTip("Companion update available")
+        self.companion_update_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #22c55e;
+                border: none;
+                border-radius: 8px;
+                color: #0a0a0f;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 8px 16px;
+                margin-left: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: #16a34a;
+            }}
+            QPushButton:pressed {{
+                background-color: #15803d;
+            }}
+        """)
+        self.companion_update_btn.clicked.connect(self._on_companion_update_clicked)
+        self.companion_update_btn.hide()
+        layout.addWidget(self.companion_update_btn)
         
         # Add stretch before system menu button
         layout.addStretch()
@@ -1292,6 +1320,22 @@ class MainWindow(QMainWindow):
         # Refresh keyboard manager to find new line edits
         if self.keyboard_manager:
             QTimer.singleShot(100, lambda: self.keyboard_manager._find_line_edits(self))
+    
+    @pyqtSlot(str)
+    def _on_companion_update_available(self, version: str):
+        """Handle companion update available signal"""
+        self.companion_update_btn.setText(f"⬆️ v{version}")
+        self.companion_update_btn.setToolTip(f"Update Companion to v{version}")
+        self.companion_update_btn.show()
+    
+    @pyqtSlot()
+    def _on_companion_update_cleared(self):
+        """Handle companion update completed/cleared"""
+        self.companion_update_btn.hide()
+    
+    def _on_companion_update_clicked(self):
+        """Handle companion update button click"""
+        self.companion_page.update_companion()
     
     @pyqtSlot(int)
     def _on_camera_button_clicked(self, button_id: int):
