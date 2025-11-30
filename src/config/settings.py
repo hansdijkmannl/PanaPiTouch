@@ -49,9 +49,13 @@ class Settings:
     atem: ATEMConfig = field(default_factory=ATEMConfig)
     selected_camera: int = 0
     companion_url: str = "http://localhost:8000"
-    fullscreen: bool = True
-    display_width: int = 2480
-    display_height: int = 1860
+    # Target display: Wisecoco 10.5" 2560x1600 (16:10)
+    fullscreen: bool = False  # False for development
+    display_width: int = 1600  # Dev window (16:10 aspect)
+    display_height: int = 1000
+    # Native resolution for fullscreen
+    native_width: int = 2560
+    native_height: int = 1600
     preview_width: int = 1920
     preview_height: int = 1080
     
@@ -90,9 +94,11 @@ class Settings:
                     atem=atem,
                     selected_camera=data.get('selected_camera', 0),
                     companion_url=data.get('companion_url', 'http://localhost:8000'),
-                    fullscreen=data.get('fullscreen', True),
-                    display_width=data.get('display_width', 2480),
-                    display_height=data.get('display_height', 1860),
+                    fullscreen=data.get('fullscreen', False),
+                    display_width=data.get('display_width', 1600),
+                    display_height=data.get('display_height', 1000),
+                    native_width=data.get('native_width', 2560),
+                    native_height=data.get('native_height', 1600),
                     preview_width=data.get('preview_width', 1920),
                     preview_height=data.get('preview_height', 1080),
                 )
@@ -133,6 +139,8 @@ class Settings:
             'fullscreen': self.fullscreen,
             'display_width': self.display_width,
             'display_height': self.display_height,
+            'native_width': self.native_width,
+            'native_height': self.native_height,
             'preview_width': self.preview_width,
             'preview_height': self.preview_height,
         }
@@ -149,7 +157,7 @@ class Settings:
     
     def add_camera(self, camera: CameraConfig):
         """Add a camera"""
-        if len(self.cameras) < 10:
+        if len(self.cameras) < 30:
             self.cameras.append(camera)
             self.save()
     

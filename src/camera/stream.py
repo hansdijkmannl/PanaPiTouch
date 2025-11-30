@@ -54,6 +54,7 @@ class CameraStream:
     @property
     def current_frame(self) -> Optional[np.ndarray]:
         with self._frame_lock:
+            # Return a copy to prevent external modification
             return self._current_frame.copy() if self._current_frame is not None else None
     
     @property
@@ -65,9 +66,11 @@ class CameraStream:
         return self._error_message
     
     def get_stream_url(self) -> str:
-        """Get MJPEG stream URL"""
+        """Get MJPEG stream URL with resolution parameter for better performance"""
         auth = f"{self.config.username}:{self.config.password}@" if self.config.username else ""
-        return f"http://{auth}{self.config.ip_address}:{self.config.port}/cgi-bin/mjpeg"
+        # Request specific resolution from camera to reduce bandwidth and processing
+        w, h = self.config.resolution
+        return f"http://{auth}{self.config.ip_address}:{self.config.port}/cgi-bin/mjpeg?resolution={w}x{h}"
     
     def get_snapshot_url(self) -> str:
         """Get single frame URL"""
@@ -99,9 +102,14 @@ class CameraStream:
                 # Create video capture with MJPEG stream
                 cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
                 
-                # Optimize capture settings for low latency
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer
+                # Optimize capture settings for performance
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
                 cap.set(cv2.CAP_PROP_FPS, 30)  # Request 30fps
+                # Try to use hardware acceleration if available
+                try:
+                    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                except:
+                    pass
                 
                 if not cap.isOpened():
                     self._connected = False
@@ -114,6 +122,9 @@ class CameraStream:
                 frame_count = 0
                 start_time = time.time()
                 
+                # Pre-allocate frame buffer to avoid repeated allocations
+                target_w, target_h = self.config.resolution
+                
                 while self._running:
                     ret, frame = cap.read()
                     
@@ -122,12 +133,19 @@ class CameraStream:
                         self._error_message = "Stream disconnected"
                         break
                     
-                    # Resize to target resolution if needed (use fast interpolation)
-                    if frame.shape[1] != self.config.resolution[0] or frame.shape[0] != self.config.resolution[1]:
-                        frame = cv2.resize(frame, self.config.resolution, interpolation=cv2.INTER_LINEAR)
+                    # Early downscaling for performance - resize immediately if frame is larger than target
+                    # This reduces processing overhead for subsequent operations
+                    frame_h, frame_w = frame.shape[:2]
+                    if frame_w > target_w or frame_h > target_h:
+                        # Use INTER_AREA for downscaling (faster and better quality for downscaling)
+                        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                    elif frame_w != target_w or frame_h != target_h:
+                        # Upscaling - use INTER_LINEAR
+                        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
                     
                     # Update current frame (direct assignment, no lock overhead for simple reference)
-                    self._current_frame = frame
+                    with self._frame_lock:
+                        self._current_frame = frame
                     
                     # Calculate FPS
                     frame_count += 1

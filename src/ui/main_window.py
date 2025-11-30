@@ -4,19 +4,23 @@ Main Application Window
 The main window with page navigation, camera preview, and controls.
 """
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
-    QButtonGroup, QSpacerItem
+    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui import QFont
 
 from ..config.settings import Settings
 from ..camera.stream import CameraStream, StreamConfig
+from ..camera.multiview import MultiviewManager, CameraInfo
 from ..atem.tally import ATEMTallyController, TallyState
 from .preview_widget import PreviewWidget
 from .settings_page import SettingsPage
+from .camera_page import CameraPage
 from .companion_page import CompanionPage
+from .joystick_widget import JoystickWidget
+from .keyboard_manager import KeyboardManager
 from .styles import STYLESHEET, COLORS
 
 
@@ -44,8 +48,19 @@ class MainWindow(QMainWindow):
         self._demo_running = False
         self._demo_thread = None
         
+        # Multiview manager
+        self.multiview_manager = MultiviewManager(output_size=(1920, 1080))
+        self.multiview_manager.set_frame_callback(self._on_multiview_frame)
+        self._multiview_active = False
+        
+        # OSD state tracking
+        self._osd_active = False
+        
         # ATEM controller
         self.atem_controller = ATEMTallyController()
+        
+        # Keyboard manager for on-screen keyboard
+        self.keyboard_manager = None
         
         self._setup_window()
         self._setup_ui()
@@ -94,14 +109,20 @@ class MainWindow(QMainWindow):
         
         # Create pages
         self.preview_page = self._create_preview_page()
+        self.camera_page = CameraPage(self.settings)
         self.companion_page = CompanionPage(self.settings.companion_url)
         self.settings_page = SettingsPage(self.settings)
         
-        self.page_stack.addWidget(self.preview_page)
-        self.page_stack.addWidget(self.companion_page)
-        self.page_stack.addWidget(self.settings_page)
+        self.page_stack.addWidget(self.preview_page)       # 0
+        self.page_stack.addWidget(self.camera_page)        # 1
+        self.page_stack.addWidget(self.companion_page)     # 2
+        self.page_stack.addWidget(self.settings_page)      # 3
         
         main_layout.addWidget(self.page_stack, stretch=1)
+        
+        # Setup keyboard manager and overlay (as floating overlay, not in layout)
+        self.keyboard_manager = KeyboardManager(self)
+        self.keyboard_manager.setup_keyboard_overlay(central_widget)
     
     def _create_nav_bar(self) -> QWidget:
         """Create the top navigation bar"""
@@ -128,14 +149,24 @@ class MainWindow(QMainWindow):
         """)
         layout.addWidget(title)
         
-        # Navigation buttons
+        # Add 25px spacing after title
+        layout.addSpacing(25)
+        
+        # Navigation buttons container (centered)
+        nav_buttons_container = QWidget()
+        nav_buttons_container.setStyleSheet("background: transparent;")
+        nav_buttons_layout = QHBoxLayout(nav_buttons_container)
+        nav_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        nav_buttons_layout.setSpacing(0)
+        
         self.nav_button_group = QButtonGroup(self)
         self.nav_button_group.setExclusive(True)
         
         nav_buttons = [
-            ("📺  Preview", 0),
-            ("🎛️  Companion", 1),
-            ("⚙️  Settings", 2),
+            ("📺  Live Page", 0),
+            ("📷  Cameras", 1),
+            ("🎛️  Companion", 2),
+            ("⚙️  Settings", 3),
         ]
         
         for text, page_idx in nav_buttons:
@@ -146,21 +177,567 @@ class MainWindow(QMainWindow):
             btn.setMinimumWidth(150)
             
             self.nav_button_group.addButton(btn, page_idx)
-            layout.addWidget(btn)
+            nav_buttons_layout.addWidget(btn)
             
             if page_idx == 0:
                 btn.setChecked(True)
         
         self.nav_button_group.idClicked.connect(self._on_nav_clicked)
         
+        layout.addWidget(nav_buttons_container)
+        
+        # Add stretch before system menu button
         layout.addStretch()
         
-        # Status indicators - two rows, 10px font, no background
+        # System menu button - text only, no icons
+        system_menu_btn = QPushButton("X")
+        system_menu_btn.setFixedSize(50, 50)
+        system_menu_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                border-radius: 10px;
+                color: {COLORS['text']};
+                font-size: 18px;
+                font-weight: 700;
+                padding: 0px;
+            }}
+            QPushButton::menu-indicator {{
+                image: none;
+                width: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['border']};
+                border-color: {COLORS['text']};
+                color: {COLORS['text']};
+            }}
+        """)
+        
+        # Create dropdown menu
+        system_menu = QMenu(system_menu_btn)
+        system_menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 4px;
+            }}
+            QMenu::item {{
+                padding: 12px 24px;
+                border-radius: 6px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['surface_hover']};
+            }}
+        """)
+        
+        # Add menu actions
+        reboot_action = system_menu.addAction("Reboot")
+        reboot_action.triggered.connect(self._reboot_system)
+        
+        shutdown_action = system_menu.addAction("Shutdown")
+        shutdown_action.triggered.connect(self._shutdown_system)
+        
+        close_action = system_menu.addAction("Close")
+        close_action.triggered.connect(self._confirm_close)
+        
+        system_menu_btn.setMenu(system_menu)
+        layout.addWidget(system_menu_btn)
+        
+        return nav_bar
+    
+    def _create_preview_page(self) -> QWidget:
+        """Create the preview page with tally bar, side panel, and camera bar (16:10 optimized)"""
+        page = QWidget()
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(16, 12, 16, 12)
+        main_layout.setSpacing(12)
+        
+        # Middle: Preview + Side panel
+        middle_layout = QHBoxLayout()
+        middle_layout.setSpacing(12)
+        
+        # Left: Preview container + Camera bar (same width)
+        preview_column = QWidget()
+        preview_column_layout = QVBoxLayout(preview_column)
+        preview_column_layout.setContentsMargins(0, 0, 0, 0)
+        preview_column_layout.setSpacing(12)
+        
+        # Preview container with FPS overlay
+        preview_container = QFrame()
+        preview_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['background']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
+        preview_inner_layout = QVBoxLayout(preview_container)
+        preview_inner_layout.setContentsMargins(0, 0, 0, 0)
+        preview_inner_layout.setSpacing(0)
+        
+        # Preview with FPS overlay in top-left
+        preview_wrapper = QWidget()
+        preview_wrapper_layout = QVBoxLayout(preview_wrapper)
+        preview_wrapper_layout.setContentsMargins(8, 8, 8, 8)
+        preview_wrapper_layout.setSpacing(0)
+        
+        # FPS label (top-left, overlaid)
+        self.fps_label = QLabel("-- fps")
+        self.fps_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.fps_label.setStyleSheet(f"""
+            color: {COLORS['text']};
+            font-size: 11px;
+            font-weight: 600;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 2px 6px;
+            border-radius: 4px;
+        """)
+        self.fps_label.setFixedHeight(20)
+        preview_wrapper_layout.addWidget(self.fps_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        
+        self.preview_widget = PreviewWidget()
+        preview_wrapper_layout.addWidget(self.preview_widget, stretch=1)
+        
+        preview_inner_layout.addWidget(preview_wrapper)
+        preview_column_layout.addWidget(preview_container, stretch=1)
+        
+        # Camera selection bar (same width as preview)
+        camera_bar = self._create_camera_bar()
+        preview_column_layout.addWidget(camera_bar)
+        
+        middle_layout.addWidget(preview_column, stretch=1)
+        
+        # Right: Side panel (overlays + PTZ + multiview)
+        side_panel = self._create_side_panel()
+        middle_layout.addWidget(side_panel)
+        
+        main_layout.addLayout(middle_layout, stretch=1)
+        
+        return page
+    
+    def _create_side_panel(self) -> QWidget:
+        """Create right side panel with collapsible PTZ controls, OSD menu, overlays, and multiview"""
+        # Outer container with fixed width
+        panel = QFrame()
+        panel.setFixedWidth(180)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
+        
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
+        
+        # Scroll area for content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background: transparent;
+            }}
+            QScrollBar:vertical {{
+                background: {COLORS['surface']};
+                width: 8px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {COLORS['border']};
+                border-radius: 4px;
+                min-height: 30px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+        """)
+        
+        # Content widget inside scroll area
+        content = QWidget()
+        content.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(10, 12, 10, 12)
+        layout.setSpacing(6)
+        
+        # Button style for toggle buttons
+        toggle_btn_style = f"""
+            QPushButton {{
+                background-color: {COLORS['surface_light']};
+                border: none;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+                padding: 8px;
+            }}
+            QPushButton:checked {{
+                background-color: #FF9500;
+                color: white;
+            }}
+        """
+        
+        # ===== PTZ Control Toggle Button =====
+        self.ptz_toggle_btn = QPushButton("▼ PTZ Control")
+        self.ptz_toggle_btn.setCheckable(True)
+        self.ptz_toggle_btn.setFixedHeight(36)
+        self.ptz_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.ptz_toggle_btn.clicked.connect(self._toggle_ptz_panel)
+        layout.addWidget(self.ptz_toggle_btn)
+        
+        # PTZ Control Panel (collapsible)
+        self.ptz_panel = QFrame()
+        self.ptz_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        ptz_layout = QVBoxLayout(self.ptz_panel)
+        ptz_layout.setContentsMargins(8, 8, 8, 8)
+        ptz_layout.setSpacing(8)
+        
+        # Virtual Joystick
+        joystick_container = QWidget()
+        joystick_layout = QHBoxLayout(joystick_container)
+        joystick_layout.setContentsMargins(0, 0, 0, 0)
+        joystick_layout.addStretch()
+        
+        self.ptz_joystick = JoystickWidget()
+        self.ptz_joystick.setFixedSize(140, 140)
+        self.ptz_joystick.position_changed.connect(self._on_joystick_move)
+        self.ptz_joystick.released.connect(self._on_joystick_release)
+        joystick_layout.addWidget(self.ptz_joystick)
+        joystick_layout.addStretch()
+        ptz_layout.addWidget(joystick_container)
+        
+        # Zoom Slider
+        zoom_label = QLabel("Zoom")
+        zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zoom_label.setStyleSheet(f"font-size: 10px; color: {COLORS['text_dim']}; background: transparent; border: none;")
+        ptz_layout.addWidget(zoom_label)
+        
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(4)
+        
+        zoom_out_label = QLabel("−")
+        zoom_out_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']}; background: transparent; border: none;")
+        zoom_row.addWidget(zoom_out_label)
+        
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(-50, 50)
+        self.zoom_slider.setValue(0)
+        self.zoom_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {COLORS['surface']};
+                height: 8px;
+                border-radius: 4px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {COLORS['primary']};
+                width: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
+            }}
+        """)
+        self.zoom_slider.sliderPressed.connect(self._on_zoom_pressed)
+        self.zoom_slider.sliderMoved.connect(self._on_zoom_moved)
+        self.zoom_slider.sliderReleased.connect(self._on_zoom_released)
+        zoom_row.addWidget(self.zoom_slider, stretch=1)
+        
+        zoom_in_label = QLabel("+")
+        zoom_in_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']}; background: transparent; border: none;")
+        zoom_row.addWidget(zoom_in_label)
+        
+        ptz_layout.addLayout(zoom_row)
+        
+        self.ptz_panel.setVisible(False)
+        layout.addWidget(self.ptz_panel)
+        
+        # ===== OSD Menu Toggle Button =====
+        self.osd_toggle_btn = QPushButton("▼ OSD Menu")
+        self.osd_toggle_btn.setCheckable(True)
+        self.osd_toggle_btn.setFixedHeight(36)
+        self.osd_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.osd_toggle_btn.clicked.connect(self._toggle_osd_panel)
+        layout.addWidget(self.osd_toggle_btn)
+        
+        # OSD Menu Panel (collapsible)
+        self.osd_panel = QFrame()
+        self.osd_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        osd_layout = QVBoxLayout(self.osd_panel)
+        osd_layout.setContentsMargins(8, 8, 8, 8)
+        osd_layout.setSpacing(6)
+        
+        osd_btn_style = f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: bold;
+                color: {COLORS['text']};
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """
+        
+        # Menu button (toggle OSD on camera)
+        self.osd_menu_btn = QPushButton("OSD ON/OFF")
+        self.osd_menu_btn.setFixedHeight(28)
+        self.osd_menu_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: none;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: bold;
+                color: {COLORS['text']};
+                padding: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """)
+        self.osd_menu_btn.clicked.connect(self._osd_toggle_menu)
+        osd_layout.addWidget(self.osd_menu_btn)
+        
+        # Tally Off button (to fix stuck tally issue)
+        self.tally_off_btn = QPushButton("TALLY OFF")
+        self.tally_off_btn.setFixedHeight(28)
+        self.tally_off_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: none;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: bold;
+                color: {COLORS['text']};
+                padding: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF3333;
+            }}
+        """)
+        self.tally_off_btn.clicked.connect(self._tally_off)
+        osd_layout.addWidget(self.tally_off_btn)
+        
+        # Add spacing between menu button and arrow grid
+        osd_layout.addSpacing(25)
+        
+        # OSD navigation grid (centered, arrow buttons only)
+        osd_grid_container = QWidget()
+        osd_grid_container_layout = QHBoxLayout(osd_grid_container)
+        osd_grid_container_layout.setContentsMargins(0, 0, 0, 0)
+        osd_grid_container_layout.addStretch()
+        
+        osd_grid = QWidget()
+        osd_grid_layout = QGridLayout(osd_grid)
+        osd_grid_layout.setContentsMargins(0, 0, 0, 0)
+        osd_grid_layout.setSpacing(2)
+        
+        osd_arrow_style = f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 16px;
+                color: {COLORS['text']};
+                min-width: 36px;
+                max-width: 36px;
+                min-height: 36px;
+                max-height: 36px;
+                padding: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """
+        
+        # Up
+        osd_up = QPushButton("▲")
+        osd_up.setFixedSize(36, 36)
+        osd_up.setStyleSheet(osd_arrow_style)
+        osd_up.clicked.connect(lambda: self._osd_navigate("up"))
+        osd_grid_layout.addWidget(osd_up, 0, 1)
+        
+        # Left
+        osd_left = QPushButton("◀")
+        osd_left.setFixedSize(36, 36)
+        osd_left.setStyleSheet(osd_arrow_style)
+        osd_left.clicked.connect(lambda: self._osd_navigate("left"))
+        osd_grid_layout.addWidget(osd_left, 1, 0)
+        
+        # Right
+        osd_right = QPushButton("▶")
+        osd_right.setFixedSize(36, 36)
+        osd_right.setStyleSheet(osd_arrow_style)
+        osd_right.clicked.connect(lambda: self._osd_navigate("right"))
+        osd_grid_layout.addWidget(osd_right, 1, 2)
+        
+        # Down
+        osd_down = QPushButton("▼")
+        osd_down.setFixedSize(36, 36)
+        osd_down.setStyleSheet(osd_arrow_style)
+        osd_down.clicked.connect(lambda: self._osd_navigate("down"))
+        osd_grid_layout.addWidget(osd_down, 2, 1)
+        
+        osd_grid_container_layout.addWidget(osd_grid)
+        osd_grid_container_layout.addStretch()
+        osd_layout.addWidget(osd_grid_container)
+        
+        # Add spacing before OK/Back buttons
+        osd_layout.addSpacing(20)
+        
+        # Back and OK buttons side by side (same style as arrow buttons)
+        osd_btn_row = QHBoxLayout()
+        osd_btn_row.setContentsMargins(0, 0, 0, 0)
+        osd_btn_row.setSpacing(10)
+        osd_btn_row.addStretch()
+        
+        osd_back = QPushButton("◀")
+        osd_back.setFixedSize(36, 36)
+        osd_back.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 16px;
+                color: {COLORS['text']};
+                min-width: 36px; max-width: 36px;
+                min-height: 36px; max-height: 36px;
+                padding: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """)
+        osd_back.clicked.connect(lambda: self._osd_navigate("back"))
+        osd_btn_row.addWidget(osd_back)
+        
+        osd_ok = QPushButton("●")
+        osd_ok.setFixedSize(36, 36)
+        osd_ok.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 16px;
+                color: {COLORS['text']};
+                min-width: 36px; max-width: 36px;
+                min-height: 36px; max-height: 36px;
+                padding: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """)
+        osd_ok.clicked.connect(lambda: self._osd_navigate("ok"))
+        osd_btn_row.addWidget(osd_ok)
+        
+        osd_btn_row.addStretch()
+        osd_layout.addLayout(osd_btn_row)
+        
+        self.osd_panel.setVisible(False)
+        layout.addWidget(self.osd_panel)
+        
+        # ===== Overlays Toggle Button =====
+        self.overlays_toggle_btn = QPushButton("▼ Overlays")
+        self.overlays_toggle_btn.setCheckable(True)
+        self.overlays_toggle_btn.setFixedHeight(36)
+        self.overlays_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.overlays_toggle_btn.clicked.connect(self._toggle_overlays_panel)
+        layout.addWidget(self.overlays_toggle_btn)
+        
+        # Overlays Panel (collapsible)
+        self.overlays_panel = QFrame()
+        self.overlays_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        overlays_layout = QVBoxLayout(self.overlays_panel)
+        overlays_layout.setContentsMargins(8, 8, 8, 8)
+        overlays_layout.setSpacing(6)
+        
+        # Overlay toggle buttons
+        self.overlay_buttons = {}
+        overlays = [
+            ("False Color", "false_color"),
+            ("Waveform", "waveform"),
+            ("Vectorscope", "vectorscope"),
+            ("Focus Assist", "focus_assist"),
+        ]
+        
+        for name, key in overlays:
+            btn = QPushButton(name)
+            btn.setObjectName("overlayButton")
+            btn.setCheckable(True)
+            btn.setFixedHeight(36)
+            btn.clicked.connect(lambda checked, k=key: self._toggle_overlay(k))
+            self.overlay_buttons[key] = btn
+            overlays_layout.addWidget(btn)
+        
+        self.overlays_panel.setVisible(False)
+        layout.addWidget(self.overlays_panel)
+        
+        # Multiview button (full width like overlay buttons)
+        self.multiview_btn = QPushButton("Quad Split")
+        self.multiview_btn.setObjectName("overlayButton")
+        self.multiview_btn.setCheckable(True)
+        self.multiview_btn.setFixedHeight(36)
+        multiview_btn_style = f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 4px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                min-width: 80px;
+                color: {COLORS['text']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['surface']};
+                color: #FF9500;
+            }}
+        """
+        self.multiview_btn.setStyleSheet(multiview_btn_style)
+        self.multiview_btn.clicked.connect(self._toggle_multiview)
+        layout.addWidget(self.multiview_btn)
+        
+        layout.addStretch()
+        
+        # Set up scroll area with content
+        scroll.setWidget(content)
+        panel_layout.addWidget(scroll)
+        
+        # Status indicators at bottom of sidebar - two rows, 10px font, no background
         status_container = QWidget()
         status_container.setStyleSheet("background: transparent; border: none;")
         status_layout = QVBoxLayout(status_container)
-        status_layout.setContentsMargins(0, 0, 0, 0)
-        status_layout.setSpacing(0)
+        status_layout.setContentsMargins(10, 8, 10, 8)
+        status_layout.setSpacing(4)
         
         self.connection_status = QLabel("CAM: ● Disconnected")
         self.connection_status.setTextFormat(Qt.TextFormat.RichText)
@@ -190,231 +767,403 @@ class MainWindow(QMainWindow):
         self.atem_status.setToolTip("ATEM not configured")
         status_layout.addWidget(self.atem_status)
         
-        layout.addWidget(status_container)
+        panel_layout.addWidget(status_container)
         
-        # Spacer before system buttons
-        layout.addSpacing(20)
-        
-        # Reboot button
-        reboot_btn = QPushButton("Reboot")
-        reboot_btn.setFixedHeight(50)
-        reboot_btn.setMinimumWidth(90)
-        reboot_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface_light']};
-                border: 2px solid {COLORS['warning']};
-                border-radius: 8px;
-                color: {COLORS['warning']};
-                font-size: 14px;
-                font-weight: 600;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['warning']};
-                color: {COLORS['background']};
-            }}
-        """)
-        reboot_btn.clicked.connect(self._reboot_system)
-        layout.addWidget(reboot_btn)
-        
-        # Shutdown button
-        shutdown_btn = QPushButton("Shutdown")
-        shutdown_btn.setFixedHeight(50)
-        shutdown_btn.setMinimumWidth(100)
-        shutdown_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface_light']};
-                border: 2px solid {COLORS['error']};
-                border-radius: 8px;
-                color: {COLORS['error']};
-                font-size: 14px;
-                font-weight: 600;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['error']};
-                color: white;
-            }}
-        """)
-        shutdown_btn.clicked.connect(self._shutdown_system)
-        layout.addWidget(shutdown_btn)
-        
-        # Close button
-        close_btn = QPushButton("Close")
-        close_btn.setFixedHeight(50)
-        close_btn.setMinimumWidth(80)
-        close_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface_light']};
-                border: 2px solid {COLORS['text_dim']};
-                border-radius: 8px;
-                color: {COLORS['text_dim']};
-                font-size: 14px;
-                font-weight: 600;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['text_dim']};
-                color: {COLORS['background']};
-            }}
-        """)
-        close_btn.clicked.connect(self._confirm_close)
-        layout.addWidget(close_btn)
-        
-        return nav_bar
+        return panel
     
-    def _create_preview_page(self) -> QWidget:
-        """Create the preview page with camera view and controls"""
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-        
-        # Top row with overlay buttons
-        overlay_bar = self._create_overlay_bar()
-        layout.addWidget(overlay_bar)
-        
-        # Preview widget
-        self.preview_widget = PreviewWidget()
-        layout.addWidget(self.preview_widget, stretch=1)
-        
-        # Bottom camera buttons
-        camera_bar = self._create_camera_bar()
-        layout.addWidget(camera_bar)
-        
-        return page
+    def _toggle_ptz_panel(self):
+        """Toggle PTZ control panel visibility"""
+        visible = self.ptz_toggle_btn.isChecked()
+        self.ptz_panel.setVisible(visible)
+        self.ptz_toggle_btn.setText("▲ PTZ Control" if visible else "▼ PTZ Control")
     
-    def _create_overlay_bar(self) -> QWidget:
-        """Create overlay toggle buttons - centered"""
-        bar = QFrame()
-        bar.setStyleSheet(f"""
-            QFrame {{
+    def _toggle_osd_panel(self):
+        """Toggle OSD menu panel visibility"""
+        visible = self.osd_toggle_btn.isChecked()
+        self.osd_panel.setVisible(visible)
+        self.osd_toggle_btn.setText("▲ OSD Menu" if visible else "▼ OSD Menu")
+    
+    def _toggle_overlays_panel(self):
+        """Toggle Overlays panel visibility"""
+        visible = self.overlays_toggle_btn.isChecked()
+        self.overlays_panel.setVisible(visible)
+        self.overlays_toggle_btn.setText("▲ Overlays" if visible else "▼ Overlays")
+    
+    def _on_joystick_move(self, x: float, y: float):
+        """Handle joystick movement - send PTZ commands"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Convert joystick position to PTZ speed (1-49)
+            # x: -1 (left) to 1 (right)
+            # y: -1 (up) to 1 (down)
+            pan_speed = int(abs(x) * 49)
+            tilt_speed = int(abs(y) * 49)
+            
+            if pan_speed > 0 or tilt_speed > 0:
+                # Determine direction
+                pan_cmd = "R" if x > 0 else "L" if x < 0 else ""
+                tilt_cmd = "t" if y > 0 else "T" if y < 0 else ""  # t=down, T=up
+                
+                # Send combined pan/tilt command
+                if pan_cmd and tilt_cmd:
+                    # Use PTS command for combined movement
+                    pan_value = 50 + int(x * 49)  # 1-99, 50 = stop
+                    tilt_value = 50 - int(y * 49)  # 1-99, 50 = stop (inverted)
+                    url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23PTS{pan_value:02d}{tilt_value:02d}&res=1"
+                elif pan_cmd:
+                    url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23{pan_cmd}{pan_speed:02d}&res=1"
+                else:
+                    url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23{tilt_cmd}{tilt_speed:02d}&res=1"
+                
+                requests.get(url, auth=(camera.username, camera.password), timeout=0.3)
+        except Exception as e:
+            print(f"PTZ joystick error: {e}")
+    
+    def _on_joystick_release(self):
+        """Handle joystick release - stop PTZ movement"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Stop all PTZ movement
+            url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23PTS5050&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=0.3)
+        except Exception as e:
+            print(f"PTZ stop error: {e}")
+    
+    def _on_zoom_pressed(self):
+        """Handle zoom slider press"""
+        pass  # Will start zoom on move
+    
+    def _on_zoom_moved(self, value: int):
+        """Handle zoom slider movement"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            if abs(value) > 5:  # Deadzone
+                # Zoom speed based on slider position
+                speed = int(abs(value) * 49 / 50)
+                cmd = "zi" if value > 0 else "zo"
+                url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23{cmd}{speed:02d}&res=1"
+                requests.get(url, auth=(camera.username, camera.password), timeout=0.3)
+        except Exception as e:
+            print(f"PTZ zoom error: {e}")
+    
+    def _on_zoom_released(self):
+        """Handle zoom slider release - stop zoom and reset slider"""
+        if self.current_camera_id is not None:
+            camera = self.settings.get_camera(self.current_camera_id)
+            if camera:
+                import requests
+                try:
+                    url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23zS&res=1"
+                    requests.get(url, auth=(camera.username, camera.password), timeout=0.3)
+                except Exception as e:
+                    print(f"PTZ zoom stop error: {e}")
+        
+        # Reset slider to center
+        self.zoom_slider.setValue(0)
+    
+    def _osd_toggle_menu(self):
+        """Toggle camera OSD on/off"""
+        if self.current_camera_id is None:
+            print("OSD toggle: No camera selected")
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            print("OSD toggle: Camera not found")
+            return
+        
+        import requests
+        try:
+            # Try multiple OSD command formats - different camera models may use different formats
+            base_url = f"http://{camera.ip_address}"
+            auth = (camera.username, camera.password)
+            
+            # Try multiple OSD command formats - different camera models may use different formats
+            osd_commands = [
+                f"{base_url}/cgi-bin/aw_ptz?cmd=%23DA1&res=1",  # Standard format with URL encoding
+                f"{base_url}/cgi-bin/aw_ptz?cmd=%23DA1",        # Without res parameter
+                f"{base_url}/cgi-bin/aw_ptz?cmd=#DA1&res=1",   # Without URL encoding
+                f"{base_url}/cgi-bin/aw_cam?cmd=%23DA1&res=1", # Alternative endpoint
+            ]
+            
+            success = False
+            for url in osd_commands:
+                try:
+                    response = requests.get(url, auth=auth, timeout=2.0)
+                    if response.status_code == 200:
+                        print(f"OSD command sent successfully: {url}")
+                        success = True
+                        break
+                    else:
+                        print(f"OSD command returned status {response.status_code}: {url}")
+                except requests.exceptions.RequestException as e:
+                    print(f"OSD command failed: {url} - {e}")
+                    continue
+            
+            if success:
+                # Toggle OSD state and update button appearance
+                self._osd_active = not self._osd_active
+                self._update_osd_button_style()
+                
+                # Delay tally off command to avoid interfering with OSD opening
+                # Send tally off command after a short delay to prevent tally from getting stuck
+                QTimer.singleShot(500, self._tally_off)
+            else:
+                print("OSD toggle: All command attempts failed")
+        except Exception as e:
+            print(f"OSD toggle error: {e}")
+    
+    def _tally_off(self):
+        """Turn off camera tally light to fix stuck tally issue"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        import time
+        try:
+            # Try multiple Panasonic tally off commands
+            # Different camera models may use different commands
+            tally_commands = [
+                "%23TAL0",  # Tally off (common command)
+                "%23TL0",   # Alternative format
+            ]
+            
+            base_url = f"http://{camera.ip_address}/cgi-bin/aw_ptz"
+            auth = (camera.username, camera.password)
+            
+            # Try each command (some cameras may respond to different formats)
+            for cmd in tally_commands:
+                try:
+                    url = f"{base_url}?cmd={cmd}&res=1"
+                    requests.get(url, auth=auth, timeout=0.5)
+                    # Small delay between commands
+                    time.sleep(0.1)
+                except:
+                    pass
+                    
+            print("Tally off command sent")
+        except Exception as e:
+            print(f"Tally off error: {e}")
+    
+    def _update_osd_button_style(self):
+        """Update OSD button style based on active state"""
+        if self._osd_active:
+            self.osd_menu_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #FF9500;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-weight: bold;
+                    color: white;
+                    padding: 0px;
+                }}
+                QPushButton:pressed {{
+                    background-color: #CC7700;
+                }}
+            """)
+        else:
+            self.osd_menu_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 10px;
+                    font-weight: bold;
+                    color: {COLORS['text']};
+                    padding: 0px;
+                }}
+                QPushButton:pressed {{
+                    background-color: #FF9500;
+                }}
+            """)
+    
+    def _osd_navigate(self, direction: str):
+        """Navigate camera OSD menu"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Panasonic OSD navigation commands
+            cmd_map = {
+                "up": "#TAU",      # Menu up
+                "down": "#TAD",    # Menu down
+                "left": "#TAL",    # Menu left
+                "right": "#TAR",   # Menu right
+                "ok": "#TAA",      # Menu enter/select
+                "back": "#TAB",    # Menu back
+            }
+            
+            if direction in cmd_map:
+                url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23{cmd_map[direction][1:]}&res=1"
+                requests.get(url, auth=(camera.username, camera.password), timeout=0.5)
+        except Exception as e:
+            print(f"OSD navigate error: {e}")
+    
+    def _create_camera_bar(self) -> QWidget:
+        """Create bottom camera selection bar"""
+        # Outer scroll area for the entire bar
+        bar_scroll = QScrollArea()
+        bar_scroll.setWidgetResizable(True)
+        bar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        bar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        bar_scroll.setFixedHeight(140)
+        bar_scroll.setStyleSheet(f"""
+            QScrollArea {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
             }}
+            QScrollBar:horizontal {{
+                background: {COLORS['surface']};
+                height: 8px;
+                border-radius: 4px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:horizontal {{
+                background: {COLORS['border']};
+                border-radius: 4px;
+                min-width: 30px;
+            }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+                width: 0px;
+            }}
         """)
-        bar.setFixedHeight(60)
+        
+        # Inner bar frame
+        bar = QFrame()
+        bar.setFixedHeight(140)
+        bar.setStyleSheet(f"""
+            QFrame {{
+                background-color: transparent;
+            }}
+        """)
         
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 8, 16, 8)
+        # Calculate vertical margins to center buttons (bar height 140, button height 80, so (140-80)/2 = 30)
+        layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(12)
         
-        # Add stretch to center buttons
+        # Center all buttons
         layout.addStretch()
         
-        # Overlay toggle buttons (no label, centered)
-        self.overlay_buttons = {}
-        
-        overlays = [
-            ("False Color", "false_color"),
-            ("Waveform", "waveform"),
-            ("Vectorscope", "vectorscope"),
-            ("Focus Assist", "focus_assist"),
-        ]
-        
-        for name, key in overlays:
-            btn = QPushButton(name)
-            btn.setObjectName("overlayButton")
-            btn.setCheckable(True)
-            btn.setFixedHeight(44)
-            btn.clicked.connect(lambda checked, k=key: self._toggle_overlay(k))
-            
-            self.overlay_buttons[key] = btn
-            layout.addWidget(btn)
-        
-        layout.addStretch()
-        
-        # FPS display
-        self.fps_label = QLabel("-- fps")
-        self.fps_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
-        layout.addWidget(self.fps_label)
-        
-        return bar
-    
-    def _create_camera_bar(self) -> QWidget:
-        """Create camera selection buttons - fits 11 buttons (1 demo + 10 cameras)"""
-        # Main container - transparent background
-        self.camera_bar = QWidget()
-        self.camera_bar.setFixedHeight(100)  # 80px buttons + 20px padding
-        
-        # Single layout for all buttons (demo + cameras), centered
-        self.camera_buttons_layout = QHBoxLayout(self.camera_bar)
-        self.camera_buttons_layout.setContentsMargins(12, 10, 12, 10)
-        self.camera_buttons_layout.setSpacing(8)
-        
-        # Add stretch to center all buttons
-        self.camera_buttons_layout.addStretch()
-        
-        # Demo button - "D" label, 80x80 square
+        # Demo button (25% bigger: 70*1.25=88, 50*1.25=63)
         self.demo_btn = QPushButton("D")
         self.demo_btn.setObjectName("demoButton")
         self.demo_btn.setCheckable(True)
-        self.demo_btn.setFixedSize(80, 80)
+        self.demo_btn.setFixedSize(88, 80)
         self.demo_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['secondary']};
-                border: 3px solid {COLORS['secondary']};
-                border-radius: 12px;
-                color: white;
-                font-weight: bold;
-                font-size: 24px;
+                background-color: transparent;
+                border: 3px solid {COLORS['border']};
+                border-radius: 10px;
+                padding: 4px;
+                color: {COLORS['text']};
+                font-weight: 600;
+                font-size: 12px;
             }}
             QPushButton:checked {{
-                background-color: {COLORS['primary']};
-                border-color: {COLORS['primary']};
+                background-color: #FF9500;
+                border-color: #FF9500;
+                color: white;
             }}
         """)
         self.demo_btn.setToolTip("Demo Video")
         self.demo_btn.clicked.connect(self._toggle_demo_mode)
-        self.camera_buttons_layout.addWidget(self.demo_btn)
+        layout.addWidget(self.demo_btn)
+        
+        # Camera buttons container (no scroll area here, bar itself scrolls)
+        self.camera_buttons_container = QWidget()
+        self.camera_buttons_container.setStyleSheet("background-color: transparent;")
+        self.camera_buttons_layout = QHBoxLayout(self.camera_buttons_container)
+        self.camera_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        self.camera_buttons_layout.setSpacing(10)
         
         # Camera buttons group
         self.camera_button_group = QButtonGroup(self)
         self.camera_button_group.setExclusive(True)
         self.camera_buttons: dict = {}
-        
         self.camera_button_group.idClicked.connect(self._on_camera_button_clicked)
         
-        # Create buttons for configured cameras (added after demo button)
+        # Build initial camera buttons
         self._rebuild_camera_buttons()
         
-        # Add stretch at end to center all buttons
-        self.camera_buttons_layout.addStretch()
+        layout.addWidget(self.camera_buttons_container)
         
-        return self.camera_bar
+        layout.addStretch()
+        
+        bar_scroll.setWidget(bar)
+        
+        return bar_scroll
     
     def _rebuild_camera_buttons(self):
-        """Rebuild camera buttons - only show configured cameras"""
-        # Clear existing camera buttons only (not demo button or stretches)
+        """Rebuild camera buttons - horizontal in bottom bar"""
+        # Clear existing camera buttons
         for btn in self.camera_buttons.values():
             self.camera_button_group.removeButton(btn)
             self.camera_buttons_layout.removeWidget(btn)
             btn.deleteLater()
         self.camera_buttons.clear()
         
-        # Find position to insert (after demo button, index 1 since stretch is at 0)
-        # Layout is: [stretch] [demo] [cam1] [cam2] ... [stretch]
-        insert_pos = 2  # After first stretch and demo button
-        
-        # Create button for each configured camera (80x80 square)
+        # Create button for each configured camera
+        num_cameras = len(self.settings.cameras)
         for i, camera in enumerate(self.settings.cameras):
-            # Use camera name from settings (truncated to fit)
-            label = camera.name[:6] if len(camera.name) > 6 else camera.name
+            # Truncate name to fit
+            label = camera.name[:8] if len(camera.name) > 8 else camera.name
             btn = QPushButton(label)
             btn.setObjectName("cameraButton")
             btn.setCheckable(True)
             btn.setProperty("tallyState", "off")
-            btn.setFixedSize(80, 80)  # 80x80 square buttons
+            btn.setFixedSize(88, 80)
             btn.setToolTip(f"{camera.name}\n{camera.ip_address}")
             
             self.camera_button_group.addButton(btn, i)
             self.camera_buttons[i] = btn
-            self.camera_buttons_layout.insertWidget(insert_pos + i, btn)
+            
+            # If 10 or fewer cameras, use stretch to spread them out
+            # If more than 10, they'll naturally overflow and scroll
+            if num_cameras <= 10:
+                self.camera_buttons_layout.addWidget(btn, stretch=1)
+            else:
+                self.camera_buttons_layout.addWidget(btn)
     
     def _toggle_demo_mode(self):
         """Toggle demo video mode"""
         if self.demo_btn.isChecked():
+            # Stop multiview if running
+            if self._multiview_active:
+                self._stop_multiview()
+            
             # Stop current camera stream
             if self.current_camera_id is not None:
                 if self.current_camera_id in self.camera_streams:
@@ -425,6 +1174,8 @@ class MainWindow(QMainWindow):
             if checked_btn:
                 self.camera_button_group.setExclusive(False)
                 checked_btn.setChecked(False)
+                self._set_camera_button_unchecked_style(checked_btn)
+                checked_btn.update()
                 self.camera_button_group.setExclusive(True)
             
             self.current_camera_id = None
@@ -517,7 +1268,8 @@ class MainWindow(QMainWindow):
     
     def _setup_connections(self):
         """Setup signal connections"""
-        # Settings changed
+        # Settings changed (from both camera page and settings page)
+        self.camera_page.settings_changed.connect(self._on_settings_changed)
         self.settings_page.settings_changed.connect(self._on_settings_changed)
         
         # ATEM tally callback
@@ -537,6 +1289,9 @@ class MainWindow(QMainWindow):
     def _on_nav_clicked(self, page_idx: int):
         """Handle navigation button click"""
         self.page_stack.setCurrentIndex(page_idx)
+        # Refresh keyboard manager to find new line edits
+        if self.keyboard_manager:
+            QTimer.singleShot(100, lambda: self.keyboard_manager._find_line_edits(self))
     
     @pyqtSlot(int)
     def _on_camera_button_clicked(self, button_id: int):
@@ -545,6 +1300,10 @@ class MainWindow(QMainWindow):
         if self._demo_running:
             self._stop_demo_video()
             self.demo_btn.setChecked(False)
+        
+        # Stop multiview if running
+        if self._multiview_active:
+            self._stop_multiview()
         
         # Find camera by button index
         if button_id < len(self.settings.cameras):
@@ -566,6 +1325,93 @@ class MainWindow(QMainWindow):
         
         self.overlay_buttons[overlay_key].setChecked(enabled)
     
+    def _ptz_home(self):
+        """Send PTZ home/preset 1 command"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Recall preset 1 (home position)
+            url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23R00&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=1.0)
+        except Exception as e:
+            print(f"PTZ home error: {e}")
+    
+    def _toggle_multiview(self):
+        """Toggle multiview display (2x2 grid, 4 cameras)"""
+        if self.multiview_btn.isChecked():
+            self._start_multiview(2, 2)
+        else:
+            self._stop_multiview()
+    
+    def _start_multiview(self, cols: int, rows: int):
+        """Start multiview with given grid"""
+        # Stop current single camera stream
+        if self.current_camera_id is not None:
+            if self.current_camera_id in self.camera_streams:
+                self.camera_streams[self.current_camera_id].stop()
+        
+        # Stop demo if running
+        if self._demo_running:
+            self._stop_demo_video()
+            self.demo_btn.setChecked(False)
+        
+        # Uncheck camera buttons
+        checked_btn = self.camera_button_group.checkedButton()
+        if checked_btn:
+            self.camera_button_group.setExclusive(False)
+            checked_btn.setChecked(False)
+            self._set_camera_button_unchecked_style(checked_btn)
+            checked_btn.update()
+            self.camera_button_group.setExclusive(True)
+        
+        # Build camera list for multiview
+        cameras = []
+        for cam in self.settings.cameras:
+            camera_info = CameraInfo(
+                id=cam.id,
+                name=cam.name,
+                ip_address=cam.ip_address,
+                username=cam.username,
+                password=cam.password
+            )
+            cameras.append(camera_info)
+        
+        if not cameras:
+            return
+        
+        # Start multiview manager
+        self.multiview_manager.start(cameras, cols, rows)
+        self._multiview_active = True
+        self.current_camera_id = None
+        
+        print(f"Started multiview with {len(cameras)} cameras")
+    
+    def _stop_multiview(self):
+        """Stop multiview and return to single camera view"""
+        if self._multiview_active:
+            self.multiview_manager.stop()
+            self._multiview_active = False
+        
+        # Uncheck multiview button
+        self.multiview_btn.setChecked(False)
+        
+        # Clear preview
+        self.preview_widget.clear_frame()
+        
+        print("Stopped multiview")
+    
+    def _on_multiview_frame(self, frame):
+        """Handle composite frame from multiview manager"""
+        if self._multiview_active:
+            self.preview_widget.update_frame(frame)
+    
+    
     def _select_camera(self, camera_id: int):
         """Select a camera to preview"""
         # Stop current stream
@@ -582,12 +1428,14 @@ class MainWindow(QMainWindow):
         
         # Create or reuse stream
         if camera_id not in self.camera_streams:
+            # Use 1280x720 for better performance on Raspberry Pi
+            # This reduces processing overhead by ~56% (fewer pixels to process)
             config = StreamConfig(
                 ip_address=camera.ip_address,
                 port=camera.port,
                 username=camera.username,
                 password=camera.password,
-                resolution=(1920, 1080)
+                resolution=(1280, 720)  # Reduced from 1920x1080 for better framerate
             )
             stream = CameraStream(config)
             stream.add_frame_callback(self._on_frame_received)
@@ -610,11 +1458,73 @@ class MainWindow(QMainWindow):
         """Update camera buttons - rebuild to match settings"""
         self._rebuild_camera_buttons()
     
+    def _set_camera_button_unchecked_style(self, btn):
+        """Set transparent background style for unchecked camera button"""
+        tally_state = btn.property("tallyState") or "off"
+        border_color = COLORS['tally_off']
+        if tally_state == "program":
+            border_color = COLORS['tally_program']
+        elif tally_state == "preview":
+            border_color = COLORS['tally_preview']
+        
+        btn.setStyleSheet(f"""
+            QPushButton#cameraButton {{
+                background-color: transparent;
+                border: 3px solid {border_color};
+                border-radius: 10px;
+                padding: 4px;
+                font-size: 12px;
+                font-weight: 600;
+                color: {COLORS['text']};
+            }}
+        """)
+    
     def _update_camera_selection_ui(self, camera_id: int):
         """Update UI to reflect selected camera"""
+        # Uncheck all buttons first and ensure transparent background
+        for btn in self.camera_buttons.values():
+            btn.setChecked(False)
+            self._set_camera_button_unchecked_style(btn)
+            btn.update()
+        
+        # Find and check the selected camera button
         for i, camera in enumerate(self.settings.cameras):
             if camera.id == camera_id:
-                self.camera_buttons[i].setChecked(True)
+                if i in self.camera_buttons:
+                    btn = self.camera_buttons[i]
+                    # Temporarily disable button group to avoid conflicts
+                    was_exclusive = self.camera_button_group.exclusive()
+                    self.camera_button_group.setExclusive(False)
+                    btn.setChecked(True)
+                    self.camera_button_group.setExclusive(was_exclusive)
+                    
+                    # Get tally state for border color
+                    tally_state = btn.property("tallyState") or "off"
+                    border_color = COLORS['tally_off']
+                    if tally_state == "program":
+                        border_color = COLORS['tally_program']
+                    elif tally_state == "preview":
+                        border_color = COLORS['tally_preview']
+                    
+                    # Apply inline style to ensure FF9500 background takes precedence
+                    # Include hover state to maintain interactivity
+                    btn.setStyleSheet(f"""
+                        QPushButton#cameraButton {{
+                            background-color: #FF9500;
+                            border: 3px solid {border_color};
+                            border-radius: 10px;
+                            padding: 4px;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: white;
+                        }}
+                        QPushButton#cameraButton:pressed {{
+                            background-color: #FF9500;
+                            border-color: {border_color};
+                        }}
+                    """)
+                    btn.update()
+                    btn.repaint()
                 break
     
     def _update_preview_tally(self):
@@ -646,12 +1556,38 @@ class MainWindow(QMainWindow):
                 else:
                     btn.setProperty("tallyState", "off")
                 
-                # Force style update
-                btn.style().unpolish(btn)
-                btn.style().polish(btn)
+                # If button is checked, update inline style to maintain FF9500 background
+                if btn.isChecked():
+                    tally_state = btn.property("tallyState") or "off"
+                    border_color = COLORS['tally_off']
+                    if tally_state == "program":
+                        border_color = COLORS['tally_program']
+                    elif tally_state == "preview":
+                        border_color = COLORS['tally_preview']
+                    
+                    btn.setStyleSheet(f"""
+                        QPushButton#cameraButton {{
+                            background-color: #FF9500;
+                            border: 3px solid {border_color};
+                            border-radius: 10px;
+                            padding: 4px;
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: white;
+                        }}
+                        QPushButton#cameraButton:pressed {{
+                            background-color: #FF9500;
+                            border-color: {border_color};
+                        }}
+                    """)
+                else:
+                    # Not checked, set transparent background
+                    self._set_camera_button_unchecked_style(btn)
+                    btn.update()
         
         # Update preview tally
         self._update_preview_tally()
+        
     
     def _on_settings_changed(self):
         """Handle settings change"""
@@ -753,7 +1689,10 @@ class MainWindow(QMainWindow):
     
     def _update_fps(self):
         """Update FPS display"""
-        if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
+        if self._multiview_active:
+            # Show multiview FPS
+            self.fps_label.setText(f"{self.multiview_manager.fps:.1f} fps")
+        elif self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
             stream = self.camera_streams[self.current_camera_id]
             self.fps_label.setText(f"{stream.fps:.1f} fps")
         else:
@@ -822,6 +1761,10 @@ class MainWindow(QMainWindow):
         if self._demo_running:
             self._stop_demo_video()
         
+        # Stop multiview if running
+        if self._multiview_active:
+            self.multiview_manager.stop()
+        
         # Stop all camera streams
         for stream in self.camera_streams.values():
             stream.stop()
@@ -868,6 +1811,11 @@ class MainWindow(QMainWindow):
             self._toggle_overlay("vectorscope")
         elif event.key() == Qt.Key.Key_F4:
             self._toggle_overlay("focus_assist")
+        
+        # M - Toggle multiview
+        elif event.key() == Qt.Key.Key_M:
+            self.multiview_btn.setChecked(not self.multiview_btn.isChecked())
+            self._toggle_multiview()
         
         else:
             super().keyPressEvent(event)

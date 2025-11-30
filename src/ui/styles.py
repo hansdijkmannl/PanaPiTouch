@@ -64,11 +64,6 @@ QPushButton {{
     min-height: 48px;
 }}
 
-QPushButton:hover {{
-    background-color: {COLORS['surface_hover']};
-    border-color: {COLORS['border_light']};
-}}
-
 QPushButton:pressed {{
     background-color: {COLORS['primary_dark']};
     border-color: {COLORS['primary']};
@@ -97,10 +92,6 @@ QPushButton#navButton {{
     font-weight: 600;
 }}
 
-QPushButton#navButton:hover {{
-    background-color: {COLORS['surface_hover']};
-}}
-
 QPushButton#navButton:checked {{
     background-color: {COLORS['surface_light']};
     border-bottom: 3px solid {COLORS['primary']};
@@ -109,48 +100,58 @@ QPushButton#navButton:checked {{
 
 /* Camera Buttons */
 QPushButton#cameraButton {{
-    background-color: {COLORS['surface']};
+    background-color: transparent;
     border: 3px solid {COLORS['tally_off']};
     border-radius: 10px;
     padding: 4px;
     font-size: 12px;
     font-weight: 600;
-}}
-
-QPushButton#cameraButton:hover {{
-    background-color: {COLORS['surface_hover']};
+    color: {COLORS['text']};
 }}
 
 QPushButton#cameraButton:checked {{
-    background-color: {COLORS['surface_light']};
-    border-color: {COLORS['primary']};
+    background-color: #FF9500;
+    border-color: {COLORS['tally_off']};
+    color: white;
+}}
+
+QPushButton#cameraButton:checked[tallyState="program"] {{
+    background-color: #FF9500;
+    border-color: {COLORS['tally_program']};
+    color: white;
+}}
+
+QPushButton#cameraButton:checked[tallyState="preview"] {{
+    background-color: #FF9500;
+    border-color: {COLORS['tally_preview']};
+    color: white;
 }}
 
 QPushButton#cameraButton[tallyState="program"] {{
     border-color: {COLORS['tally_program']};
-    background-color: rgba(255, 51, 51, 0.15);
+    background-color: transparent;
 }}
 
 QPushButton#cameraButton[tallyState="preview"] {{
     border-color: {COLORS['tally_preview']};
-    background-color: rgba(51, 204, 51, 0.1);
+    background-color: transparent;
 }}
 
 /* Overlay Toggle Buttons */
 QPushButton#overlayButton {{
     background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
+    border: none;
     border-radius: 8px;
-    padding: 10px 16px;
+    padding: 4px 16px;
     font-size: 12px;
     font-weight: 600;
     min-width: 80px;
+    color: {COLORS['text']};
 }}
 
 QPushButton#overlayButton:checked {{
-    background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
-    color: {COLORS['background']};
+    background-color: {COLORS['surface']};
+    color: #FF9500;
 }}
 
 /* Preview Frame */

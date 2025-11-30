@@ -1,0 +1,1272 @@
+"""
+Camera Page
+
+Configuration for Panasonic PTZ cameras.
+"""
+import re
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
+    QGroupBox, QScrollArea, QListWidget, QListWidgetItem,
+    QMessageBox, QFrame, QApplication, QProgressBar,
+    QComboBox
+)
+from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer
+from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
+
+from ..config.settings import Settings, CameraConfig
+from ..camera.discovery import CameraDiscovery, DiscoveredCamera
+from ..camera.stream import CameraStream, StreamConfig
+
+
+class DiscoveryWorker(QThread):
+    """Worker thread for Panasonic camera discovery"""
+    camera_found = pyqtSignal(object)  # DiscoveredCamera
+    progress = pyqtSignal(str)
+    progress_value = pyqtSignal(int)  # 0-100
+    finished_signal = pyqtSignal(int)  # Total count
+    
+    def __init__(self):
+        super().__init__()
+        self.discovery = CameraDiscovery()
+    
+    def run(self):
+        """Run Panasonic UDP discovery in background thread"""
+        self.discovery.set_progress_callback(self._on_progress)
+        self.progress_value.emit(10)
+        cameras = self.discovery.discover()
+        self.progress_value.emit(100)
+        
+        for cam in cameras:
+            self.camera_found.emit(cam)
+        
+        self.finished_signal.emit(len(cameras))
+    
+    def _on_progress(self, message: str):
+        """Handle progress updates"""
+        self.progress.emit(message)
+
+
+class CameraListItem(QFrame):
+    """Enhanced camera list item with status indicators and actions"""
+    
+    edit_clicked = pyqtSignal(int)
+    selection_changed = pyqtSignal(int, bool)  # camera_id, selected
+    
+    def __init__(self, camera: CameraConfig, atem_input: int, parent=None):
+        super().__init__(parent)
+        self.camera = camera
+        self.atem_input = atem_input
+        self.connection_status = "unknown"  # "online", "offline", "unknown", "testing"
+        self.last_test_result = None
+        self._setup_ui()
+    
+    def _setup_ui(self):
+        self.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+            }
+        """)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(20, 12, 20, 12)  # Add right margin to avoid scroll bar overlapping edit button
+        layout.setSpacing(16)  # Increased spacing between elements
+        
+        # Checkbox for bulk selection
+        self.checkbox = QCheckBox()
+        self.checkbox.setFixedSize(24, 24)
+        self.checkbox.setStyleSheet("""
+            QCheckBox {
+                background-color: transparent;
+                spacing: 0px;
+            }
+            QCheckBox::indicator {
+                width: 24px;
+                height: 24px;
+                border: 2px solid #FFFFFF;
+                border-radius: 4px;
+                background-color: #FFFFFF;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #FF9500;
+                border-color: #FF9500;
+            }
+        """)
+        self.checkbox.stateChanged.connect(
+            lambda state: self.selection_changed.emit(self.camera.id, state == Qt.CheckState.Checked.value)
+        )
+        layout.addWidget(self.checkbox)
+        
+        # Status indicator (colored dot)
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setFixedSize(16, 16)
+        self.status_indicator.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                color: #888898;
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        layout.addWidget(self.status_indicator)
+        
+        # Thumbnail
+        self.thumbnail_label = QLabel()
+        self.thumbnail_label.setFixedSize(120, 68)  # 16:9 aspect ratio
+        self.thumbnail_label.setStyleSheet("""
+            QLabel {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 6px;
+            }
+        """)
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._create_demo_thumbnail()
+        layout.addWidget(self.thumbnail_label)
+        
+        # Camera info
+        info_layout = QVBoxLayout()
+        info_layout.setSpacing(4)
+        
+        name_row = QHBoxLayout()
+        name_label = QLabel(f"<b>{self.camera.name}</b>")
+        name_label.setStyleSheet("font-size: 15px; font-weight: 600;")
+        name_row.addWidget(name_label)
+        
+        # ATEM input badge
+        if self.atem_input > 0:
+            atem_badge = QLabel(f"ATEM {self.atem_input}")
+            atem_badge.setStyleSheet("""
+                QLabel {
+                    background-color: #FF9500;
+                    color: #0a0a0f;
+                    font-size: 10px;
+                    font-weight: 600;
+                    padding: 2px 8px;
+                    border-radius: 10px;
+                }
+            """)
+            name_row.addWidget(atem_badge)
+        
+        name_row.addStretch()
+        info_layout.addLayout(name_row)
+        
+        # IP address only
+        ip_label = QLabel(self.camera.ip_address)
+        ip_label.setStyleSheet("color: #888898; font-size: 13px;")
+        info_layout.addWidget(ip_label)
+        
+        # Connection status text
+        self.status_label = QLabel("Status: Unknown")
+        self.status_label.setStyleSheet("color: #888898; font-size: 11px;")
+        info_layout.addWidget(self.status_label)
+        
+        layout.addLayout(info_layout, stretch=1)
+        
+        # Edit button - centered vertically
+        edit_btn = QPushButton("Edit")
+        edit_btn.setFixedSize(80, 40)
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #00b4d8;
+                border: none;
+                border-radius: 6px;
+                color: #0a0a0f;
+                font-size: 13px;
+                font-weight: 600;
+            }
+        """)
+        edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.camera.id))
+        layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        
+        self.setStyleSheet("""
+            CameraListItem {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 10px;
+                padding: 0px;
+            }
+        """)
+    
+    def _create_demo_thumbnail(self):
+        """Create a demo thumbnail image"""
+        self._update_thumbnail_image()
+    
+    def _update_thumbnail_image(self, frame=None):
+        """Update thumbnail with camera frame or 'No Connection' message"""
+        pixmap = QPixmap(120, 68)
+        pixmap.fill(QColor("#1a1a24"))
+        
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw gradient background
+        gradient = QLinearGradient(0, 0, 120, 68)
+        gradient.setColorAt(0, QColor("#2a2a38"))
+        gradient.setColorAt(1, QColor("#1a1a24"))
+        painter.fillRect(0, 0, 120, 68, gradient)
+        
+        if frame is not None and self.connection_status == "online":
+            # Convert numpy frame to QPixmap
+            from PyQt6.QtGui import QImage
+            import cv2
+            import numpy as np
+            
+            # Resize frame to thumbnail size
+            h, w = frame.shape[:2]
+            scale = min(120 / w, 68 / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            
+            # Create QImage
+            bytes_per_line = 3 * new_w
+            q_img = QImage(rgb_frame.data, new_w, new_h, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # Draw centered
+            x_offset = (120 - new_w) // 2
+            y_offset = (68 - new_h) // 2
+            painter.drawImage(x_offset, y_offset, q_img)
+        else:
+            # Draw "No Connection" message
+            painter.setPen(QColor("#888898"))
+            font = painter.font()
+            font.setPointSize(10)
+            font.setBold(True)
+            painter.setFont(font)
+            painter.drawText(0, 0, 120, 68, Qt.AlignmentFlag.AlignCenter, "No\nConnection")
+        
+        painter.end()
+        self.thumbnail_label.setPixmap(pixmap)
+    
+    def update_thumbnail_frame(self, frame):
+        """Update thumbnail with camera frame"""
+        if frame is not None:
+            self._update_thumbnail_image(frame)
+    
+    def update_status(self, status: str, message: str = ""):
+        """Update connection status indicator"""
+        self.connection_status = status
+        # Update thumbnail when status changes
+        if status != "online":
+            self._update_thumbnail_image()
+        if status == "online":
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    font-size: 16px;
+                    color: #22c55e;
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            self.status_label.setText(f"Status: Online" + (f" - {message}" if message else ""))
+            self.status_label.setStyleSheet("color: #22c55e; font-size: 11px;")
+        elif status == "offline":
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    font-size: 16px;
+                    color: #ef4444;
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            self.status_label.setText(f"Status: Offline" + (f" - {message}" if message else ""))
+            self.status_label.setStyleSheet("color: #ef4444; font-size: 11px;")
+        elif status == "testing":
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    font-size: 16px;
+                    color: #00b4d8;
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            self.status_label.setText("Status: Testing...")
+            self.status_label.setStyleSheet("color: #00b4d8; font-size: 11px;")
+        else:  # unknown
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    font-size: 16px;
+                    color: #888898;
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            self.status_label.setText("Status: Unknown")
+            self.status_label.setStyleSheet("color: #888898; font-size: 11px;")
+
+
+class CameraPage(QWidget):
+    """
+    Enhanced camera configuration page with improved UX and features.
+    """
+    
+    settings_changed = pyqtSignal()
+    
+    def __init__(self, settings: Settings, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self._editing_camera_id = None
+        self._discovery_worker = None
+        self._discovered_cameras = []
+        self._camera_items = {}  # camera_id -> CameraListItem
+        self._selected_cameras = set()  # Set of selected camera IDs
+        self._thumbnail_streams = {}  # camera_id -> CameraStream
+        self._thumbnail_timer = QTimer()
+        self._thumbnail_timer.timeout.connect(self._update_all_thumbnails)
+        
+        self._setup_ui()
+        self._load_settings()
+        
+        # Start thumbnail update timer (update every 2 minutes)
+        self._thumbnail_timer.start(120000)
+    
+    def _setup_ui(self):
+        """Setup the camera page UI"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+        
+        # Header
+        header = QLabel("Camera Configuration")
+        header.setStyleSheet("font-size: 24px; font-weight: 700;")
+        main_layout.addWidget(header)
+        
+        # Content area
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(20)
+        
+        # Left panel - Discovery + Manual add
+        left_panel = self._create_left_panel()
+        content_layout.addWidget(left_panel, stretch=1)
+        
+        # Right panel - Camera list
+        right_panel = self._create_camera_list_panel()
+        content_layout.addWidget(right_panel, stretch=1)
+        
+        main_layout.addLayout(content_layout)
+    
+    def _create_left_panel(self) -> QWidget:
+        """Create left panel with discovery and manual add"""
+        panel = QFrame()
+        panel.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # Discovery section
+        discovery_group = QGroupBox("Discover Cameras (Panasonic Easy IP)")
+        discovery_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+            }
+        """)
+        discovery_layout = QVBoxLayout(discovery_group)
+        discovery_layout.setSpacing(12)
+        
+        # Scan button
+        self.discover_btn = QPushButton("🔍  Scan Network")
+        self.discover_btn.setFixedHeight(50)
+        self.discover_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #00b4d8;
+                border: none;
+                border-radius: 8px;
+                color: #0a0a0f;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a38;
+                color: #888898;
+            }
+        """)
+        self.discover_btn.clicked.connect(self._discover_cameras)
+        discovery_layout.addWidget(self.discover_btn)
+        
+        # Progress bar
+        self.discovery_progress = QProgressBar()
+        self.discovery_progress.setRange(0, 100)
+        self.discovery_progress.setValue(0)
+        self.discovery_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #1a1a24;
+                height: 24px;
+            }
+            QProgressBar::chunk {
+                background-color: #00b4d8;
+                border-radius: 3px;
+            }
+        """)
+        self.discovery_progress.hide()
+        discovery_layout.addWidget(self.discovery_progress)
+        
+        # Status label
+        self.discovery_status = QLabel("Ready to scan")
+        self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+        discovery_layout.addWidget(self.discovery_status)
+        
+        # Discovered cameras list
+        self.discovered_list = QListWidget()
+        self.discovered_list.setFixedHeight(140)
+        self.discovered_list.setStyleSheet("""
+            QListWidget {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-radius: 4px;
+                margin: 2px;
+            }
+            QListWidget::item:selected {
+                background-color: #00b4d8;
+                color: #0a0a0f;
+            }
+            QListWidget::item:hover {
+                background-color: #2a2a38;
+            }
+        """)
+        self.discovered_list.itemDoubleClicked.connect(self._add_discovered_camera)
+        self.discovered_list.itemClicked.connect(self._on_discovered_item_clicked)
+        discovery_layout.addWidget(self.discovered_list)
+        
+        # Add discovered button
+        add_discovered_btn = QPushButton("Add Selected Camera")
+        add_discovered_btn.setFixedHeight(40)
+        add_discovered_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 13px;
+            }
+        """)
+        add_discovered_btn.clicked.connect(self._add_selected_discovered)
+        discovery_layout.addWidget(add_discovered_btn)
+        
+        layout.addWidget(discovery_group)
+        
+        # Manual add section
+        manual_group = QGroupBox("Add Camera Manually")
+        manual_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+            }
+        """)
+        manual_layout = QGridLayout(manual_group)
+        manual_layout.setSpacing(12)
+        manual_layout.setColumnStretch(1, 1)
+        
+        # Name
+        manual_layout.addWidget(QLabel("Name:"), 0, 0)
+        self.camera_name_input = QLineEdit()
+        self.camera_name_input.setPlaceholderText("Camera 1")
+        self.camera_name_input.textChanged.connect(self._validate_form)
+        manual_layout.addWidget(self.camera_name_input, 0, 1)
+        
+        # IP Address
+        manual_layout.addWidget(QLabel("IP Address:"), 1, 0)
+        self.camera_ip_input = QLineEdit()
+        self.camera_ip_input.setPlaceholderText("192.168.1.100")
+        self.camera_ip_input.textChanged.connect(self._validate_form)
+        manual_layout.addWidget(self.camera_ip_input, 1, 1)
+        
+        # Port
+        manual_layout.addWidget(QLabel("Port:"), 2, 0)
+        self.camera_port_input = QSpinBox()
+        self.camera_port_input.setRange(1, 65535)
+        self.camera_port_input.setValue(80)
+        manual_layout.addWidget(self.camera_port_input, 2, 1)
+        
+        # Username
+        manual_layout.addWidget(QLabel("Username:"), 3, 0)
+        self.camera_user_input = QLineEdit()
+        self.camera_user_input.setPlaceholderText("admin")
+        manual_layout.addWidget(self.camera_user_input, 3, 1)
+        
+        # Password
+        password_row = QHBoxLayout()
+        self.camera_pass_input = QLineEdit()
+        self.camera_pass_input.setPlaceholderText("admin")
+        self.camera_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        password_row.addWidget(self.camera_pass_input)
+        
+        # Password visibility toggle
+        self.password_toggle = QPushButton("👁")
+        self.password_toggle.setFixedSize(40, 40)
+        self.password_toggle.setCheckable(True)
+        self.password_toggle.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                font-size: 16px;
+            }
+        """)
+        self.password_toggle.toggled.connect(self._toggle_password_visibility)
+        password_row.addWidget(self.password_toggle)
+        
+        manual_layout.addWidget(QLabel("Password:"), 4, 0)
+        manual_layout.addLayout(password_row, 4, 1)
+        
+        # ATEM Input mapping
+        manual_layout.addWidget(QLabel("ATEM Input:"), 5, 0)
+        self.camera_atem_input = QSpinBox()
+        self.camera_atem_input.setRange(0, 20)
+        self.camera_atem_input.setValue(0)
+        self.camera_atem_input.setSpecialValueText("None")
+        manual_layout.addWidget(self.camera_atem_input, 5, 1)
+        
+        # Form validation message
+        self.form_error_label = QLabel("")
+        self.form_error_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 4px;")
+        self.form_error_label.hide()
+        manual_layout.addWidget(self.form_error_label, 6, 0, 1, 2)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
+        
+        self.test_camera_btn = QPushButton("Test")
+        self.test_camera_btn.setFixedHeight(44)
+        self.test_camera_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 13px;
+            }
+        """)
+        self.test_camera_btn.clicked.connect(self._test_camera)
+        btn_layout.addWidget(self.test_camera_btn)
+        
+        self.save_camera_btn = QPushButton("Save")
+        self.save_camera_btn.setFixedHeight(44)
+        self.save_camera_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #00b4d8;
+                border: none;
+                border-radius: 6px;
+                color: #0a0a0f;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a38;
+                color: #888898;
+            }
+        """)
+        self.save_camera_btn.clicked.connect(self._save_camera)
+        btn_layout.addWidget(self.save_camera_btn)
+        
+        self.cancel_edit_btn = QPushButton("Cancel")
+        self.cancel_edit_btn.setFixedHeight(44)
+        self.cancel_edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 13px;
+            }
+        """)
+        self.cancel_edit_btn.clicked.connect(self._cancel_edit)
+        self.cancel_edit_btn.hide()
+        btn_layout.addWidget(self.cancel_edit_btn)
+        
+        manual_layout.addLayout(btn_layout, 7, 0, 1, 2)
+        
+        layout.addWidget(manual_group)
+        layout.addStretch()
+        
+        return panel
+    
+    def _create_camera_list_panel(self) -> QWidget:
+        """Create camera list panel with search and bulk operations"""
+        panel = QFrame()
+        panel.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # Header with count and progress
+        header_layout = QHBoxLayout()
+        
+        self.camera_list_header = QLabel("Configured Cameras (0/30)")
+        self.camera_list_header.setStyleSheet("font-size: 18px; font-weight: 600; border: none;")
+        header_layout.addWidget(self.camera_list_header)
+        
+        header_layout.addStretch()
+        
+        # Progress bar for camera count
+        self.camera_count_progress = QProgressBar()
+        self.camera_count_progress.setRange(0, 30)
+        self.camera_count_progress.setValue(0)
+        self.camera_count_progress.setFixedWidth(120)
+        self.camera_count_progress.setFormat("%v/30")
+        self.camera_count_progress.setFixedHeight(24)
+        self.camera_count_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #1a1a24;
+                height: 24px;
+                font-size: 12px;
+            }
+            QProgressBar::chunk {
+                background-color: #00b4d8;
+                border-radius: 3px;
+            }
+        """)
+        header_layout.addWidget(self.camera_count_progress)
+        
+        # Sort dropdown with icon
+        header_layout.addSpacing(12)
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["⇅ Name", "⇅ IP Address", "⇅ ATEM Input", "⇅ Status"])
+        self.sort_combo.setFixedHeight(24)
+        self.sort_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                padding: 0px 8px;
+                font-size: 12px;
+                min-width: 140px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 20px;
+            }
+            QComboBox::down-arrow {
+                image: none;
+                border: none;
+            }
+        """)
+        self.sort_combo.currentTextChanged.connect(self._refresh_camera_list)
+        header_layout.addWidget(self.sort_combo)
+        
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+        
+        # Bulk operations bar - match camera row width
+        bulk_container = QWidget()
+        bulk_container.setContentsMargins(20, 0, 20, 0)  # Match camera row horizontal margins
+        bulk_container.setStyleSheet("background-color: transparent;")
+        bulk_layout = QHBoxLayout(bulk_container)
+        bulk_layout.setContentsMargins(0, 4, 0, 4)  # Add vertical padding to prevent clipping
+        bulk_layout.setSpacing(8)
+        
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.setFixedHeight(36)
+        self.select_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+        """)
+        self.select_all_btn.clicked.connect(self._select_all_cameras)
+        bulk_layout.addWidget(self.select_all_btn, stretch=1)
+        
+        self.deselect_all_btn = QPushButton("Deselect All")
+        self.deselect_all_btn.setFixedHeight(36)
+        self.deselect_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+        """)
+        self.deselect_all_btn.clicked.connect(self._deselect_all_cameras)
+        bulk_layout.addWidget(self.deselect_all_btn, stretch=1)
+        
+        self.bulk_duplicate_btn = QPushButton("Duplicate Selected")
+        self.bulk_duplicate_btn.setFixedHeight(36)
+        self.bulk_duplicate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 12px;
+            }
+        """)
+        self.bulk_duplicate_btn.clicked.connect(self._bulk_duplicate_cameras)
+        bulk_layout.addWidget(self.bulk_duplicate_btn, stretch=1)
+        
+        self.bulk_delete_btn = QPushButton("Delete Selected")
+        self.bulk_delete_btn.setFixedHeight(36)
+        self.bulk_delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                border: none;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 600;
+            }
+        """)
+        self.bulk_delete_btn.clicked.connect(self._bulk_delete_cameras)
+        bulk_layout.addWidget(self.bulk_delete_btn, stretch=1)
+        
+        layout.addWidget(bulk_container)
+        
+        # Add spacing between bulk operations and camera list
+        layout.addSpacing(20)
+        
+        # Frame for camera list with scroll bar on outside
+        camera_list_frame = QFrame()
+        camera_list_frame.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        camera_list_frame_layout = QVBoxLayout(camera_list_frame)
+        camera_list_frame_layout.setContentsMargins(0, 0, 0, 0)
+        camera_list_frame_layout.setSpacing(0)
+        
+        # Scroll area for camera list
+        self.camera_scroll = QScrollArea()
+        self.camera_scroll.setWidgetResizable(True)
+        self.camera_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.camera_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.camera_scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+            QScrollBar:vertical {
+                background: #1a1a24;
+                width: 8px;
+                border-radius: 4px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #2a2a38;
+                border-radius: 4px;
+                min-height: 30px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+        
+        # Camera list widget inside frame
+        self.camera_list_widget = QWidget()
+        self.camera_list_widget.setStyleSheet("background-color: transparent;")
+        self.camera_list_layout = QVBoxLayout(self.camera_list_widget)
+        self.camera_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.camera_list_layout.setSpacing(10)
+        self.camera_list_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.camera_scroll.setWidget(self.camera_list_widget)
+        camera_list_frame_layout.addWidget(self.camera_scroll)
+        
+        layout.addWidget(camera_list_frame)
+        
+        # Empty state message
+        self.empty_state_label = QLabel("No cameras configured.\nAdd cameras using discovery or manual entry.")
+        self.empty_state_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.empty_state_label.setStyleSheet("""
+            QLabel {
+                color: #888898;
+                font-size: 14px;
+                padding: 40px;
+            }
+        """)
+        self.empty_state_label.hide()
+        layout.addWidget(self.empty_state_label)
+        
+        return panel
+    
+    def _load_settings(self):
+        """Load current settings into UI"""
+        self._refresh_camera_list()
+    
+    def _refresh_camera_list(self):
+        """Refresh the camera list display"""
+        # Clear existing items
+        for item in list(self._camera_items.values()):
+            item.deleteLater()
+        self._camera_items.clear()
+        
+        # Get cameras and sort
+        cameras = list(self.settings.cameras)
+        sort_by = self.sort_combo.currentText()
+        if "Name" in sort_by:
+            cameras.sort(key=lambda c: c.name.lower())
+        elif "IP Address" in sort_by:
+            cameras.sort(key=lambda c: c.ip_address)
+        elif "ATEM Input" in sort_by:
+            cameras.sort(key=lambda c: self.settings.atem.input_mapping.get(str(c.id), 0), reverse=True)
+        # Status sorting would require connection status, skip for now
+        
+        # Add cameras
+        for camera in cameras:
+            atem_input = self.settings.atem.input_mapping.get(str(camera.id), 0)
+            item = CameraListItem(camera, atem_input)
+            item.edit_clicked.connect(self._edit_camera)
+            item.selection_changed.connect(self._on_camera_selection_changed)
+            self._camera_items[camera.id] = item
+            self.camera_list_layout.addWidget(item)
+            
+            # Set up thumbnail stream for online cameras
+            self._setup_thumbnail_stream(camera)
+        
+        # Update count and progress
+        total = len(self.settings.cameras)
+        self.camera_list_header.setText(f"Configured Cameras ({total}/30)")
+        self.camera_count_progress.setValue(total)
+        
+        # Show/hide empty state
+        if total == 0:
+            self.empty_state_label.show()
+        else:
+            self.empty_state_label.hide()
+    
+    def _setup_thumbnail_stream(self, camera: CameraConfig):
+        """Set up thumbnail stream for a camera"""
+        # Stop existing stream if any
+        if camera.id in self._thumbnail_streams:
+            self._thumbnail_streams[camera.id].stop()
+            del self._thumbnail_streams[camera.id]
+        
+        # Create stream config
+        config = StreamConfig(
+            ip_address=camera.ip_address,
+            port=camera.port,
+            username=camera.username,
+            password=camera.password,
+            resolution=(320, 180)  # Small resolution for thumbnails
+        )
+        
+        # Create and start stream
+        stream = CameraStream(config)
+        self._thumbnail_streams[camera.id] = stream
+        stream.start(use_mjpeg=False)  # Use snapshot mode for thumbnails
+    
+    def _update_all_thumbnails(self):
+        """Update all camera thumbnails"""
+        for camera_id, item in self._camera_items.items():
+            if camera_id in self._thumbnail_streams:
+                stream = self._thumbnail_streams[camera_id]
+                if stream.is_connected:
+                    frame = stream.current_frame
+                    if frame is not None:
+                        item.update_thumbnail_frame(frame)
+                        if item.connection_status != "online":
+                            item.update_status("online")
+                else:
+                    if item.connection_status == "online":
+                        item.update_status("offline")
+            else:
+                # Set up stream if not exists
+                camera = self.settings.get_camera(camera_id)
+                if camera:
+                    self._setup_thumbnail_stream(camera)
+    
+    def _validate_form(self):
+        """Validate form inputs"""
+        name = self.camera_name_input.text().strip()
+        ip = self.camera_ip_input.text().strip()
+        
+        errors = []
+        
+        if not name:
+            errors.append("Name is required")
+        
+        if not ip:
+            errors.append("IP address is required")
+        elif not self._is_valid_ip(ip):
+            errors.append("Invalid IP address format")
+        
+        if errors:
+            self.form_error_label.setText(" • ".join(errors))
+            self.form_error_label.show()
+            self.save_camera_btn.setEnabled(False)
+        else:
+            self.form_error_label.hide()
+            self.save_camera_btn.setEnabled(True)
+    
+    def _is_valid_ip(self, ip: str) -> bool:
+        """Validate IP address format"""
+        pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        if not re.match(pattern, ip):
+            return False
+        parts = ip.split('.')
+        return all(0 <= int(part) <= 255 for part in parts)
+    
+    def _toggle_password_visibility(self, checked: bool):
+        """Toggle password visibility"""
+        if checked:
+            self.camera_pass_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.password_toggle.setText("🙈")
+        else:
+            self.camera_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.password_toggle.setText("👁")
+    
+    def _on_discovered_item_clicked(self, item: QListWidgetItem):
+        """Handle discovered camera item click - auto-fill form"""
+        cam: DiscoveredCamera = item.data(Qt.ItemDataRole.UserRole)
+        if cam:
+            self._add_discovered_camera(item)
+    
+    def _discover_cameras(self):
+        """Discover cameras on the network using background thread"""
+        if self._discovery_worker and self._discovery_worker.isRunning():
+            return
+        
+        # Clear UI
+        self.discovered_list.clear()
+        self._discovered_cameras = []
+        
+        # Update UI state
+        self.discover_btn.setEnabled(False)
+        self.discover_btn.setText("⏳ Scanning...")
+        self.discovery_status.setText("Starting network discovery...")
+        self.discovery_status.setStyleSheet("color: #00b4d8; font-size: 12px; padding: 4px;")
+        self.discovery_progress.show()
+        self.discovery_progress.setValue(0)
+        
+        # Create and start worker thread
+        self._discovery_worker = DiscoveryWorker()
+        self._discovery_worker.camera_found.connect(self._on_camera_discovered)
+        self._discovery_worker.progress.connect(self._on_discovery_progress)
+        self._discovery_worker.progress_value.connect(self.discovery_progress.setValue)
+        self._discovery_worker.finished_signal.connect(self._on_discovery_finished)
+        self._discovery_worker.start()
+    
+    @pyqtSlot(object)
+    def _on_camera_discovered(self, camera: DiscoveredCamera):
+        """Handle discovered camera from worker thread"""
+        # Check if already in list
+        for existing in self._discovered_cameras:
+            if existing.ip_address == camera.ip_address:
+                return
+        
+        self._discovered_cameras.append(camera)
+        
+        # Add to list widget
+        display_name = camera.name or camera.model or "Unknown"
+        display_text = f"{display_name} - {camera.ip_address}"
+        if camera.mac_address:
+            display_text += f" [{camera.mac_address}]"
+        
+        item = QListWidgetItem(display_text)
+        item.setData(Qt.ItemDataRole.UserRole, camera)
+        self.discovered_list.addItem(item)
+    
+    @pyqtSlot(str)
+    def _on_discovery_progress(self, message: str):
+        """Handle progress update from worker thread"""
+        self.discovery_status.setText(message)
+        QApplication.processEvents()
+    
+    @pyqtSlot(int)
+    def _on_discovery_finished(self, count: int):
+        """Handle discovery completion"""
+        self.discover_btn.setEnabled(True)
+        self.discover_btn.setText("🔍  Scan Network")
+        self.discovery_progress.setValue(100)
+        QTimer.singleShot(1000, lambda: self.discovery_progress.hide())
+        
+        if count == 0:
+            self.discovery_status.setText("No cameras found")
+            self.discovery_status.setStyleSheet("color: #ef4444; font-size: 12px; padding: 4px;")
+            self.discovered_list.addItem("No Panasonic cameras found on network")
+        else:
+            self.discovery_status.setText(f"Found {count} camera(s)")
+            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+    
+    def _add_discovered_camera(self, item: QListWidgetItem):
+        """Add discovered camera to config"""
+        cam: DiscoveredCamera = item.data(Qt.ItemDataRole.UserRole)
+        if cam:
+            self.camera_name_input.setText(cam.name or cam.model or "Camera")
+            self.camera_ip_input.setText(cam.ip_address)
+            self.camera_user_input.setText("admin")
+            self.camera_pass_input.setText("admin")
+            self._validate_form()
+    
+    def _add_selected_discovered(self):
+        """Add selected discovered camera"""
+        item = self.discovered_list.currentItem()
+        if item and item.data(Qt.ItemDataRole.UserRole):
+            self._add_discovered_camera(item)
+    
+    def _test_camera(self):
+        """Test camera connection from form"""
+        ip = self.camera_ip_input.text().strip()
+        if not ip:
+            QMessageBox.warning(self, "Error", "Please enter an IP address")
+            return
+        
+        port = self.camera_port_input.value()
+        username = self.camera_user_input.text() or "admin"
+        password = self.camera_pass_input.text() or "admin"
+        
+        from ..camera.stream import CameraStream, StreamConfig
+        
+        config = StreamConfig(
+            ip_address=ip,
+            port=port,
+            username=username,
+            password=password
+        )
+        
+        stream = CameraStream(config)
+        success, message = stream.test_connection()
+        
+        if success:
+            QMessageBox.information(self, "Success", f"Connection successful!\n{message}")
+        else:
+            QMessageBox.warning(self, "Connection Failed", f"Could not connect to camera:\n{message}")
+    
+    def _save_camera(self):
+        """Save camera configuration"""
+        name = self.camera_name_input.text().strip()
+        ip = self.camera_ip_input.text().strip()
+        
+        if not name or not ip:
+            return
+        
+        port = self.camera_port_input.value()
+        username = self.camera_user_input.text() or "admin"
+        password = self.camera_pass_input.text() or "admin"
+        
+        if self._editing_camera_id is not None:
+            # Update existing camera
+            camera = CameraConfig(
+                id=self._editing_camera_id,
+                name=name,
+                ip_address=ip,
+                port=port,
+                username=username,
+                password=password
+            )
+            self.settings.update_camera(camera)
+            
+            # Update ATEM mapping
+            atem_input = self.camera_atem_input.value()
+            if atem_input > 0:
+                self.settings.atem.input_mapping[str(camera.id)] = atem_input
+            elif str(camera.id) in self.settings.atem.input_mapping:
+                del self.settings.atem.input_mapping[str(camera.id)]
+            
+            self._editing_camera_id = None
+            self.cancel_edit_btn.hide()
+            self.save_camera_btn.setText("Save")
+        else:
+            # Add new camera
+            if len(self.settings.cameras) >= 30:
+                QMessageBox.warning(self, "Error", "Maximum 30 cameras allowed")
+                return
+            
+            # Generate new ID
+            existing_ids = [c.id for c in self.settings.cameras]
+            new_id = 1
+            while new_id in existing_ids:
+                new_id += 1
+            
+            camera = CameraConfig(
+                id=new_id,
+                name=name,
+                ip_address=ip,
+                port=port,
+                username=username,
+                password=password
+            )
+            self.settings.add_camera(camera)
+            
+            # Update ATEM mapping
+            atem_input = self.camera_atem_input.value()
+            if atem_input > 0:
+                self.settings.atem.input_mapping[str(camera.id)] = atem_input
+        
+        self.settings.save()
+        self._refresh_camera_list()
+        self._clear_camera_form()
+        self.settings_changed.emit()
+    
+    def _edit_camera(self, camera_id: int):
+        """Edit existing camera"""
+        camera = self.settings.get_camera(camera_id)
+        if not camera:
+            return
+        
+        self._editing_camera_id = camera_id
+        
+        self.camera_name_input.setText(camera.name)
+        self.camera_ip_input.setText(camera.ip_address)
+        self.camera_port_input.setValue(camera.port)
+        self.camera_user_input.setText(camera.username)
+        self.camera_pass_input.setText(camera.password)
+        
+        # Load ATEM mapping
+        atem_input = self.settings.atem.input_mapping.get(str(camera_id), 0)
+        self.camera_atem_input.setValue(atem_input)
+        
+        self.save_camera_btn.setText("Update")
+        self.cancel_edit_btn.show()
+        self._validate_form()
+    
+    def _cancel_edit(self):
+        """Cancel camera edit"""
+        self._editing_camera_id = None
+        self._clear_camera_form()
+        self.cancel_edit_btn.hide()
+        self.save_camera_btn.setText("Save")
+    
+    def _on_camera_selection_changed(self, camera_id: int, selected: bool):
+        """Handle camera selection checkbox change"""
+        if selected:
+            self._selected_cameras.add(camera_id)
+        else:
+            self._selected_cameras.discard(camera_id)
+    
+    def _select_all_cameras(self):
+        """Select all cameras"""
+        for item in self._camera_items.values():
+            item.checkbox.setCheckState(Qt.CheckState.Checked)
+    
+    def _deselect_all_cameras(self):
+        """Deselect all cameras"""
+        for item in self._camera_items.values():
+            item.checkbox.setCheckState(Qt.CheckState.Unchecked)
+    
+    def _bulk_duplicate_cameras(self):
+        """Duplicate all selected cameras"""
+        if not self._selected_cameras:
+            QMessageBox.information(self, "No Selection", "Please select cameras to duplicate")
+            return
+        
+        # Check if we have room for duplicates
+        current_count = len(self.settings.cameras)
+        selected_count = len(self._selected_cameras)
+        if current_count + selected_count > 30:
+            QMessageBox.warning(
+                self, "Error",
+                f"Cannot duplicate {selected_count} camera(s). Maximum 30 cameras allowed.\n"
+                f"Current: {current_count}, Would be: {current_count + selected_count}"
+            )
+            return
+        
+        # Duplicate each selected camera
+        for camera_id in list(self._selected_cameras):
+            camera = self.settings.get_camera(camera_id)
+            if not camera:
+                continue
+            
+            # Generate new ID
+            existing_ids = [c.id for c in self.settings.cameras]
+            new_id = 1
+            while new_id in existing_ids:
+                new_id += 1
+            
+            # Create duplicate
+            new_camera = CameraConfig(
+                id=new_id,
+                name=f"{camera.name} (Copy)",
+                ip_address=camera.ip_address,
+                port=camera.port,
+                username=camera.username,
+                password=camera.password
+            )
+            
+            self.settings.add_camera(new_camera)
+            
+            # Copy ATEM mapping if exists
+            if str(camera_id) in self.settings.atem.input_mapping:
+                self.settings.atem.input_mapping[str(new_id)] = self.settings.atem.input_mapping[str(camera_id)]
+        
+        self.settings.save()
+        self._selected_cameras.clear()
+        self._refresh_camera_list()
+        self.settings_changed.emit()
+    
+    def _bulk_delete_cameras(self):
+        """Delete all selected cameras"""
+        if not self._selected_cameras:
+            QMessageBox.information(self, "No Selection", "Please select cameras to delete")
+            return
+        
+        count = len(self._selected_cameras)
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Are you sure you want to delete {count} camera(s)?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            for camera_id in list(self._selected_cameras):
+                self.settings.remove_camera(camera_id)
+                if str(camera_id) in self.settings.atem.input_mapping:
+                    del self.settings.atem.input_mapping[str(camera_id)]
+            
+            self.settings.save()
+            self._selected_cameras.clear()
+            self._refresh_camera_list()
+            self.settings_changed.emit()
+    
+    def _clear_camera_form(self):
+        """Clear camera form inputs"""
+        self.camera_name_input.clear()
+        self.camera_ip_input.clear()
+        self.camera_port_input.setValue(80)
+        self.camera_user_input.clear()
+        self.camera_pass_input.clear()
+        self.camera_atem_input.setValue(0)
+        self.form_error_label.hide()
+        self.save_camera_btn.setEnabled(True)

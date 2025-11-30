@@ -54,10 +54,11 @@ class PreviewWidget(QWidget):
         
         self._setup_ui()
         
-        # Update timer for display - 16ms = ~60fps target
+        # Update timer for display - 33ms = ~30fps target (matches camera framerate)
+        # Lower update rate reduces CPU load and improves overall performance
         self._update_timer = QTimer()
         self._update_timer.timeout.connect(self._update_display)
-        self._update_timer.start(16)
+        self._update_timer.start(33)  # Changed from 16ms to 33ms for better performance
     
     def _setup_ui(self):
         """Setup the UI"""
@@ -129,14 +130,17 @@ class PreviewWidget(QWidget):
         
         # Resize frame using OpenCV (faster than Qt scaling on Pi)
         if new_w != w or new_h != h:
-            # Use INTER_NEAREST for fastest scaling, INTER_LINEAR for better quality
-            frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+            # Use INTER_AREA for downscaling (faster and better quality), INTER_LINEAR for upscaling
+            if new_w < w or new_h < h:
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            else:
+                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             h, w = frame.shape[:2]
         
         # Convert BGR to RGB
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Create QImage directly from buffer (no copy)
+        # Create QImage directly from buffer (QImage will make a copy internally)
         bytes_per_line = 3 * w
         q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
         
@@ -181,7 +185,7 @@ class PreviewWidget(QWidget):
             
             self._display_frame = frame
         else:
-            # No overlays - use frame directly
+            # No overlays - use frame directly (reference, not copy)
             self._display_frame = self._current_frame
         
         self._update_pixmap(self._display_frame)
