@@ -242,51 +242,58 @@ class CompanionPage(QWidget):
         self._update_process.finished.connect(self._on_update_finished)
         self._update_process.errorOccurred.connect(self._on_update_error)
         
-        # Method 1: companion-pi update command (if using companion-pi)
-        # Method 2: Use the companion update script
-        # Method 3: Pull latest via git and restart service
+        # Read stdout/stderr for debugging
+        self._update_process.readyReadStandardOutput.connect(self._on_update_stdout)
+        self._update_process.readyReadStandardError.connect(self._on_update_stderr)
         
-        # Create update script that tries multiple methods
-        update_script = """
-        #!/bin/bash
-        set -e
-        
-        # Try companion-pi update first
-        if command -v companion-pi &> /dev/null; then
-            echo "Using companion-pi update..."
-            companion-pi update
-            exit 0
-        fi
-        
-        # Try companion update command
-        if command -v companion &> /dev/null; then
-            echo "Using companion update..."
-            companion update
-            exit 0
-        fi
-        
-        # Try updating via npm if installed that way
-        COMPANION_DIR="$HOME/companion"
-        if [ -d "$COMPANION_DIR" ]; then
-            echo "Updating via git..."
-            cd "$COMPANION_DIR"
-            git pull
-            yarn install
-            sudo systemctl restart companion 2>/dev/null || sudo systemctl restart companion-pi 2>/dev/null || true
-            exit 0
-        fi
-        
-        # Try apt update if installed via package
-        if dpkg -l | grep -q companion; then
-            echo "Updating via apt..."
-            sudo apt update
-            sudo apt install -y companion
-            exit 0
-        fi
-        
-        echo "Could not find Companion installation to update"
-        exit 1
-        """
+        # Create update script - tries companionpi method first (most common on Pi)
+        update_script = """#!/bin/bash
+set -e
+
+echo "Starting Companion update..."
+
+# Method 1: CompanionPi installation (most common on Raspberry Pi)
+if [ -f "/usr/local/src/companionpi/companion-update" ]; then
+    echo "Found CompanionPi installation, running update..."
+    cd /usr/local/src/companionpi
+    
+    # Stop companion
+    systemctl stop companion || true
+    
+    # Pull latest companionpi code
+    git pull -q
+    
+    # Run the update script (pass 'stable' to avoid prompts)
+    ./update.sh stable
+    
+    # Restart companion
+    systemctl start companion
+    
+    echo "Update complete!"
+    exit 0
+fi
+
+# Method 2: Direct companion-update command
+if [ -x "/usr/local/bin/companion-update" ]; then
+    echo "Using companion-update command..."
+    /usr/local/bin/companion-update stable
+    exit 0
+fi
+
+# Method 3: Check for companion in /opt and use update.sh directly
+if [ -f "/usr/local/src/companionpi/update.sh" ]; then
+    echo "Running update.sh directly..."
+    cd /usr/local/src/companionpi
+    systemctl stop companion || true
+    ./update.sh stable
+    systemctl start companion
+    exit 0
+fi
+
+echo "ERROR: Could not find Companion installation to update"
+echo "Companion may be installed in an unsupported way."
+exit 1
+"""
         
         # Write and execute update script
         import tempfile
@@ -298,7 +305,22 @@ class CompanionPage(QWidget):
         os.chmod(script_path, 0o755)
         
         self._update_script_path = script_path
-        self._update_process.start('/bin/bash', [script_path])
+        # Run with sudo since companion-update requires root
+        self._update_process.start('sudo', ['/bin/bash', script_path])
+    
+    def _on_update_stdout(self):
+        """Handle stdout from update process"""
+        data = self._update_process.readAllStandardOutput().data().decode()
+        print(f"[Companion Update] {data.strip()}")
+        # Update status with last line
+        lines = data.strip().split('\n')
+        if lines:
+            self.status_label.setText(lines[-1][:50])
+    
+    def _on_update_stderr(self):
+        """Handle stderr from update process"""
+        data = self._update_process.readAllStandardError().data().decode()
+        print(f"[Companion Update Error] {data.strip()}")
     
     def _on_update_finished(self, exit_code, exit_status):
         """Handle update process completion"""
@@ -327,10 +349,10 @@ class CompanionPage(QWidget):
                 self,
                 "Update Failed",
                 "Could not update Companion automatically.\n\n"
-                "You may need to update manually via SSH:\n"
-                "  companion-pi update\n"
-                "or\n"
-                "  sudo apt update && sudo apt upgrade companion"
+                "You may need to update manually via SSH:\n\n"
+                "  sudo /usr/local/src/companionpi/companion-update\n\n"
+                "Or run with the 'stable' parameter:\n"
+                "  sudo /usr/local/src/companionpi/update.sh stable"
             )
     
     def _on_update_error(self, error):
