@@ -880,17 +880,7 @@ class MainWindow(QMainWindow):
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
-        # Color picker dropdown for frame guide color - with color strips
-        from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen
-        from PyQt6.QtCore import QRectF
-        
-        self.frame_color_combo = QComboBox()
-        self.frame_color_combo.setFixedHeight(32)
-        self.frame_color_combo.setIconSize(QSize(120, 20))
-        self.frame_color_combo.setStyleSheet(touch_combo_style)
-        setup_combo_view(self.frame_color_combo)
-        
-        # Store color data for lookup
+        # Color picker buttons - 25x25px, centered, rounded
         self._frame_colors = {
             "White": ((255, 255, 255), "#FFFFFF"),
             "Red": ((0, 0, 255), "#FF0000"),      # BGR for OpenCV
@@ -899,27 +889,39 @@ class MainWindow(QMainWindow):
             "Yellow": ((0, 255, 255), "#FFFF00"), # BGR for OpenCV
         }
         
-        # Add color strips as icons with rounded corners
-        for name, (bgr, hex_color) in self._frame_colors.items():
-            # Create pixmap with transparent background
-            pixmap = QPixmap(120, 20)
-            pixmap.fill(Qt.GlobalColor.transparent)
-            
-            # Draw rounded rectangle
-            painter = QPainter(pixmap)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setBrush(QBrush(QColor(hex_color)))
-            painter.setPen(QPen(QColor("#444444"), 1))
-            painter.drawRoundedRect(QRectF(0, 0, 119, 19), 4, 4)
-            painter.end()
-            
-            icon = QIcon(pixmap)
-            self.frame_color_combo.addItem(icon, "")
-            # Store color name as item data
-            self.frame_color_combo.setItemData(self.frame_color_combo.count() - 1, name)
+        color_row = QWidget()
+        color_row_layout = QHBoxLayout(color_row)
+        color_row_layout.setContentsMargins(0, 4, 0, 4)
+        color_row_layout.setSpacing(6)
+        color_row_layout.addStretch()
         
-        self.frame_color_combo.currentIndexChanged.connect(self._on_frame_color_index_changed)
-        frame_guide_layout.addWidget(self.frame_color_combo)
+        self._color_buttons = {}
+        for name, (bgr, hex_color) in self._frame_colors.items():
+            btn = QPushButton()
+            btn.setFixedSize(25, 25)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {hex_color};
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 6px;
+                }}
+                QPushButton:hover {{
+                    border-color: {COLORS['text']};
+                }}
+                QPushButton:checked {{
+                    border-color: {COLORS['primary']};
+                    border-width: 3px;
+                }}
+            """)
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda checked, n=name: self._on_frame_color_clicked(n))
+            color_row_layout.addWidget(btn)
+            self._color_buttons[name] = btn
+        
+        color_row_layout.addStretch()
+        # Default to white selected
+        self._color_buttons["White"].setChecked(True)
+        frame_guide_layout.addWidget(color_row)
         
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
@@ -1246,10 +1248,14 @@ class MainWindow(QMainWindow):
         else:
             self.preview_widget.frame_guide.disable_drag_mode()
     
-    def _on_frame_color_index_changed(self, index: int):
-        """Handle frame guide color selection from dropdown"""
-        color_name = self.frame_color_combo.itemData(index)
-        if color_name and color_name in self._frame_colors:
+    def _on_frame_color_clicked(self, color_name: str):
+        """Handle frame guide color button click"""
+        # Uncheck all other color buttons
+        for name, btn in self._color_buttons.items():
+            btn.setChecked(name == color_name)
+        
+        # Apply color
+        if color_name in self._frame_colors:
             bgr_color, hex_color = self._frame_colors[color_name]
             self.preview_widget.frame_guide.line_color = bgr_color
     
@@ -2356,49 +2362,102 @@ class MainWindow(QMainWindow):
             self.close()
     
     def _reboot_system(self):
-        """Show confirmation dialog and reboot the system"""
+        """Show confirmation dialog with save option and reboot the system"""
         from PyQt6.QtWidgets import QMessageBox
         import subprocess
         
-        reply = QMessageBox.question(
-            self,
-            "Reboot System",
-            "Are you sure you want to reboot the Raspberry Pi?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Reboot System")
+        msg.setText("Do you want to save settings before rebooting?")
+        msg.setIcon(QMessageBox.Icon.Question)
         
-        if reply == QMessageBox.StandardButton.Yes:
+        save_btn = msg.addButton("Save && Reboot", QMessageBox.ButtonRole.AcceptRole)
+        no_save_btn = msg.addButton("Reboot Without Saving", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        msg.setDefaultButton(save_btn)
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        
+        if clicked == cancel_btn:
+            return
+        
+        if clicked == save_btn:
             self.settings.save()
-            self.close()
-            try:
-                subprocess.run(['sudo', 'reboot'], check=True)
-            except Exception as e:
-                print(f"Reboot failed: {e}")
+        
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        
+        try:
+            subprocess.run(['sudo', 'reboot'], check=True)
+        except Exception as e:
+            print(f"Reboot failed: {e}")
     
     def _shutdown_system(self):
-        """Show confirmation dialog and shutdown the system"""
+        """Show confirmation dialog with save option and shutdown the system"""
         from PyQt6.QtWidgets import QMessageBox
         import subprocess
         
-        reply = QMessageBox.question(
-            self,
-            "Shutdown System",
-            "Are you sure you want to shutdown the Raspberry Pi?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Shutdown System")
+        msg.setText("Do you want to save settings before shutting down?")
+        msg.setIcon(QMessageBox.Icon.Question)
         
-        if reply == QMessageBox.StandardButton.Yes:
+        save_btn = msg.addButton("Save && Shutdown", QMessageBox.ButtonRole.AcceptRole)
+        no_save_btn = msg.addButton("Shutdown Without Saving", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        msg.setDefaultButton(save_btn)
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        
+        if clicked == cancel_btn:
+            return
+        
+        if clicked == save_btn:
             self.settings.save()
-            self.close()
-            try:
-                subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=True)
-            except Exception as e:
-                print(f"Shutdown failed: {e}")
+        
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        
+        try:
+            subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=True)
+        except Exception as e:
+            print(f"Shutdown failed: {e}")
     
     def closeEvent(self, event):
-        """Handle window close"""
+        """Handle window close with save confirmation"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        # Skip dialog if already handled by reboot/shutdown
+        if not getattr(self, '_skip_close_dialog', False):
+            # Ask user about saving settings
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Close Application")
+            msg.setText("Do you want to save settings before closing?")
+            msg.setIcon(QMessageBox.Icon.Question)
+            
+            save_btn = msg.addButton("Save && Close", QMessageBox.ButtonRole.AcceptRole)
+            no_save_btn = msg.addButton("Close Without Saving", QMessageBox.ButtonRole.DestructiveRole)
+            cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            
+            msg.setDefaultButton(save_btn)
+            msg.exec()
+            
+            clicked = msg.clickedButton()
+            
+            if clicked == cancel_btn:
+                event.ignore()
+                return
+            
+            # Save settings only if user chose to save
+            if clicked == save_btn:
+                self.settings.save()
+        
         # Stop demo mode if running
         if self._demo_running:
             self._stop_demo_video()
@@ -2413,9 +2472,6 @@ class MainWindow(QMainWindow):
         
         # Disconnect ATEM
         self.atem_controller.disconnect()
-        
-        # Save settings
-        self.settings.save()
         
         event.accept()
     

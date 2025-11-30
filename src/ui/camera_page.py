@@ -522,8 +522,8 @@ class CameraPage(QWidget):
         layout.setSpacing(16)
         
         # Unified Add Camera section
-        add_camera_group = QGroupBox("➕ Add Camera")
-        add_camera_group.setStyleSheet("""
+        self.add_camera_group = QGroupBox("➕ Add Camera")
+        self.add_camera_group.setStyleSheet("""
             QGroupBox {
                 font-size: 16px;
                 font-weight: 600;
@@ -538,7 +538,7 @@ class CameraPage(QWidget):
                 padding: 0 8px;
             }
         """)
-        add_camera_layout = QVBoxLayout(add_camera_group)
+        add_camera_layout = QVBoxLayout(self.add_camera_group)
         add_camera_layout.setSpacing(12)
         
         # Top buttons row: Scan Network and Add Manually toggle
@@ -907,7 +907,7 @@ class CameraPage(QWidget):
         self.manual_buttons_container.hide()
         add_camera_layout.addWidget(self.manual_buttons_container)
         
-        layout.addWidget(add_camera_group)
+        layout.addWidget(self.add_camera_group)
         layout.addStretch()
         
         return panel
@@ -1693,6 +1693,10 @@ class CameraPage(QWidget):
         
         self._editing_camera_id = camera_id
         
+        # Show the manual form if not already visible
+        if not self.manual_toggle_btn.isChecked():
+            self.manual_toggle_btn.setChecked(True)
+        
         self.camera_name_input.setText(camera.name)
         self.camera_ip_input.setText(camera.ip_address)
         self.camera_user_input.setText(camera.username)
@@ -1706,6 +1710,13 @@ class CameraPage(QWidget):
         self.cancel_edit_btn.show()
         self._validate_form()
         self._form_has_changes = False
+        
+        # Scroll to make the Add Camera section visible and focus the name field
+        self.add_camera_group.setVisible(True)
+        self.camera_name_input.setFocus()
+        
+        # Use QTimer to ensure the scroll happens after layout updates
+        QTimer.singleShot(100, lambda: self.add_camera_group.ensurePolished())
     
     def _cancel_edit(self):
         """Cancel camera edit"""
