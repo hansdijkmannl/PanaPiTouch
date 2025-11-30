@@ -56,6 +56,11 @@ class MainWindow(QMainWindow):
         # OSD state tracking
         self._osd_active = False
         
+        # Split view state
+        self._split_enabled = False
+        self._split_camera_id = None
+        self._split_mode = 'side'  # 'side' or 'top'
+        
         # ATEM controller
         self.atem_controller = ATEMTallyController()
         
@@ -729,6 +734,278 @@ class MainWindow(QMainWindow):
         self.overlays_panel.setVisible(False)
         layout.addWidget(self.overlays_panel)
         
+        # ===== Grid Overlay Toggle Button =====
+        self.grid_toggle_btn = QPushButton("▼ Grid/Guides")
+        self.grid_toggle_btn.setCheckable(True)
+        self.grid_toggle_btn.setFixedHeight(36)
+        self.grid_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.grid_toggle_btn.clicked.connect(self._toggle_grid_panel)
+        layout.addWidget(self.grid_toggle_btn)
+        
+        # Grid Panel (collapsible)
+        self.grid_panel = QFrame()
+        self.grid_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        grid_layout = QVBoxLayout(self.grid_panel)
+        grid_layout.setContentsMargins(8, 8, 8, 8)
+        grid_layout.setSpacing(6)
+        
+        # Grid type buttons
+        self.grid_buttons = {}
+        grid_types = [
+            ("Rule of Thirds", "thirds"),
+            ("Center Cross", "center"),
+            ("Level Lines", "level"),
+        ]
+        
+        for name, key in grid_types:
+            btn = QPushButton(name)
+            btn.setObjectName("overlayButton")
+            btn.setCheckable(True)
+            btn.setFixedHeight(32)
+            btn.clicked.connect(lambda checked, k=key: self._toggle_grid_type(k))
+            self.grid_buttons[key] = btn
+            grid_layout.addWidget(btn)
+        
+        self.grid_panel.setVisible(False)
+        layout.addWidget(self.grid_panel)
+        
+        # ===== Frame Guides Toggle Button =====
+        self.frame_guide_toggle_btn = QPushButton("▼ Frame Guides")
+        self.frame_guide_toggle_btn.setCheckable(True)
+        self.frame_guide_toggle_btn.setFixedHeight(36)
+        self.frame_guide_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.frame_guide_toggle_btn.clicked.connect(self._toggle_frame_guide_panel)
+        layout.addWidget(self.frame_guide_toggle_btn)
+        
+        # Frame Guides Panel (collapsible)
+        self.frame_guide_panel = QFrame()
+        self.frame_guide_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        frame_guide_layout = QVBoxLayout(self.frame_guide_panel)
+        frame_guide_layout.setContentsMargins(8, 8, 8, 8)
+        frame_guide_layout.setSpacing(6)
+        
+        # Template category dropdown
+        from PyQt6.QtWidgets import QComboBox
+        self.frame_category_combo = QComboBox()
+        self.frame_category_combo.setFixedHeight(32)
+        self.frame_category_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                color: {COLORS['text']};
+                font-size: 11px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                color: {COLORS['text']};
+                selection-background-color: {COLORS['primary']};
+            }}
+        """)
+        self.frame_category_combo.addItems(["Social", "Cinema", "TV/Broadcast", "Custom"])
+        self.frame_category_combo.currentTextChanged.connect(self._on_frame_category_changed)
+        frame_guide_layout.addWidget(self.frame_category_combo)
+        
+        # Template selection dropdown
+        self.frame_template_combo = QComboBox()
+        self.frame_template_combo.setFixedHeight(32)
+        self.frame_template_combo.setStyleSheet(self.frame_category_combo.styleSheet())
+        self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
+        frame_guide_layout.addWidget(self.frame_template_combo)
+        
+        # Custom ratio input row
+        custom_row = QHBoxLayout()
+        custom_row.setSpacing(4)
+        
+        from PyQt6.QtWidgets import QLineEdit
+        self.custom_width_input = QLineEdit()
+        self.custom_width_input.setPlaceholderText("W")
+        self.custom_width_input.setFixedSize(40, 28)
+        self.custom_width_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 2px 4px;
+                color: {COLORS['text']};
+                font-size: 11px;
+            }}
+        """)
+        custom_row.addWidget(self.custom_width_input)
+        
+        colon_label = QLabel(":")
+        colon_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 12px; background: transparent; border: none;")
+        custom_row.addWidget(colon_label)
+        
+        self.custom_height_input = QLineEdit()
+        self.custom_height_input.setPlaceholderText("H")
+        self.custom_height_input.setFixedSize(40, 28)
+        self.custom_height_input.setStyleSheet(self.custom_width_input.styleSheet())
+        custom_row.addWidget(self.custom_height_input)
+        
+        apply_ratio_btn = QPushButton("Apply")
+        apply_ratio_btn.setFixedSize(50, 28)
+        apply_ratio_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['primary']};
+                border: none;
+                border-radius: 4px;
+                color: white;
+                font-size: 10px;
+                font-weight: bold;
+            }}
+            QPushButton:pressed {{
+                background-color: #FF9500;
+            }}
+        """)
+        apply_ratio_btn.clicked.connect(self._apply_custom_ratio)
+        custom_row.addWidget(apply_ratio_btn)
+        
+        frame_guide_layout.addLayout(custom_row)
+        
+        # Drag mode toggle
+        self.drag_mode_btn = QPushButton("✋ Drag to Resize")
+        self.drag_mode_btn.setObjectName("overlayButton")
+        self.drag_mode_btn.setCheckable(True)
+        self.drag_mode_btn.setFixedHeight(32)
+        self.drag_mode_btn.clicked.connect(self._toggle_drag_mode)
+        frame_guide_layout.addWidget(self.drag_mode_btn)
+        
+        # Save custom button
+        save_custom_btn = QPushButton("💾 Save as Custom")
+        save_custom_btn.setFixedHeight(28)
+        save_custom_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 10px;
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+            }}
+        """)
+        save_custom_btn.clicked.connect(self._save_custom_frame_guide)
+        frame_guide_layout.addWidget(save_custom_btn)
+        
+        # Clear button
+        clear_guide_btn = QPushButton("✕ Clear Guide")
+        clear_guide_btn.setFixedHeight(28)
+        clear_guide_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 10px;
+            }}
+            QPushButton:pressed {{
+                background-color: #ff4444;
+            }}
+        """)
+        clear_guide_btn.clicked.connect(self._clear_frame_guide)
+        frame_guide_layout.addWidget(clear_guide_btn)
+        
+        self.frame_guide_panel.setVisible(False)
+        layout.addWidget(self.frame_guide_panel)
+        
+        # Initialize frame guide templates
+        self._on_frame_category_changed("Social")
+        
+        # ===== Split Screen Toggle Button =====
+        self.split_toggle_btn = QPushButton("▼ Split Compare")
+        self.split_toggle_btn.setCheckable(True)
+        self.split_toggle_btn.setFixedHeight(36)
+        self.split_toggle_btn.setStyleSheet(toggle_btn_style)
+        self.split_toggle_btn.clicked.connect(self._toggle_split_panel)
+        layout.addWidget(self.split_toggle_btn)
+        
+        # Split Screen Panel (collapsible)
+        self.split_panel = QFrame()
+        self.split_panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        split_layout = QVBoxLayout(self.split_panel)
+        split_layout.setContentsMargins(8, 8, 8, 8)
+        split_layout.setSpacing(6)
+        
+        # Camera selection dropdown
+        split_label = QLabel("Compare with:")
+        split_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; background: transparent; border: none;")
+        split_layout.addWidget(split_label)
+        
+        self.split_camera_combo = QComboBox()
+        self.split_camera_combo.setFixedHeight(32)
+        self.split_camera_combo.setStyleSheet(self.frame_category_combo.styleSheet())
+        split_layout.addWidget(self.split_camera_combo)
+        
+        # Split mode buttons
+        split_mode_row = QHBoxLayout()
+        split_mode_row.setSpacing(4)
+        
+        self.split_side_btn = QPushButton("Side")
+        self.split_side_btn.setCheckable(True)
+        self.split_side_btn.setChecked(True)
+        self.split_side_btn.setFixedHeight(28)
+        self.split_side_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 10px;
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: white;
+            }}
+        """)
+        self.split_side_btn.clicked.connect(lambda: self._set_split_mode('side'))
+        split_mode_row.addWidget(self.split_side_btn)
+        
+        self.split_top_btn = QPushButton("Top/Bottom")
+        self.split_top_btn.setCheckable(True)
+        self.split_top_btn.setFixedHeight(28)
+        self.split_top_btn.setStyleSheet(self.split_side_btn.styleSheet())
+        self.split_top_btn.clicked.connect(lambda: self._set_split_mode('top'))
+        split_mode_row.addWidget(self.split_top_btn)
+        
+        split_layout.addLayout(split_mode_row)
+        
+        # Enable split button
+        self.split_enable_btn = QPushButton("Enable Split View")
+        self.split_enable_btn.setObjectName("overlayButton")
+        self.split_enable_btn.setCheckable(True)
+        self.split_enable_btn.setFixedHeight(32)
+        self.split_enable_btn.clicked.connect(self._toggle_split_view)
+        split_layout.addWidget(self.split_enable_btn)
+        
+        self.split_panel.setVisible(False)
+        layout.addWidget(self.split_panel)
+        
         # Multiview button (full width like overlay buttons)
         self.multiview_btn = QPushButton("Quad Split")
         self.multiview_btn.setObjectName("overlayButton")
@@ -816,6 +1093,153 @@ class MainWindow(QMainWindow):
         visible = self.overlays_toggle_btn.isChecked()
         self.overlays_panel.setVisible(visible)
         self.overlays_toggle_btn.setText("▲ Overlays" if visible else "▼ Overlays")
+    
+    def _toggle_grid_panel(self):
+        """Toggle Grid panel visibility"""
+        visible = self.grid_toggle_btn.isChecked()
+        self.grid_panel.setVisible(visible)
+        self.grid_toggle_btn.setText("▲ Grid/Guides" if visible else "▼ Grid/Guides")
+    
+    def _toggle_frame_guide_panel(self):
+        """Toggle Frame Guides panel visibility"""
+        visible = self.frame_guide_toggle_btn.isChecked()
+        self.frame_guide_panel.setVisible(visible)
+        self.frame_guide_toggle_btn.setText("▲ Frame Guides" if visible else "▼ Frame Guides")
+    
+    def _toggle_split_panel(self):
+        """Toggle Split Compare panel visibility"""
+        visible = self.split_toggle_btn.isChecked()
+        self.split_panel.setVisible(visible)
+        self.split_toggle_btn.setText("▲ Split Compare" if visible else "▼ Split Compare")
+        
+        # Populate camera dropdown when opening
+        if visible:
+            self._populate_split_cameras()
+    
+    def _toggle_grid_type(self, grid_type: str):
+        """Toggle specific grid type"""
+        if grid_type == "thirds":
+            enabled = self.preview_widget.toggle_rule_of_thirds()
+            self.grid_buttons["thirds"].setChecked(enabled)
+        elif grid_type == "center":
+            enabled = self.preview_widget.toggle_center_cross()
+            self.grid_buttons["center"].setChecked(enabled)
+        elif grid_type == "level":
+            enabled = self.preview_widget.toggle_level_lines()
+            self.grid_buttons["level"].setChecked(enabled)
+    
+    def _on_frame_category_changed(self, category: str):
+        """Handle frame guide category change"""
+        self.frame_template_combo.clear()
+        
+        templates = self.preview_widget.frame_guide.get_all_templates()
+        if category in templates:
+            for guide in templates[category]:
+                self.frame_template_combo.addItem(guide.name)
+        elif category == "Custom":
+            # Show custom guides
+            custom_guides = self.preview_widget.frame_guide.custom_guides
+            for guide in custom_guides:
+                self.frame_template_combo.addItem(guide.name)
+            if not custom_guides:
+                self.frame_template_combo.addItem("(No custom guides)")
+    
+    def _on_frame_template_changed(self, template_name: str):
+        """Handle frame guide template selection"""
+        if not template_name or template_name == "(No custom guides)":
+            return
+        
+        category = self.frame_category_combo.currentText()
+        if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
+            self.preview_widget.frame_guide.enabled = True
+    
+    def _apply_custom_ratio(self):
+        """Apply custom aspect ratio from input fields"""
+        try:
+            width = float(self.custom_width_input.text())
+            height = float(self.custom_height_input.text())
+            
+            if width > 0 and height > 0:
+                self.preview_widget.frame_guide.set_custom_ratio(width, height)
+                self.preview_widget.frame_guide.enabled = True
+        except ValueError:
+            pass  # Invalid input, ignore
+    
+    def _toggle_drag_mode(self):
+        """Toggle drag/resize mode for frame guide"""
+        if self.drag_mode_btn.isChecked():
+            self.preview_widget.frame_guide.enable_drag_mode()
+            self.preview_widget.frame_guide.enabled = True
+        else:
+            self.preview_widget.frame_guide.disable_drag_mode()
+    
+    def _save_custom_frame_guide(self):
+        """Save current frame guide as custom preset"""
+        from PyQt6.QtWidgets import QInputDialog
+        
+        name, ok = QInputDialog.getText(
+            self, "Save Custom Guide",
+            "Enter a name for this frame guide:"
+        )
+        
+        if ok and name:
+            if self.preview_widget.frame_guide.save_current_as_custom(name):
+                # Refresh category if on Custom
+                if self.frame_category_combo.currentText() == "Custom":
+                    self._on_frame_category_changed("Custom")
+    
+    def _clear_frame_guide(self):
+        """Clear the active frame guide"""
+        self.preview_widget.frame_guide.clear()
+        self.preview_widget.frame_guide.enabled = False
+        self.drag_mode_btn.setChecked(False)
+    
+    def _populate_split_cameras(self):
+        """Populate split screen camera dropdown"""
+        self.split_camera_combo.clear()
+        
+        for camera in self.settings.cameras:
+            if camera.id != self.current_camera_id:
+                self.split_camera_combo.addItem(camera.name, camera.id)
+    
+    def _set_split_mode(self, mode: str):
+        """Set split screen mode (side or top)"""
+        self.split_side_btn.setChecked(mode == 'side')
+        self.split_top_btn.setChecked(mode == 'top')
+        self._split_mode = mode
+    
+    def _toggle_split_view(self):
+        """Toggle split screen view"""
+        enabled = self.split_enable_btn.isChecked()
+        
+        if enabled:
+            # Get selected camera
+            camera_id = self.split_camera_combo.currentData()
+            if camera_id is None:
+                self.split_enable_btn.setChecked(False)
+                return
+            
+            # Start split view
+            self._split_camera_id = camera_id
+            self._split_enabled = True
+            
+            # Start stream for second camera if not already running
+            if camera_id not in self.camera_streams:
+                camera = self.settings.get_camera(camera_id)
+                if camera:
+                    config = StreamConfig(
+                        ip_address=camera.ip_address,
+                        port=camera.port,
+                        username=camera.username,
+                        password=camera.password,
+                        resolution=(1280, 720)  # Lower res for split
+                    )
+                    stream = CameraStream(config)
+                    stream.start()
+                    self.camera_streams[camera_id] = stream
+        else:
+            self._split_enabled = False
+            self._split_camera_id = None
     
     def _on_joystick_move(self, x: float, y: float):
         """Handle joystick movement - send PTZ commands"""
@@ -1496,7 +1920,85 @@ class MainWindow(QMainWindow):
     
     def _on_frame_received(self, frame):
         """Handle received frame from camera"""
+        import cv2
+        import numpy as np
+        
+        # Handle split view if enabled
+        if self._split_enabled and self._split_camera_id is not None:
+            split_frame = self._get_split_frame(frame)
+            if split_frame is not None:
+                frame = split_frame
+        
         self.preview_widget.update_frame(frame)
+    
+    def _get_split_frame(self, main_frame):
+        """Combine main frame with split camera frame"""
+        import cv2
+        import numpy as np
+        
+        # Get frame from second camera
+        if self._split_camera_id not in self.camera_streams:
+            return None
+        
+        split_stream = self.camera_streams[self._split_camera_id]
+        split_frame = split_stream.get_frame()
+        
+        if split_frame is None:
+            return None
+        
+        h, w = main_frame.shape[:2]
+        
+        if self._split_mode == 'side':
+            # Side by side - each camera gets half width
+            half_w = w // 2
+            
+            # Resize both frames to half width
+            main_resized = cv2.resize(main_frame, (half_w, h), interpolation=cv2.INTER_AREA)
+            split_resized = cv2.resize(split_frame, (half_w, h), interpolation=cv2.INTER_AREA)
+            
+            # Combine horizontally
+            combined = np.hstack([main_resized, split_resized])
+            
+            # Draw divider line
+            cv2.line(combined, (half_w, 0), (half_w, h), (255, 255, 255), 2)
+            
+            # Add labels
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            main_camera = self.settings.get_camera(self.current_camera_id)
+            split_camera = self.settings.get_camera(self._split_camera_id)
+            
+            if main_camera:
+                cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
+            if split_camera:
+                cv2.putText(combined, split_camera.name, (half_w + 10, 30), font, 0.7, (255, 255, 255), 2)
+            
+            return combined
+        
+        else:  # top/bottom
+            # Top and bottom - each camera gets half height
+            half_h = h // 2
+            
+            # Resize both frames to half height
+            main_resized = cv2.resize(main_frame, (w, half_h), interpolation=cv2.INTER_AREA)
+            split_resized = cv2.resize(split_frame, (w, half_h), interpolation=cv2.INTER_AREA)
+            
+            # Combine vertically
+            combined = np.vstack([main_resized, split_resized])
+            
+            # Draw divider line
+            cv2.line(combined, (0, half_h), (w, half_h), (255, 255, 255), 2)
+            
+            # Add labels
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            main_camera = self.settings.get_camera(self.current_camera_id)
+            split_camera = self.settings.get_camera(self._split_camera_id)
+            
+            if main_camera:
+                cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
+            if split_camera:
+                cv2.putText(combined, split_camera.name, (10, half_h + 30), font, 0.7, (255, 255, 255), 2)
+            
+            return combined
     
     def _update_camera_buttons(self):
         """Update camera buttons - rebuild to match settings"""

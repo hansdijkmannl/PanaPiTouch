@@ -10,7 +10,10 @@ from PyQt6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
-from ..overlays import FalseColorOverlay, WaveformOverlay, VectorscopeOverlay, FocusAssistOverlay
+from ..overlays import (
+    FalseColorOverlay, WaveformOverlay, VectorscopeOverlay, FocusAssistOverlay,
+    GridOverlay, FrameGuideOverlay
+)
 from ..atem.tally import TallyState
 
 
@@ -40,6 +43,8 @@ class PreviewWidget(QWidget):
         self.waveform = WaveformOverlay()
         self.vectorscope = VectorscopeOverlay()
         self.focus_assist = FocusAssistOverlay()
+        self.grid_overlay = GridOverlay()
+        self.frame_guide = FrameGuideOverlay()
         
         # Tally state
         self._tally_state = TallyState.OFF
@@ -170,18 +175,23 @@ class PreviewWidget(QWidget):
             self.false_color.enabled or 
             self.focus_assist.enabled or 
             self.waveform.enabled or 
-            self.vectorscope.enabled
+            self.vectorscope.enabled or
+            self.grid_overlay.enabled or
+            self.frame_guide.enabled
         )
         
         if overlays_active:
             # Need to copy frame for overlay processing
             frame = self._current_frame.copy()
             
-            # Apply overlays in order
+            # Apply overlays in order (analysis first, then guides on top)
             frame = self.false_color.apply(frame)
             frame = self.focus_assist.apply(frame)
             frame = self.waveform.apply(frame)
             frame = self.vectorscope.apply(frame)
+            # Grid and frame guides applied last so they're always visible
+            frame = self.grid_overlay.apply(frame)
+            frame = self.frame_guide.apply(frame)
             
             self._display_frame = frame
         else:
@@ -240,6 +250,34 @@ class PreviewWidget(QWidget):
         """Toggle focus assist overlay"""
         self.focus_assist.toggle()
         return self.focus_assist.enabled
+    
+    def toggle_grid(self):
+        """Toggle grid overlay"""
+        self.grid_overlay.toggle()
+        return self.grid_overlay.enabled
+    
+    def toggle_rule_of_thirds(self):
+        """Toggle rule of thirds in grid overlay"""
+        if not self.grid_overlay.enabled:
+            self.grid_overlay.enabled = True
+        return self.grid_overlay.toggle_rule_of_thirds()
+    
+    def toggle_center_cross(self):
+        """Toggle center crosshair in grid overlay"""
+        if not self.grid_overlay.enabled:
+            self.grid_overlay.enabled = True
+        return self.grid_overlay.toggle_center_cross()
+    
+    def toggle_level_lines(self):
+        """Toggle level lines in grid overlay"""
+        if not self.grid_overlay.enabled:
+            self.grid_overlay.enabled = True
+        return self.grid_overlay.toggle_level_lines()
+    
+    def toggle_frame_guide(self):
+        """Toggle frame guide overlay"""
+        self.frame_guide.toggle()
+        return self.frame_guide.enabled
     
     def clear_frame(self):
         """Clear the current frame and show no signal"""
