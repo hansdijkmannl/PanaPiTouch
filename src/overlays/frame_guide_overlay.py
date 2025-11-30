@@ -225,8 +225,18 @@ class FrameGuideOverlay:
     
     def _calculate_frame_rect(self, frame_w: int, frame_h: int) -> Tuple[int, int, int, int]:
         """Calculate the frame guide rectangle based on aspect ratio"""
-        if self.drag_mode and self.custom_rect:
-            # Use custom rectangle (denormalize from 0-1000 to actual pixels)
+        # First priority: Use custom_rect if it exists (for dragged or recalled custom frames)
+        # Check custom_rect on the active_guide first (for recalled guides)
+        if self.active_guide is not None and self.active_guide.custom_rect is not None:
+            rect = self.active_guide.custom_rect
+            x = int(rect[0] * frame_w / 1000)
+            y = int(rect[1] * frame_h / 1000)
+            w = int(rect[2] * frame_w / 1000)
+            h = int(rect[3] * frame_h / 1000)
+            return (x, y, w, h)
+        
+        # Second priority: Use instance custom_rect (for currently being dragged frames)
+        if self.custom_rect is not None:
             x = int(self.custom_rect[0] * frame_w / 1000)
             y = int(self.custom_rect[1] * frame_h / 1000)
             w = int(self.custom_rect[2] * frame_w / 1000)
@@ -236,6 +246,7 @@ class FrameGuideOverlay:
         if self.active_guide is None:
             return (0, 0, frame_w, frame_h)
         
+        # Fall back to aspect ratio calculation for preset guides
         guide_w, guide_h = self.active_guide.aspect_ratio
         guide_ratio = guide_w / guide_h
         frame_ratio = frame_w / frame_h

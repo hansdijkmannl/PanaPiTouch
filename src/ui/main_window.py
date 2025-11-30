@@ -896,7 +896,7 @@ class MainWindow(QMainWindow):
         frame_guide_layout.addLayout(btn_row)
         
         # Add spacing at bottom
-        frame_guide_layout.addSpacing(15)
+        frame_guide_layout.addSpacing(20)
         
         self.frame_guide_panel.setVisible(False)
         layout.addWidget(self.frame_guide_panel)
@@ -994,7 +994,7 @@ class MainWindow(QMainWindow):
         split_layout.addWidget(self.split_enable_btn)
         
         # Add spacing at bottom
-        split_layout.addSpacing(15)
+        split_layout.addSpacing(20)
         
         self.split_panel.setVisible(False)
         layout.addWidget(self.split_panel)
