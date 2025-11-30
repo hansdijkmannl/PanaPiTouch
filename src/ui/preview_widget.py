@@ -262,17 +262,11 @@ class PreviewWidget(QWidget):
             self.grid_overlay.enabled = True
         return self.grid_overlay.toggle_rule_of_thirds()
     
-    def toggle_center_cross(self):
-        """Toggle center crosshair in grid overlay"""
+    def toggle_full_grid(self):
+        """Toggle full grid in grid overlay"""
         if not self.grid_overlay.enabled:
             self.grid_overlay.enabled = True
-        return self.grid_overlay.toggle_center_cross()
-    
-    def toggle_level_lines(self):
-        """Toggle level lines in grid overlay"""
-        if not self.grid_overlay.enabled:
-            self.grid_overlay.enabled = True
-        return self.grid_overlay.toggle_level_lines()
+        return self.grid_overlay.toggle_full_grid()
     
     def toggle_frame_guide(self):
         """Toggle frame guide overlay"""
@@ -291,3 +285,56 @@ class PreviewWidget(QWidget):
         # Mark frame dirty to trigger redraw at new size
         if self._display_frame is not None:
             self._frame_dirty = True
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press for frame guide drag/resize"""
+        if self.frame_guide.drag_mode:
+            # Get position relative to preview label
+            pos = self.preview_label.mapFrom(self, event.pos())
+            label_size = self.preview_label.size()
+            
+            # Check if click is within the preview area
+            if 0 <= pos.x() <= label_size.width() and 0 <= pos.y() <= label_size.height():
+                # Get current frame dimensions
+                if self._current_frame is not None:
+                    frame_h, frame_w = self._current_frame.shape[:2]
+                    
+                    # Scale click position to frame coordinates
+                    scale = min(label_size.width() / frame_w, label_size.height() / frame_h)
+                    offset_x = (label_size.width() - frame_w * scale) / 2
+                    offset_y = (label_size.height() - frame_h * scale) / 2
+                    
+                    frame_x = int((pos.x() - offset_x) / scale)
+                    frame_y = int((pos.y() - offset_y) / scale)
+                    
+                    self.frame_guide.handle_touch_start(frame_x, frame_y, frame_w, frame_h)
+        
+        super().mousePressEvent(event)
+    
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for frame guide drag/resize"""
+        if self.frame_guide.drag_mode and self.frame_guide._drag_start is not None:
+            pos = self.preview_label.mapFrom(self, event.pos())
+            label_size = self.preview_label.size()
+            
+            if self._current_frame is not None:
+                frame_h, frame_w = self._current_frame.shape[:2]
+                
+                scale = min(label_size.width() / frame_w, label_size.height() / frame_h)
+                offset_x = (label_size.width() - frame_w * scale) / 2
+                offset_y = (label_size.height() - frame_h * scale) / 2
+                
+                frame_x = int((pos.x() - offset_x) / scale)
+                frame_y = int((pos.y() - offset_y) / scale)
+                
+                self.frame_guide.handle_touch_move(frame_x, frame_y, frame_w, frame_h)
+                self._frame_dirty = True
+        
+        super().mouseMoveEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release for frame guide drag/resize"""
+        if self.frame_guide.drag_mode:
+            self.frame_guide.handle_touch_end()
+        
+        super().mouseReleaseEvent(event)

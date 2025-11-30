@@ -759,8 +759,7 @@ class MainWindow(QMainWindow):
         self.grid_buttons = {}
         grid_types = [
             ("Rule of Thirds", "thirds"),
-            ("Center Cross", "center"),
-            ("Level Lines", "level"),
+            ("Full Grid", "grid"),
         ]
         
         for name, key in grid_types:
@@ -796,80 +795,95 @@ class MainWindow(QMainWindow):
         frame_guide_layout.setContentsMargins(8, 8, 8, 8)
         frame_guide_layout.setSpacing(6)
         
-        # Template category dropdown
+        # Template category dropdown - touch friendly
         from PyQt6.QtWidgets import QComboBox
-        self.frame_category_combo = QComboBox()
-        self.frame_category_combo.setFixedHeight(32)
-        self.frame_category_combo.setStyleSheet(f"""
+        touch_combo_style = f"""
             QComboBox {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
+                border-radius: 6px;
+                padding: 8px 12px;
                 color: {COLORS['text']};
-                font-size: 11px;
+                font-size: 12px;
+                min-height: 20px;
             }}
             QComboBox::drop-down {{
                 border: none;
-                width: 20px;
+                width: 30px;
+            }}
+            QComboBox::down-arrow {{
+                width: 12px;
+                height: 12px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 color: {COLORS['text']};
                 selection-background-color: {COLORS['primary']};
+                padding: 4px;
             }}
-        """)
+            QComboBox QAbstractItemView::item {{
+                min-height: 36px;
+                padding: 8px 12px;
+            }}
+        """
+        self.frame_category_combo = QComboBox()
+        self.frame_category_combo.setFixedHeight(40)
+        self.frame_category_combo.setStyleSheet(touch_combo_style)
         self.frame_category_combo.addItems(["Social", "Cinema", "TV/Broadcast", "Custom"])
         self.frame_category_combo.currentTextChanged.connect(self._on_frame_category_changed)
         frame_guide_layout.addWidget(self.frame_category_combo)
         
-        # Template selection dropdown
+        # Template selection dropdown - touch friendly
         self.frame_template_combo = QComboBox()
-        self.frame_template_combo.setFixedHeight(32)
-        self.frame_template_combo.setStyleSheet(self.frame_category_combo.styleSheet())
+        self.frame_template_combo.setFixedHeight(40)
+        self.frame_template_combo.setStyleSheet(touch_combo_style)
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
         # Custom ratio input row
         custom_row = QHBoxLayout()
-        custom_row.setSpacing(4)
+        custom_row.setSpacing(6)
         
         from PyQt6.QtWidgets import QLineEdit
-        self.custom_width_input = QLineEdit()
-        self.custom_width_input.setPlaceholderText("W")
-        self.custom_width_input.setFixedSize(40, 28)
-        self.custom_width_input.setStyleSheet(f"""
+        custom_input_style = f"""
             QLineEdit {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 2px 4px;
+                border-radius: 6px;
+                padding: 6px 8px;
                 color: {COLORS['text']};
-                font-size: 11px;
+                font-size: 14px;
             }}
-        """)
-        custom_row.addWidget(self.custom_width_input)
+        """
+        self.custom_width_input = QLineEdit()
+        self.custom_width_input.setPlaceholderText("W")
+        self.custom_width_input.setFixedHeight(36)
+        self.custom_width_input.setStyleSheet(custom_input_style)
+        custom_row.addWidget(self.custom_width_input, 1)
         
         colon_label = QLabel(":")
-        colon_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 12px; background: transparent; border: none;")
+        colon_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 16px; font-weight: bold; background: transparent; border: none;")
         custom_row.addWidget(colon_label)
         
         self.custom_height_input = QLineEdit()
         self.custom_height_input.setPlaceholderText("H")
-        self.custom_height_input.setFixedSize(40, 28)
-        self.custom_height_input.setStyleSheet(self.custom_width_input.styleSheet())
-        custom_row.addWidget(self.custom_height_input)
+        self.custom_height_input.setFixedHeight(36)
+        self.custom_height_input.setStyleSheet(custom_input_style)
+        custom_row.addWidget(self.custom_height_input, 1)
         
-        apply_ratio_btn = QPushButton("Apply")
-        apply_ratio_btn.setFixedSize(50, 28)
+        frame_guide_layout.addLayout(custom_row)
+        
+        # Apply button - full width below inputs
+        apply_ratio_btn = QPushButton("Apply Custom Ratio")
+        apply_ratio_btn.setFixedHeight(36)
         apply_ratio_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['primary']};
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 color: white;
-                font-size: 10px;
+                font-size: 12px;
                 font-weight: bold;
             }}
             QPushButton:pressed {{
@@ -877,9 +891,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         apply_ratio_btn.clicked.connect(self._apply_custom_ratio)
-        custom_row.addWidget(apply_ratio_btn)
-        
-        frame_guide_layout.addLayout(custom_row)
+        frame_guide_layout.addWidget(apply_ratio_btn)
         
         # Drag mode toggle
         self.drag_mode_btn = QPushButton("✋ Drag to Resize")
@@ -952,44 +964,46 @@ class MainWindow(QMainWindow):
         split_layout.setContentsMargins(8, 8, 8, 8)
         split_layout.setSpacing(6)
         
-        # Camera selection dropdown
+        # Camera selection dropdown - touch friendly
         split_label = QLabel("Compare with:")
-        split_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; background: transparent; border: none;")
+        split_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; background: transparent; border: none;")
         split_layout.addWidget(split_label)
         
         self.split_camera_combo = QComboBox()
-        self.split_camera_combo.setFixedHeight(32)
-        self.split_camera_combo.setStyleSheet(self.frame_category_combo.styleSheet())
+        self.split_camera_combo.setFixedHeight(40)
+        self.split_camera_combo.setStyleSheet(touch_combo_style)
         split_layout.addWidget(self.split_camera_combo)
         
-        # Split mode buttons
+        # Split mode buttons - touch friendly
         split_mode_row = QHBoxLayout()
-        split_mode_row.setSpacing(4)
+        split_mode_row.setSpacing(6)
         
-        self.split_side_btn = QPushButton("Side")
-        self.split_side_btn.setCheckable(True)
-        self.split_side_btn.setChecked(True)
-        self.split_side_btn.setFixedHeight(28)
-        self.split_side_btn.setStyleSheet(f"""
+        split_btn_style = f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 6px;
                 color: {COLORS['text']};
-                font-size: 10px;
+                font-size: 12px;
+                font-weight: 600;
             }}
             QPushButton:checked {{
                 background-color: {COLORS['primary']};
                 color: white;
             }}
-        """)
+        """
+        self.split_side_btn = QPushButton("Side by Side")
+        self.split_side_btn.setCheckable(True)
+        self.split_side_btn.setChecked(True)
+        self.split_side_btn.setFixedHeight(36)
+        self.split_side_btn.setStyleSheet(split_btn_style)
         self.split_side_btn.clicked.connect(lambda: self._set_split_mode('side'))
         split_mode_row.addWidget(self.split_side_btn)
         
         self.split_top_btn = QPushButton("Top/Bottom")
         self.split_top_btn.setCheckable(True)
-        self.split_top_btn.setFixedHeight(28)
-        self.split_top_btn.setStyleSheet(self.split_side_btn.styleSheet())
+        self.split_top_btn.setFixedHeight(36)
+        self.split_top_btn.setStyleSheet(split_btn_style)
         self.split_top_btn.clicked.connect(lambda: self._set_split_mode('top'))
         split_mode_row.addWidget(self.split_top_btn)
         
@@ -1121,12 +1135,9 @@ class MainWindow(QMainWindow):
         if grid_type == "thirds":
             enabled = self.preview_widget.toggle_rule_of_thirds()
             self.grid_buttons["thirds"].setChecked(enabled)
-        elif grid_type == "center":
-            enabled = self.preview_widget.toggle_center_cross()
-            self.grid_buttons["center"].setChecked(enabled)
-        elif grid_type == "level":
-            enabled = self.preview_widget.toggle_level_lines()
-            self.grid_buttons["level"].setChecked(enabled)
+        elif grid_type == "grid":
+            enabled = self.preview_widget.toggle_full_grid()
+            self.grid_buttons["grid"].setChecked(enabled)
     
     def _on_frame_category_changed(self, category: str):
         """Handle frame guide category change"""

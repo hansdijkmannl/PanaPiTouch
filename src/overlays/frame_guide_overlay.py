@@ -58,9 +58,9 @@ class FrameGuideOverlay:
         self.active_guide: Optional[FrameGuide] = None
         self.custom_guides: List[FrameGuide] = []
         
-        # Styling
+        # Styling - thicker lines for visibility
         self.line_color = (0, 200, 255)  # Orange/yellow (BGR)
-        self.line_thickness = 2
+        self.line_thickness = 4  # Doubled from 2
         self.line_opacity = 0.8
         self.fill_opacity = 0.3  # Darken outside areas
         self.show_label = True
