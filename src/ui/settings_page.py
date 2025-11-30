@@ -1158,25 +1158,37 @@ class SettingsPage(QWidget):
             # Try multiple network configuration methods
             success = False
             method_used = None
+            cidr = self._subnet_to_cidr(subnet)
             
             # Method 1: NetworkManager (nmcli)
             try:
-                cidr = self._subnet_to_cidr(subnet)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface, 
-                               f'ipv4.addresses', f'{ip}/{cidr}'], check=True, 
-                               capture_output=True)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface,
-                               'ipv4.gateway', gateway], check=True, capture_output=True)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'modify', interface,
-                               'ipv4.method', 'manual'], check=True, capture_output=True)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'down', interface], 
-                               check=False, capture_output=True)
-                subprocess.run(['sudo', 'nmcli', 'connection', 'up', interface], 
-                               check=True, capture_output=True)
-                success = True
-                method_used = "NetworkManager"
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                pass
+                # First, find the connection name for this interface
+                result = subprocess.run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'connection', 'show', '--active'],
+                                       capture_output=True, text=True, check=True)
+                connection_name = None
+                for line in result.stdout.strip().split('\n'):
+                    if ':' in line:
+                        name, device = line.split(':', 1)
+                        if device == interface:
+                            connection_name = name
+                            break
+                
+                if connection_name:
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name, 
+                                   f'ipv4.addresses', f'{ip}/{cidr}'], check=True, 
+                                   capture_output=True)
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                                   'ipv4.gateway', gateway], check=True, capture_output=True)
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                                   'ipv4.method', 'manual'], check=True, capture_output=True)
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'down', connection_name], 
+                                   check=False, capture_output=True)
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'up', connection_name], 
+                                   check=True, capture_output=True)
+                    success = True
+                    method_used = "NetworkManager"
+            except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                print(f"NetworkManager method failed: {e}")
             
             # Method 2: dhcpcd (common on Raspberry Pi)
             if not success:
