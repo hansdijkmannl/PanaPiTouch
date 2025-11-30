@@ -63,20 +63,19 @@ class SettingsPage(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
         
-        # Top row - ATEM, Network, and Backup panels
+        # Top row - ATEM, Network, and Backup panels (equal stretch)
         top_row = QHBoxLayout()
         top_row.setSpacing(20)
         
         atem_panel = self._create_atem_panel()
-        top_row.addWidget(atem_panel)
+        top_row.addWidget(atem_panel, 1)  # stretch factor 1
         
         network_panel = self._create_network_panel()
-        top_row.addWidget(network_panel)
+        top_row.addWidget(network_panel, 1)  # stretch factor 1
         
         backup_panel = self._create_backup_panel()
-        top_row.addWidget(backup_panel)
+        top_row.addWidget(backup_panel, 1)  # stretch factor 1
         
-        top_row.addStretch()
         main_layout.addLayout(top_row)
         
         # Bottom row - System Info panel
@@ -173,7 +172,6 @@ class SettingsPage(QWidget):
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -291,7 +289,6 @@ class SettingsPage(QWidget):
     def _create_network_panel(self) -> QWidget:
         """Create network configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -534,7 +531,6 @@ class SettingsPage(QWidget):
     def _create_backup_panel(self) -> QWidget:
         """Create backup and restore panel"""
         panel = QFrame()
-        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -581,13 +577,8 @@ class SettingsPage(QWidget):
         create_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
         create_layout.addWidget(create_header)
         
-        # Name label and input
-        name_label = QLabel("Name:")
-        name_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        create_layout.addWidget(name_label)
-        
         self.backup_name_input = QLineEdit()
-        self.backup_name_input.setPlaceholderText("e.g., Working setup")
+        self.backup_name_input.setPlaceholderText("Enter backup name")
         self.backup_name_input.setStyleSheet(self._get_input_style())
         create_layout.addWidget(self.backup_name_input)
         
