@@ -578,6 +578,7 @@ class SettingsPage(QWidget):
         create_layout.addWidget(create_header)
         
         self.backup_name_input = QLineEdit()
+        self.backup_name_input.setObjectName("backup_name_input")
         self.backup_name_input.setPlaceholderText("Enter backup name")
         self.backup_name_input.setStyleSheet(self._get_input_style())
         create_layout.addWidget(self.backup_name_input)
