@@ -18,6 +18,7 @@ class FrameGuide:
     aspect_ratio: Tuple[float, float]  # width:height
     color: Tuple[int, int, int] = (255, 255, 255)  # BGR
     is_custom: bool = False
+    custom_rect: Optional[Tuple[int, int, int, int]] = None  # x, y, w, h (normalized 0-1000) for drag-created frames
 
 
 class FrameGuideOverlay:
@@ -92,7 +93,8 @@ class FrameGuideOverlay:
                             name=g['name'],
                             aspect_ratio=tuple(g['aspect_ratio']),
                             color=tuple(g.get('color', (255, 255, 255))),
-                            is_custom=True
+                            is_custom=True,
+                            custom_rect=tuple(g['custom_rect']) if g.get('custom_rect') else None
                         )
                         for g in data.get('guides', [])
                     ]
@@ -110,6 +112,7 @@ class FrameGuideOverlay:
                         'name': g.name,
                         'aspect_ratio': list(g.aspect_ratio),
                         'color': list(g.color),
+                        'custom_rect': list(g.custom_rect) if g.custom_rect else None,
                     }
                     for g in self.custom_guides
                 ]
@@ -133,8 +136,13 @@ class FrameGuideOverlay:
             for guide in templates[category]:
                 if guide.name == name:
                     self.active_guide = guide
-                    self.drag_mode = False
-                    self.custom_rect = None
+                    # If guide has a custom_rect, restore it and enable drag mode
+                    if guide.custom_rect is not None:
+                        self.custom_rect = guide.custom_rect
+                        self.drag_mode = True
+                    else:
+                        self.drag_mode = False
+                        self.custom_rect = None
                     return True
         return False
     
@@ -157,15 +165,18 @@ class FrameGuideOverlay:
     
     def save_current_as_custom(self, name: str) -> bool:
         """Save current guide as a custom preset"""
-        # Get aspect ratio from custom rect if in drag mode, otherwise from active guide
+        # Get aspect ratio and custom rect from drag mode if active
         if self.drag_mode and self.custom_rect is not None:
-            # Calculate aspect ratio from custom rect
+            # Save the normalized custom_rect for exact positioning
+            custom_rect = self.custom_rect
+            # Calculate aspect ratio from custom rect (normalized values represent relative size)
             w, h = self.custom_rect[2], self.custom_rect[3]
             if h <= 0:
                 return False
             aspect_ratio = (float(w), float(h))
         elif self.active_guide is not None:
             aspect_ratio = self.active_guide.aspect_ratio
+            custom_rect = None
         else:
             return False
         
@@ -173,7 +184,8 @@ class FrameGuideOverlay:
             name=name,
             aspect_ratio=aspect_ratio,
             color=self.line_color,
-            is_custom=True
+            is_custom=True,
+            custom_rect=custom_rect
         )
         
         # Check if name already exists - update it

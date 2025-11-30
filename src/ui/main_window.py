@@ -792,8 +792,8 @@ class MainWindow(QMainWindow):
             }}
         """)
         frame_guide_layout = QVBoxLayout(self.frame_guide_panel)
-        frame_guide_layout.setContentsMargins(8, 8, 8, 8)
-        frame_guide_layout.setSpacing(6)
+        frame_guide_layout.setContentsMargins(6, 6, 6, 6)
+        frame_guide_layout.setSpacing(4)
         
         # Template category dropdown - touch friendly
         from PyQt6.QtWidgets import QComboBox
@@ -801,34 +801,35 @@ class MainWindow(QMainWindow):
             QComboBox {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 8px 12px;
+                border-radius: 4px;
+                padding: 4px 6px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 10px;
                 min-height: 20px;
             }}
             QComboBox::drop-down {{
                 border: none;
-                width: 30px;
+                width: 20px;
             }}
             QComboBox::down-arrow {{
-                width: 12px;
-                height: 12px;
+                width: 10px;
+                height: 10px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 color: {COLORS['text']};
                 selection-background-color: {COLORS['primary']};
-                padding: 4px;
+                padding: 2px;
             }}
             QComboBox QAbstractItemView::item {{
-                min-height: 36px;
-                padding: 8px 12px;
+                min-height: 32px;
+                padding: 4px 6px;
+                font-size: 10px;
             }}
         """
         self.frame_category_combo = QComboBox()
-        self.frame_category_combo.setFixedHeight(40)
+        self.frame_category_combo.setFixedHeight(32)
         self.frame_category_combo.setStyleSheet(touch_combo_style)
         self.frame_category_combo.addItems(["Social", "Cinema", "TV/Broadcast", "Custom"])
         self.frame_category_combo.currentTextChanged.connect(self._on_frame_category_changed)
@@ -836,7 +837,7 @@ class MainWindow(QMainWindow):
         
         # Template selection dropdown - touch friendly
         self.frame_template_combo = QComboBox()
-        self.frame_template_combo.setFixedHeight(40)
+        self.frame_template_combo.setFixedHeight(32)
         self.frame_template_combo.setStyleSheet(touch_combo_style)
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
@@ -845,23 +846,20 @@ class MainWindow(QMainWindow):
         self.drag_mode_btn = QPushButton("✋ Custom Frame")
         self.drag_mode_btn.setObjectName("overlayButton")
         self.drag_mode_btn.setCheckable(True)
-        self.drag_mode_btn.setFixedHeight(36)
+        self.drag_mode_btn.setFixedHeight(30)
         self.drag_mode_btn.clicked.connect(self._toggle_drag_mode)
         frame_guide_layout.addWidget(self.drag_mode_btn)
         
-        # Save and Clear buttons - side by side
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
-        
+        # Save and Clear buttons - stacked vertically
         save_custom_btn = QPushButton("💾 Save")
-        save_custom_btn.setFixedHeight(36)
+        save_custom_btn.setFixedHeight(30)
         save_custom_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 4px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 10px;
                 font-weight: 600;
             }}
             QPushButton:pressed {{
@@ -869,17 +867,17 @@ class MainWindow(QMainWindow):
             }}
         """)
         save_custom_btn.clicked.connect(self._save_custom_frame_guide)
-        btn_row.addWidget(save_custom_btn)
+        frame_guide_layout.addWidget(save_custom_btn)
         
         clear_guide_btn = QPushButton("✕ Clear")
-        clear_guide_btn.setFixedHeight(36)
+        clear_guide_btn.setFixedHeight(30)
         clear_guide_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 4px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 10px;
                 font-weight: 600;
             }}
             QPushButton:pressed {{
@@ -887,9 +885,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         clear_guide_btn.clicked.connect(self._clear_frame_guide)
-        btn_row.addWidget(clear_guide_btn)
-        
-        frame_guide_layout.addLayout(btn_row)
+        frame_guide_layout.addWidget(clear_guide_btn)
         
         self.frame_guide_panel.setVisible(False)
         layout.addWidget(self.frame_guide_panel)
@@ -915,30 +911,27 @@ class MainWindow(QMainWindow):
             }}
         """)
         split_layout = QVBoxLayout(self.split_panel)
-        split_layout.setContentsMargins(8, 8, 8, 8)
-        split_layout.setSpacing(6)
+        split_layout.setContentsMargins(6, 6, 6, 6)
+        split_layout.setSpacing(4)
         
         # Camera selection dropdown - touch friendly
         split_label = QLabel("Compare with:")
-        split_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; background: transparent; border: none;")
+        split_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 9px; background: transparent; border: none;")
         split_layout.addWidget(split_label)
         
         self.split_camera_combo = QComboBox()
-        self.split_camera_combo.setFixedHeight(40)
+        self.split_camera_combo.setFixedHeight(32)
         self.split_camera_combo.setStyleSheet(touch_combo_style)
         split_layout.addWidget(self.split_camera_combo)
         
-        # Split mode buttons - touch friendly
-        split_mode_row = QHBoxLayout()
-        split_mode_row.setSpacing(6)
-        
+        # Split mode buttons - stacked vertically
         split_btn_style = f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 4px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 10px;
                 font-weight: 600;
             }}
             QPushButton:checked {{
@@ -949,25 +942,23 @@ class MainWindow(QMainWindow):
         self.split_side_btn = QPushButton("Side by Side")
         self.split_side_btn.setCheckable(True)
         self.split_side_btn.setChecked(True)
-        self.split_side_btn.setFixedHeight(36)
+        self.split_side_btn.setFixedHeight(28)
         self.split_side_btn.setStyleSheet(split_btn_style)
         self.split_side_btn.clicked.connect(lambda: self._set_split_mode('side'))
-        split_mode_row.addWidget(self.split_side_btn)
+        split_layout.addWidget(self.split_side_btn)
         
         self.split_top_btn = QPushButton("Top/Bottom")
         self.split_top_btn.setCheckable(True)
-        self.split_top_btn.setFixedHeight(36)
+        self.split_top_btn.setFixedHeight(28)
         self.split_top_btn.setStyleSheet(split_btn_style)
         self.split_top_btn.clicked.connect(lambda: self._set_split_mode('top'))
-        split_mode_row.addWidget(self.split_top_btn)
-        
-        split_layout.addLayout(split_mode_row)
+        split_layout.addWidget(self.split_top_btn)
         
         # Enable split button
         self.split_enable_btn = QPushButton("Enable Split View")
         self.split_enable_btn.setObjectName("overlayButton")
         self.split_enable_btn.setCheckable(True)
-        self.split_enable_btn.setFixedHeight(32)
+        self.split_enable_btn.setFixedHeight(30)
         self.split_enable_btn.clicked.connect(self._toggle_split_view)
         split_layout.addWidget(self.split_enable_btn)
         
@@ -1117,6 +1108,11 @@ class MainWindow(QMainWindow):
         category = self.frame_category_combo.currentText()
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
             self.preview_widget.frame_guide.enabled = True
+            # Update Custom Frame button state based on whether guide has custom_rect
+            if self.preview_widget.frame_guide.drag_mode:
+                self.drag_mode_btn.setChecked(True)
+            else:
+                self.drag_mode_btn.setChecked(False)
     
     def _toggle_drag_mode(self):
         """Toggle drag/resize mode for frame guide"""
