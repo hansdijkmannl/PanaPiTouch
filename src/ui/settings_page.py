@@ -63,7 +63,7 @@ class SettingsPage(QWidget):
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(20)
         
-        # Top row - ATEM and Network panels
+        # Top row - ATEM, Network, and Backup panels
         top_row = QHBoxLayout()
         top_row.setSpacing(20)
         
@@ -73,10 +73,13 @@ class SettingsPage(QWidget):
         network_panel = self._create_network_panel()
         top_row.addWidget(network_panel)
         
+        backup_panel = self._create_backup_panel()
+        top_row.addWidget(backup_panel)
+        
         top_row.addStretch()
         main_layout.addLayout(top_row)
         
-        # Bottom row - System Info and Backup panels
+        # Bottom row - System Info panel
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(20)
         
@@ -85,16 +88,6 @@ class SettingsPage(QWidget):
         
         bottom_row.addStretch()
         main_layout.addLayout(bottom_row)
-        
-        # Third row - Backup & Restore panel
-        backup_row = QHBoxLayout()
-        backup_row.setSpacing(20)
-        
-        backup_panel = self._create_backup_panel()
-        backup_row.addWidget(backup_panel)
-        
-        backup_row.addStretch()
-        main_layout.addLayout(backup_row)
         
         main_layout.addStretch()
         
@@ -623,34 +616,10 @@ class SettingsPage(QWidget):
         restore_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
         restore_layout.addWidget(restore_header)
         
-        # Backup dropdown row
-        dropdown_row = QHBoxLayout()
-        dropdown_row.setSpacing(10)
-        
+        # Backup dropdown
         self.backup_combo = QComboBox()
         self.backup_combo.setStyleSheet(self._get_input_style())
-        self.backup_combo.setMinimumWidth(250)
-        dropdown_row.addWidget(self.backup_combo, 1)
-        
-        refresh_btn = QPushButton("⟳")
-        refresh_btn.setFixedSize(44, 44)
-        refresh_btn.setToolTip("Refresh backup list")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: none;
-                border-radius: 8px;
-                font-size: 16px;
-                color: #ffffff;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
-            }
-        """)
-        refresh_btn.clicked.connect(self._refresh_backup_list)
-        dropdown_row.addWidget(refresh_btn)
-        
-        restore_layout.addLayout(dropdown_row)
+        restore_layout.addWidget(self.backup_combo)
         
         # Action buttons row
         action_row = QHBoxLayout()
