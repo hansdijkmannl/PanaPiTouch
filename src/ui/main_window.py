@@ -843,7 +843,9 @@ class MainWindow(QMainWindow):
         frame_guide_layout.addWidget(self.frame_template_combo)
         
         # Color picker row for frame guide color
-        color_row = QHBoxLayout()
+        color_container = QWidget()
+        color_container.setFixedHeight(36)
+        color_row = QHBoxLayout(color_container)
         color_row.setSpacing(4)
         color_row.setContentsMargins(0, 4, 0, 4)
         
@@ -859,23 +861,14 @@ class MainWindow(QMainWindow):
         for name, hex_color, bgr_color in frame_colors:
             color_btn = QPushButton()
             color_btn.setFixedSize(28, 28)
-            color_btn.setMinimumSize(28, 28)
-            color_btn.setMaximumSize(28, 28)
             color_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {hex_color};
-                    border: 2px solid #444;
+                    border: 2px solid #444444;
                     border-radius: 4px;
-                    min-width: 28px;
-                    max-width: 28px;
-                    min-height: 28px;
-                    max-height: 28px;
-                }}
-                QPushButton:hover {{
-                    border: 2px solid #888;
                 }}
                 QPushButton:pressed {{
-                    border: 2px solid {COLORS['primary']};
+                    border: 2px solid #00b4d8;
                 }}
             """)
             color_btn.clicked.connect(lambda checked, c=bgr_color, h=hex_color: self._set_frame_guide_color(c, h))
@@ -883,7 +876,7 @@ class MainWindow(QMainWindow):
             color_row.addWidget(color_btn)
         
         color_row.addStretch()
-        frame_guide_layout.addLayout(color_row)
+        frame_guide_layout.addWidget(color_container)
         
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
@@ -1230,10 +1223,8 @@ class MainWindow(QMainWindow):
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background-color: {btn_hex};
-                        border: 3px solid {COLORS['primary']};
+                        border: 3px solid #00b4d8;
                         border-radius: 4px;
-                        min-width: 28px; max-width: 28px;
-                        min-height: 28px; max-height: 28px;
                     }}
                 """)
             else:
@@ -1241,13 +1232,11 @@ class MainWindow(QMainWindow):
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background-color: {btn_hex};
-                        border: 2px solid #444;
+                        border: 2px solid #444444;
                         border-radius: 4px;
-                        min-width: 28px; max-width: 28px;
-                        min-height: 28px; max-height: 28px;
                     }}
-                    QPushButton:hover {{
-                        border: 2px solid #888;
+                    QPushButton:pressed {{
+                        border: 2px solid #00b4d8;
                     }}
                 """)
     
