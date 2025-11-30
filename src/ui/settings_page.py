@@ -173,7 +173,7 @@ class SettingsPage(QWidget):
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(400)
+        panel.setFixedWidth(350)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -291,7 +291,7 @@ class SettingsPage(QWidget):
     def _create_network_panel(self) -> QWidget:
         """Create network configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(400)
+        panel.setFixedWidth(350)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -534,7 +534,7 @@ class SettingsPage(QWidget):
     def _create_backup_panel(self) -> QWidget:
         """Create backup and restore panel"""
         panel = QFrame()
-        panel.setFixedWidth(500)
+        panel.setFixedWidth(350)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
