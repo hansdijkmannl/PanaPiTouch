@@ -849,41 +849,47 @@ class MainWindow(QMainWindow):
         self.drag_mode_btn.clicked.connect(self._toggle_drag_mode)
         frame_guide_layout.addWidget(self.drag_mode_btn)
         
-        # Save custom button
-        save_custom_btn = QPushButton("💾 Save as Custom")
-        save_custom_btn.setFixedHeight(28)
+        # Save and Clear buttons - side by side
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+        
+        save_custom_btn = QPushButton("💾 Save")
+        save_custom_btn.setFixedHeight(36)
         save_custom_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 6px;
                 color: {COLORS['text']};
-                font-size: 10px;
+                font-size: 12px;
+                font-weight: 600;
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['primary']};
             }}
         """)
         save_custom_btn.clicked.connect(self._save_custom_frame_guide)
-        frame_guide_layout.addWidget(save_custom_btn)
+        btn_row.addWidget(save_custom_btn)
         
-        # Clear button
-        clear_guide_btn = QPushButton("✕ Clear Guide")
-        clear_guide_btn.setFixedHeight(28)
+        clear_guide_btn = QPushButton("✕ Clear")
+        clear_guide_btn.setFixedHeight(36)
         clear_guide_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
+                border-radius: 6px;
                 color: {COLORS['text']};
-                font-size: 10px;
+                font-size: 12px;
+                font-weight: 600;
             }}
             QPushButton:pressed {{
                 background-color: #ff4444;
             }}
         """)
         clear_guide_btn.clicked.connect(self._clear_frame_guide)
-        frame_guide_layout.addWidget(clear_guide_btn)
+        btn_row.addWidget(clear_guide_btn)
+        
+        frame_guide_layout.addLayout(btn_row)
         
         self.frame_guide_panel.setVisible(False)
         layout.addWidget(self.frame_guide_panel)
@@ -1131,9 +1137,18 @@ class MainWindow(QMainWindow):
         
         if ok and name:
             if self.preview_widget.frame_guide.save_current_as_custom(name):
-                # Refresh category if on Custom
-                if self.frame_category_combo.currentText() == "Custom":
-                    self._on_frame_category_changed("Custom")
+                # Uncheck Custom Frame button and disable drag mode
+                self.drag_mode_btn.setChecked(False)
+                self.preview_widget.frame_guide.disable_drag_mode()
+                
+                # Switch to Custom category and select the saved guide
+                self.frame_category_combo.setCurrentText("Custom")
+                self._on_frame_category_changed("Custom")
+                
+                # Select the newly saved guide in the template dropdown
+                index = self.frame_template_combo.findText(name)
+                if index >= 0:
+                    self.frame_template_combo.setCurrentIndex(index)
     
     def _clear_frame_guide(self):
         """Clear the active frame guide"""

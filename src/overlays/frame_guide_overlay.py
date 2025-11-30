@@ -63,7 +63,7 @@ class FrameGuideOverlay:
         self.line_thickness = 4  # Doubled from 2
         self.line_opacity = 0.8
         self.fill_opacity = 0.3  # Darken outside areas
-        self.show_label = True
+        self.show_label = False  # Don't show label text
         
         # Drag/resize state
         self.drag_mode = False
@@ -157,28 +157,34 @@ class FrameGuideOverlay:
     
     def save_current_as_custom(self, name: str) -> bool:
         """Save current guide as a custom preset"""
-        if self.active_guide is None:
+        # Get aspect ratio from custom rect if in drag mode, otherwise from active guide
+        if self.drag_mode and self.custom_rect is not None:
+            # Calculate aspect ratio from custom rect
+            w, h = self.custom_rect[2], self.custom_rect[3]
+            if h <= 0:
+                return False
+            aspect_ratio = (float(w), float(h))
+        elif self.active_guide is not None:
+            aspect_ratio = self.active_guide.aspect_ratio
+        else:
             return False
         
-        # Check if name already exists
+        new_guide = FrameGuide(
+            name=name,
+            aspect_ratio=aspect_ratio,
+            color=self.line_color,
+            is_custom=True
+        )
+        
+        # Check if name already exists - update it
         for i, guide in enumerate(self.custom_guides):
             if guide.name == name:
-                self.custom_guides[i] = FrameGuide(
-                    name=name,
-                    aspect_ratio=self.active_guide.aspect_ratio,
-                    color=self.line_color,
-                    is_custom=True
-                )
+                self.custom_guides[i] = new_guide
                 self._save_custom_guides()
                 return True
         
         # Add new custom guide
-        self.custom_guides.append(FrameGuide(
-            name=name,
-            aspect_ratio=self.active_guide.aspect_ratio,
-            color=self.line_color,
-            is_custom=True
-        ))
+        self.custom_guides.append(new_guide)
         self._save_custom_guides()
         return True
     
