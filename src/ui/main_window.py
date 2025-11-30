@@ -420,6 +420,74 @@ class MainWindow(QMainWindow):
             }}
         """
         
+        # Shared touch-friendly combo box style
+        from PyQt6.QtWidgets import QComboBox, QListView
+        touch_combo_style = f"""
+            QComboBox {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 8px;
+                color: {COLORS['text']};
+                font-size: 11px;
+                min-height: 20px;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 24px;
+                background-color: {COLORS['surface']};
+            }}
+            QComboBox::down-arrow {{
+                width: 12px;
+                height: 12px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['surface']};
+                border: none;
+                color: {COLORS['text']};
+                selection-background-color: {COLORS['primary']};
+                padding: 2px;
+                outline: none;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 36px;
+                padding: 6px 8px;
+                font-size: 11px;
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+            }}
+            QComboBox QAbstractItemView::item:hover {{
+                background-color: {COLORS['surface_light']};
+            }}
+            QComboBox QAbstractItemView::item:selected {{
+                background-color: {COLORS['primary']};
+            }}
+        """
+        
+        def setup_combo_view(combo: QComboBox):
+            """Set up a dark styled view for combo box"""
+            view = QListView()
+            view.setStyleSheet(f"""
+                QListView {{
+                    background-color: {COLORS['surface']};
+                    border: none;
+                    outline: none;
+                }}
+                QListView::item {{
+                    background-color: {COLORS['surface']};
+                    color: {COLORS['text']};
+                    min-height: 36px;
+                    padding: 6px 8px;
+                }}
+                QListView::item:hover {{
+                    background-color: {COLORS['surface_light']};
+                }}
+                QListView::item:selected {{
+                    background-color: {COLORS['primary']};
+                }}
+            """)
+            combo.setView(view)
+        
         # ===== PTZ Control Toggle Button =====
         self.ptz_toggle_btn = QPushButton("▼ PTZ Control")
         self.ptz_toggle_btn.setCheckable(True)
@@ -796,58 +864,10 @@ class MainWindow(QMainWindow):
         frame_guide_layout.setSpacing(4)
         
         # Template category dropdown - touch friendly
-        from PyQt6.QtWidgets import QComboBox
-        touch_combo_style = f"""
-            QComboBox {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 6px 8px;
-                color: {COLORS['text']};
-                font-size: 11px;
-                min-height: 20px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 24px;
-                background-color: {COLORS['surface']};
-            }}
-            QComboBox::down-arrow {{
-                width: 12px;
-                height: 12px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                color: {COLORS['text']};
-                selection-background-color: {COLORS['primary']};
-                padding: 2px;
-                outline: none;
-            }}
-            QComboBox QAbstractItemView::item {{
-                min-height: 36px;
-                padding: 6px 8px;
-                font-size: 11px;
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-            }}
-            QComboBox QAbstractItemView::item:hover {{
-                background-color: {COLORS['surface_light']};
-            }}
-            QComboBox QAbstractItemView::item:selected {{
-                background-color: {COLORS['primary']};
-            }}
-            QComboBox QListView {{
-                background-color: {COLORS['surface']};
-                color: {COLORS['text']};
-            }}
-            QComboBox QFrame {{
-                background-color: {COLORS['surface']};
-            }}
-        """
         self.frame_category_combo = QComboBox()
         self.frame_category_combo.setFixedHeight(38)
         self.frame_category_combo.setStyleSheet(touch_combo_style)
+        setup_combo_view(self.frame_category_combo)
         self.frame_category_combo.addItems(["Social", "Cinema", "TV/Broadcast", "Custom"])
         self.frame_category_combo.currentTextChanged.connect(self._on_frame_category_changed)
         frame_guide_layout.addWidget(self.frame_category_combo)
@@ -856,51 +876,19 @@ class MainWindow(QMainWindow):
         self.frame_template_combo = QComboBox()
         self.frame_template_combo.setFixedHeight(38)
         self.frame_template_combo.setStyleSheet(touch_combo_style)
+        setup_combo_view(self.frame_template_combo)
         self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
         frame_guide_layout.addWidget(self.frame_template_combo)
         
         # Color picker dropdown for frame guide color - with color strips
-        from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen, QPainterPath
+        from PyQt6.QtGui import QPixmap, QIcon, QColor, QPainter, QBrush, QPen
         from PyQt6.QtCore import QRectF
         
         self.frame_color_combo = QComboBox()
         self.frame_color_combo.setFixedHeight(32)
-        self.frame_color_combo.setIconSize(QSize(140, 24))
-        
-        # Custom style for color dropdown
-        color_combo_style = f"""
-            QComboBox {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 2px 4px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                padding: 4px;
-                outline: none;
-            }}
-            QComboBox QAbstractItemView::item {{
-                min-height: 28px;
-                padding: 2px;
-                background-color: {COLORS['surface']};
-            }}
-            QComboBox QAbstractItemView::item:selected {{
-                background-color: {COLORS['surface_light']};
-            }}
-            QComboBox QAbstractItemView::item:hover {{
-                background-color: {COLORS['surface_light']};
-            }}
-            QComboBox QListView {{
-                background-color: {COLORS['surface']};
-            }}
-        """
-        self.frame_color_combo.setStyleSheet(color_combo_style)
+        self.frame_color_combo.setIconSize(QSize(120, 20))
+        self.frame_color_combo.setStyleSheet(touch_combo_style)
+        setup_combo_view(self.frame_color_combo)
         
         # Store color data for lookup
         self._frame_colors = {
@@ -914,7 +902,7 @@ class MainWindow(QMainWindow):
         # Add color strips as icons with rounded corners
         for name, (bgr, hex_color) in self._frame_colors.items():
             # Create pixmap with transparent background
-            pixmap = QPixmap(140, 24)
+            pixmap = QPixmap(120, 20)
             pixmap.fill(Qt.GlobalColor.transparent)
             
             # Draw rounded rectangle
@@ -922,7 +910,7 @@ class MainWindow(QMainWindow):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setBrush(QBrush(QColor(hex_color)))
             painter.setPen(QPen(QColor("#444444"), 1))
-            painter.drawRoundedRect(QRectF(0, 0, 139, 23), 4, 4)
+            painter.drawRoundedRect(QRectF(0, 0, 119, 19), 4, 4)
             painter.end()
             
             icon = QIcon(pixmap)
@@ -1039,6 +1027,7 @@ class MainWindow(QMainWindow):
         self.split_camera_combo = QComboBox()
         self.split_camera_combo.setFixedHeight(38)
         self.split_camera_combo.setStyleSheet(touch_combo_style)
+        setup_combo_view(self.split_camera_combo)
         split_layout.addWidget(self.split_camera_combo)
         
         # Split mode buttons - side by side
