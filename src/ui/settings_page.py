@@ -6,11 +6,15 @@ Configuration for ATEM, network, and system settings.
 import re
 import subprocess
 import os
+import json
+import shutil
+from pathlib import Path
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit,
     QGroupBox, QFrame, QMessageBox, QComboBox,
-    QScrollArea, QGridLayout
+    QScrollArea, QGridLayout, QInputDialog
 )
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt
 
@@ -72,7 +76,7 @@ class SettingsPage(QWidget):
         top_row.addStretch()
         main_layout.addLayout(top_row)
         
-        # Bottom row - System Info panel
+        # Bottom row - System Info and Backup panels
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(20)
         
@@ -81,6 +85,16 @@ class SettingsPage(QWidget):
         
         bottom_row.addStretch()
         main_layout.addLayout(bottom_row)
+        
+        # Third row - Backup & Restore panel
+        backup_row = QHBoxLayout()
+        backup_row.setSpacing(20)
+        
+        backup_panel = self._create_backup_panel()
+        backup_row.addWidget(backup_panel)
+        
+        backup_row.addStretch()
+        main_layout.addLayout(backup_row)
         
         main_layout.addStretch()
         
@@ -523,6 +537,367 @@ class SettingsPage(QWidget):
         layout.addWidget(temp_frame)
         
         return panel
+    
+    def _create_backup_panel(self) -> QWidget:
+        """Create backup and restore panel"""
+        panel = QFrame()
+        panel.setFixedWidth(500)
+        panel.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        
+        # Header with icon
+        header_layout = QHBoxLayout()
+        header_icon = QLabel("💾")
+        header_icon.setStyleSheet("font-size: 24px; border: none;")
+        header_layout.addWidget(header_icon)
+        header = QLabel("Backup & Restore")
+        header.setStyleSheet("font-size: 20px; font-weight: 600; border: none; color: #ffffff;")
+        header_layout.addWidget(header)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+        
+        # Info
+        info_label = QLabel("Save and restore your camera configurations and settings.")
+        info_label.setStyleSheet("color: #888898; border: none; font-size: 13px;")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        # Create backup section
+        create_frame = QFrame()
+        create_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+            }
+        """)
+        create_layout = QVBoxLayout(create_frame)
+        create_layout.setContentsMargins(16, 12, 16, 12)
+        create_layout.setSpacing(10)
+        
+        create_header = QLabel("Create New Backup")
+        create_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
+        create_layout.addWidget(create_header)
+        
+        # Name input row
+        name_row = QHBoxLayout()
+        name_row.setSpacing(10)
+        
+        self.backup_name_input = QLineEdit()
+        self.backup_name_input.setPlaceholderText("Enter backup name (e.g., 'Working setup')")
+        self.backup_name_input.setStyleSheet(self._get_input_style())
+        name_row.addWidget(self.backup_name_input, 1)
+        
+        create_btn = QPushButton("Create Backup")
+        create_btn.setStyleSheet(self._get_button_style(primary=True))
+        create_btn.setFixedWidth(140)
+        create_btn.clicked.connect(self._create_backup)
+        name_row.addWidget(create_btn)
+        
+        create_layout.addLayout(name_row)
+        layout.addWidget(create_frame)
+        
+        # Restore section
+        restore_frame = QFrame()
+        restore_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+            }
+        """)
+        restore_layout = QVBoxLayout(restore_frame)
+        restore_layout.setContentsMargins(16, 12, 16, 12)
+        restore_layout.setSpacing(10)
+        
+        restore_header = QLabel("Restore from Backup")
+        restore_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
+        restore_layout.addWidget(restore_header)
+        
+        # Backup dropdown row
+        dropdown_row = QHBoxLayout()
+        dropdown_row.setSpacing(10)
+        
+        self.backup_combo = QComboBox()
+        self.backup_combo.setStyleSheet(self._get_input_style())
+        self.backup_combo.setMinimumWidth(250)
+        dropdown_row.addWidget(self.backup_combo, 1)
+        
+        refresh_btn = QPushButton("⟳")
+        refresh_btn.setFixedSize(44, 44)
+        refresh_btn.setToolTip("Refresh backup list")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: none;
+                border-radius: 8px;
+                font-size: 16px;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+            }
+        """)
+        refresh_btn.clicked.connect(self._refresh_backup_list)
+        dropdown_row.addWidget(refresh_btn)
+        
+        restore_layout.addLayout(dropdown_row)
+        
+        # Action buttons row
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        
+        restore_btn = QPushButton("Restore Selected")
+        restore_btn.setStyleSheet(self._get_button_style(primary=True))
+        restore_btn.clicked.connect(self._restore_backup)
+        action_row.addWidget(restore_btn)
+        
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 2px solid #ef4444;
+                border-radius: 8px;
+                color: #ef4444;
+                font-size: 14px;
+                font-weight: 500;
+                padding: 12px 20px;
+                min-height: 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.2);
+            }
+            QPushButton:pressed {
+                background-color: rgba(239, 68, 68, 0.3);
+            }
+        """)
+        delete_btn.clicked.connect(self._delete_backup)
+        action_row.addWidget(delete_btn)
+        
+        action_row.addStretch()
+        restore_layout.addLayout(action_row)
+        
+        layout.addWidget(restore_frame)
+        
+        # Status
+        self.backup_status_label = QLabel("● Ready")
+        self.backup_status_label.setStyleSheet("""
+            QLabel {
+                padding: 10px 16px;
+                border-radius: 8px;
+                background-color: rgba(34, 197, 94, 0.15);
+                color: #22c55e;
+                border: 1px solid rgba(34, 197, 94, 0.3);
+                font-size: 13px;
+            }
+        """)
+        layout.addWidget(self.backup_status_label)
+        
+        layout.addStretch()
+        
+        # Initialize backup list
+        self._refresh_backup_list()
+        
+        return panel
+    
+    def _get_backup_dir(self) -> Path:
+        """Get backup directory, create if doesn't exist"""
+        backup_dir = Path.home() / ".panapitouch" / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        return backup_dir
+    
+    def _refresh_backup_list(self):
+        """Refresh the backup dropdown list"""
+        self.backup_combo.clear()
+        
+        backup_dir = self._get_backup_dir()
+        backups = list(backup_dir.glob("*.json"))
+        
+        if not backups:
+            self.backup_combo.addItem("No backups found", None)
+            return
+        
+        # Sort by modification time, newest first
+        backups.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        
+        for backup_file in backups:
+            # Get friendly name from filename
+            name = backup_file.stem  # filename without .json
+            
+            # Get modification time
+            mtime = datetime.fromtimestamp(backup_file.stat().st_mtime)
+            date_str = mtime.strftime("%b %d, %Y %H:%M")
+            
+            # Display as "Name (Date)"
+            display_name = f"{name}  •  {date_str}"
+            self.backup_combo.addItem(display_name, str(backup_file))
+    
+    def _create_backup(self):
+        """Create a new backup with custom name"""
+        name = self.backup_name_input.text().strip()
+        
+        if not name:
+            QMessageBox.warning(self, "Error", "Please enter a backup name")
+            return
+        
+        # Sanitize filename
+        safe_name = re.sub(r'[^\w\s-]', '', name).strip()
+        safe_name = re.sub(r'[-\s]+', '_', safe_name)
+        
+        if not safe_name:
+            QMessageBox.warning(self, "Error", "Please enter a valid backup name")
+            return
+        
+        backup_dir = self._get_backup_dir()
+        backup_file = backup_dir / f"{safe_name}.json"
+        
+        # Check if exists
+        if backup_file.exists():
+            reply = QMessageBox.question(
+                self,
+                "Backup Exists",
+                f"A backup named '{name}' already exists.\n\nDo you want to overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        
+        try:
+            # Create backup data
+            backup_data = {
+                "version": "1.0",
+                "created": datetime.now().isoformat(),
+                "name": name,
+                "settings": self.settings.to_dict()
+            }
+            
+            # Write backup file
+            with open(backup_file, 'w') as f:
+                json.dump(backup_data, f, indent=2)
+            
+            self._set_backup_status(f"Backup '{name}' created", "success")
+            self.backup_name_input.clear()
+            self._refresh_backup_list()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to create backup:\n{str(e)}")
+            self._set_backup_status("Backup failed", "error")
+    
+    def _restore_backup(self):
+        """Restore selected backup"""
+        backup_path = self.backup_combo.currentData()
+        
+        if not backup_path:
+            QMessageBox.warning(self, "Error", "Please select a backup to restore")
+            return
+        
+        backup_file = Path(backup_path)
+        if not backup_file.exists():
+            QMessageBox.warning(self, "Error", "Backup file not found")
+            self._refresh_backup_list()
+            return
+        
+        # Confirm restore
+        reply = QMessageBox.question(
+            self,
+            "Restore Backup",
+            f"This will replace your current settings with the backup.\n\n"
+            "Your current settings will be lost.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            # Read backup
+            with open(backup_file, 'r') as f:
+                backup_data = json.load(f)
+            
+            # Restore settings
+            if "settings" in backup_data:
+                self.settings.load_from_dict(backup_data["settings"])
+                self.settings.save()
+                
+                # Reload UI
+                self._load_settings()
+                
+                self._set_backup_status(f"Restored from backup", "success")
+                self.settings_changed.emit()
+                
+                QMessageBox.information(
+                    self, 
+                    "Restore Complete", 
+                    "Settings have been restored successfully.\n\n"
+                    "Some changes may require restarting the app."
+                )
+            else:
+                QMessageBox.warning(self, "Error", "Invalid backup file format")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to restore backup:\n{str(e)}")
+            self._set_backup_status("Restore failed", "error")
+    
+    def _delete_backup(self):
+        """Delete selected backup"""
+        backup_path = self.backup_combo.currentData()
+        
+        if not backup_path:
+            QMessageBox.warning(self, "Error", "Please select a backup to delete")
+            return
+        
+        backup_file = Path(backup_path)
+        backup_name = backup_file.stem
+        
+        reply = QMessageBox.question(
+            self,
+            "Delete Backup",
+            f"Are you sure you want to delete '{backup_name}'?\n\n"
+            "This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        try:
+            backup_file.unlink()
+            self._set_backup_status(f"Deleted '{backup_name}'", "success")
+            self._refresh_backup_list()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to delete backup:\n{str(e)}")
+            self._set_backup_status("Delete failed", "error")
+    
+    def _set_backup_status(self, text, status_type="info"):
+        """Set backup status label with appropriate styling"""
+        colors = {
+            "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
+            "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
+            "info": ("#00b4d8", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
+        }
+        text_color, bg_color, border_color = colors.get(status_type, colors["info"])
+        
+        self.backup_status_label.setText(f"● {text}")
+        self.backup_status_label.setStyleSheet(f"""
+            QLabel {{
+                padding: 10px 16px;
+                border-radius: 8px;
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                font-size: 13px;
+            }}
+        """)
     
     def _start_system_monitor(self):
         """Start periodic system info updates"""

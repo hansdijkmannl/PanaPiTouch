@@ -173,4 +173,61 @@ class Settings:
                 self.cameras[i] = camera
                 self.save()
                 return
+    
+    def to_dict(self) -> dict:
+        """Convert settings to dictionary for backup"""
+        return {
+            'cameras': [
+                {
+                    'id': cam.id,
+                    'name': cam.name,
+                    'ip_address': cam.ip_address,
+                    'port': cam.port,
+                    'username': cam.username,
+                    'password': cam.password,
+                    'enabled': cam.enabled,
+                }
+                for cam in self.cameras
+            ],
+            'atem': {
+                'ip_address': self.atem.ip_address,
+                'enabled': self.atem.enabled,
+                'input_mapping': self.atem.input_mapping,
+            },
+            'selected_camera': self.selected_camera,
+            'companion_url': self.companion_url,
+            'fullscreen': self.fullscreen,
+            'display_width': self.display_width,
+            'display_height': self.display_height,
+            'native_width': self.native_width,
+            'native_height': self.native_height,
+            'preview_width': self.preview_width,
+            'preview_height': self.preview_height,
+        }
+    
+    def load_from_dict(self, data: dict):
+        """Load settings from dictionary (for restore from backup)"""
+        # Load cameras
+        self.cameras = []
+        for cam_data in data.get('cameras', []):
+            self.cameras.append(CameraConfig(**cam_data))
+        
+        # Load ATEM settings
+        atem_data = data.get('atem', {})
+        self.atem = ATEMConfig(
+            ip_address=atem_data.get('ip_address', ''),
+            enabled=atem_data.get('enabled', False),
+            input_mapping=atem_data.get('input_mapping', {})
+        )
+        
+        # Load other settings
+        self.selected_camera = data.get('selected_camera', 0)
+        self.companion_url = data.get('companion_url', 'http://localhost:8000')
+        self.fullscreen = data.get('fullscreen', False)
+        self.display_width = data.get('display_width', 1600)
+        self.display_height = data.get('display_height', 1000)
+        self.native_width = data.get('native_width', 2560)
+        self.native_height = data.get('native_height', 1600)
+        self.preview_width = data.get('preview_width', 1920)
+        self.preview_height = data.get('preview_height', 1080)
 
