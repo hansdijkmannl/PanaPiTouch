@@ -173,7 +173,7 @@ class SettingsPage(QWidget):
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(350)
+        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -291,7 +291,7 @@ class SettingsPage(QWidget):
     def _create_network_panel(self) -> QWidget:
         """Create network configuration panel"""
         panel = QFrame()
-        panel.setFixedWidth(350)
+        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -534,7 +534,7 @@ class SettingsPage(QWidget):
     def _create_backup_panel(self) -> QWidget:
         """Create backup and restore panel"""
         panel = QFrame()
-        panel.setFixedWidth(350)
+        panel.setFixedWidth(370)
         panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
@@ -581,22 +581,20 @@ class SettingsPage(QWidget):
         create_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
         create_layout.addWidget(create_header)
         
-        # Name input row
-        name_row = QHBoxLayout()
-        name_row.setSpacing(10)
+        # Name label and input
+        name_label = QLabel("Name:")
+        name_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
+        create_layout.addWidget(name_label)
         
         self.backup_name_input = QLineEdit()
-        self.backup_name_input.setPlaceholderText("Enter backup name (e.g., 'Working setup')")
+        self.backup_name_input.setPlaceholderText("e.g., Working setup")
         self.backup_name_input.setStyleSheet(self._get_input_style())
-        name_row.addWidget(self.backup_name_input, 1)
+        create_layout.addWidget(self.backup_name_input)
         
         create_btn = QPushButton("Create Backup")
         create_btn.setStyleSheet(self._get_button_style(primary=True))
-        create_btn.setFixedWidth(140)
         create_btn.clicked.connect(self._create_backup)
-        name_row.addWidget(create_btn)
-        
-        create_layout.addLayout(name_row)
+        create_layout.addWidget(create_btn)
         layout.addWidget(create_frame)
         
         # Restore section
