@@ -211,7 +211,6 @@ class CameraListItem(QFrame):
     """Enhanced camera list item with status indicators and actions"""
     
     edit_clicked = pyqtSignal(int)
-    identify_clicked = pyqtSignal(str, str, str)  # ip, username, password
     selection_changed = pyqtSignal(int, bool)  # camera_id, selected
     
     def __init__(self, camera: CameraConfig, atem_input: int, parent=None):
@@ -323,38 +322,9 @@ class CameraListItem(QFrame):
         
         layout.addLayout(info_layout, stretch=1)
         
-        # Button container for Identify and Edit
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(8)
-        
-        # Identify button - blink camera LED
-        identify_btn = QPushButton("💡")
-        identify_btn.setFixedSize(40, 40)
-        identify_btn.setToolTip("Identify camera (blink LED)")
-        identify_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: none;
-                border-radius: 6px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
-            }
-            QPushButton:pressed {
-                background-color: #4a4a58;
-            }
-        """)
-        identify_btn.clicked.connect(lambda: self.identify_clicked.emit(
-            self.camera.ip_address, 
-            self.camera.username or "admin", 
-            self.camera.password or "12345"
-        ))
-        btn_layout.addWidget(identify_btn)
-        
         # Edit button - centered vertically
         edit_btn = QPushButton("Edit")
-        edit_btn.setFixedSize(60, 40)
+        edit_btn.setFixedSize(80, 40)
         edit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #00b4d8;
@@ -364,14 +334,9 @@ class CameraListItem(QFrame):
                 font-size: 13px;
                 font-weight: 600;
             }
-            QPushButton:hover {
-                background-color: #0099bb;
-            }
         """)
         edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.camera.id))
-        btn_layout.addWidget(edit_btn)
-        
-        layout.addLayout(btn_layout)
+        layout.addWidget(edit_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
         
         self.setStyleSheet("""
             CameraListItem {
@@ -1188,7 +1153,6 @@ class CameraPage(QWidget):
             item = CameraListItem(camera, atem_input)
             item.edit_clicked.connect(self._edit_camera)
             item.selection_changed.connect(self._on_camera_selection_changed)
-            item.identify_clicked.connect(self._on_identify_configured_camera)
             self._camera_items[camera.id] = item
             self.camera_list_layout.addWidget(item)
             
@@ -1526,20 +1490,6 @@ class CameraPage(QWidget):
         else:
             self.discovery_status.setText("Ready to scan or add manually")
             self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
-    
-    def _on_identify_configured_camera(self, ip_address: str, username: str, password: str):
-        """Handle identify button click on configured camera list item"""
-        from src.camera.discovery import CameraDiscovery
-        
-        # Run identify in background
-        def identify_task():
-            success = CameraDiscovery.identify_camera(ip_address, username, password, duration=5)
-            return success
-        
-        import concurrent.futures
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        executor.submit(identify_task)
-        # Fire and forget - visual feedback is on the camera itself
     
     def _fetch_discovery_thumbnail(self, ip_address: str, card: 'DiscoveredCameraCard'):
         """Fetch thumbnail for discovered camera in background"""
