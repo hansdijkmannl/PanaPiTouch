@@ -896,7 +896,7 @@ class MainWindow(QMainWindow):
         frame_guide_layout.addLayout(btn_row)
         
         # Add spacing at bottom
-        frame_guide_layout.addSpacing(8)
+        frame_guide_layout.addSpacing(15)
         
         self.frame_guide_panel.setVisible(False)
         layout.addWidget(self.frame_guide_panel)
@@ -994,7 +994,7 @@ class MainWindow(QMainWindow):
         split_layout.addWidget(self.split_enable_btn)
         
         # Add spacing at bottom
-        split_layout.addSpacing(8)
+        split_layout.addSpacing(15)
         
         self.split_panel.setVisible(False)
         layout.addWidget(self.split_panel)
@@ -1098,6 +1098,10 @@ class MainWindow(QMainWindow):
         visible = self.frame_guide_toggle_btn.isChecked()
         self.frame_guide_panel.setVisible(visible)
         self.frame_guide_toggle_btn.setText("▲ Frame Guides" if visible else "▼ Frame Guides")
+        
+        # When opening, enable the last used frame guide if one exists
+        if visible and self.preview_widget.frame_guide.active_guide is not None:
+            self.preview_widget.frame_guide.enabled = True
     
     def _toggle_split_panel(self):
         """Toggle Split Compare panel visibility"""

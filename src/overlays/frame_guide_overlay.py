@@ -166,8 +166,9 @@ class FrameGuideOverlay:
     
     def save_current_as_custom(self, name: str) -> bool:
         """Save current guide as a custom preset"""
-        # Get aspect ratio and custom rect from drag mode if active
-        if self.drag_mode and self.custom_rect is not None:
+        # Priority: Save custom_rect if it exists (even if drag_mode is off)
+        # This ensures we save the actual dragged frame, not a default
+        if self.custom_rect is not None:
             # Save the normalized custom_rect for exact positioning
             custom_rect = self.custom_rect
             # Calculate aspect ratio from custom rect (normalized values represent relative size)
@@ -176,6 +177,7 @@ class FrameGuideOverlay:
                 return False
             aspect_ratio = (float(w), float(h))
         elif self.active_guide is not None:
+            # Fallback to active guide's aspect ratio if no custom_rect
             aspect_ratio = self.active_guide.aspect_ratio
             custom_rect = None
         else:
