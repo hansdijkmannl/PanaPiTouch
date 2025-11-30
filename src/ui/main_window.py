@@ -189,7 +189,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(nav_buttons_container)
         
         # Companion update button (hidden by default, shown when update available)
-        self.companion_update_btn = QPushButton("⬆️ Update")
+        self.companion_update_btn = QPushButton("⬆️ Companion Update")
         self.companion_update_btn.setFixedHeight(50)
         self.companion_update_btn.setToolTip("Companion update available")
         self.companion_update_btn.setStyleSheet(f"""
@@ -1324,7 +1324,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(str)
     def _on_companion_update_available(self, version: str):
         """Handle companion update available signal"""
-        self.companion_update_btn.setText(f"⬆️ v{version}")
+        self.companion_update_btn.setText(f"⬆️ Companion Update")
         self.companion_update_btn.setToolTip(f"Update Companion to v{version}")
         self.companion_update_btn.show()
     
