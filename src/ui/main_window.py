@@ -1849,6 +1849,10 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_nav_clicked(self, page_idx: int):
         """Handle navigation button click"""
+        # Hide keyboard when switching pages
+        if self.keyboard_manager:
+            self.keyboard_manager._hide_keyboard()
+        
         self.page_stack.setCurrentIndex(page_idx)
         # Refresh keyboard manager to find new line edits
         if self.keyboard_manager:

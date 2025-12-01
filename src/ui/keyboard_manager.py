@@ -45,7 +45,7 @@ class KeyboardManager(QObject):
         self.keyboard_container.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLORS['surface']};
-                border-top: 2px solid {COLORS['primary']};
+                border-top: 1px solid {COLORS['border']};
             }}
         """)
         
@@ -131,7 +131,7 @@ class KeyboardManager(QObject):
             keyboard.space_pressed.connect(self._on_space)
     
     def eventFilter(self, obj, event):
-        """Filter events to detect QLineEdit focus and parent resize"""
+        """Filter events to detect QLineEdit focus, parent resize, and clicks outside keyboard"""
         from PyQt6.QtCore import QEvent
         
         if event.type() == QEvent.Type.FocusIn:
@@ -145,6 +145,24 @@ class KeyboardManager(QObject):
             # Reposition keyboard when parent resizes
             if obj == self._parent_widget_for_positioning and self.keyboard_container and self.keyboard_container.isVisible():
                 QTimer.singleShot(10, self._position_keyboard)
+        elif event.type() == QEvent.Type.MouseButtonPress:
+            # Hide keyboard when clicking outside of it
+            if self.keyboard_container and self.keyboard_container.isVisible():
+                # Check if click is outside the keyboard container
+                if hasattr(event, 'globalPosition'):
+                    click_pos = event.globalPosition().toPoint()
+                else:
+                    click_pos = event.globalPos()
+                
+                keyboard_rect = self.keyboard_container.geometry()
+                keyboard_global = self.keyboard_container.mapToGlobal(keyboard_rect.topLeft())
+                keyboard_rect.moveTopLeft(keyboard_global)
+                
+                if not keyboard_rect.contains(click_pos):
+                    # Also check if click is not on a QLineEdit
+                    clicked_widget = obj
+                    if not isinstance(clicked_widget, QLineEdit):
+                        self._hide_keyboard()
         
         return super().eventFilter(obj, event)
     
