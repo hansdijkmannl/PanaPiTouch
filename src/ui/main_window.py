@@ -247,38 +247,8 @@ class MainWindow(QMainWindow):
             }}
         """)
         
-        # Create dropdown menu
-        system_menu = QMenu(system_menu_btn)
-        system_menu.setStyleSheet(f"""
-            QMenu {{
-                background-color: {COLORS['surface']};
-                border: 2px solid {COLORS['border']};
-                border-radius: 8px;
-                padding: 4px;
-            }}
-            QMenu::item {{
-                padding: 12px 24px;
-                border-radius: 6px;
-                color: {COLORS['text']};
-                font-size: 14px;
-                font-weight: 600;
-            }}
-            QMenu::item:selected {{
-                background-color: {COLORS['surface_hover']};
-            }}
-        """)
-        
-        # Add menu actions
-        reboot_action = system_menu.addAction("Reboot")
-        reboot_action.triggered.connect(self._reboot_system)
-        
-        shutdown_action = system_menu.addAction("Shutdown")
-        shutdown_action.triggered.connect(self._shutdown_system)
-        
-        close_action = system_menu.addAction("Close")
-        close_action.triggered.connect(self._confirm_close)
-        
-        system_menu_btn.setMenu(system_menu)
+        # Connect button click to show popup instead of menu
+        system_menu_btn.clicked.connect(self._show_system_popup)
         layout.addWidget(system_menu_btn)
         
         return nav_bar
@@ -2410,6 +2380,33 @@ class MainWindow(QMainWindow):
             self.fps_label.setText(f"{stream.fps:.1f} fps")
         else:
             self.fps_label.setText("-- fps")
+    
+    def _show_system_popup(self):
+        """Show system popup with Reboot, Shutdown, and Close options"""
+        from PyQt6.QtWidgets import QMessageBox
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("System Options")
+        msg.setText("Choose an action:")
+        msg.setIcon(QMessageBox.Icon.Question)
+        
+        reboot_btn = msg.addButton("Reboot", QMessageBox.ButtonRole.AcceptRole)
+        shutdown_btn = msg.addButton("Shutdown", QMessageBox.ButtonRole.AcceptRole)
+        close_btn = msg.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
+        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        
+        msg.setDefaultButton(cancel_btn)
+        msg.exec()
+        
+        clicked = msg.clickedButton()
+        
+        if clicked == reboot_btn:
+            self._reboot_system()
+        elif clicked == shutdown_btn:
+            self._shutdown_system()
+        elif clicked == close_btn:
+            self._confirm_close()
+        # If cancel, do nothing
     
     def _confirm_close(self):
         """Show confirmation dialog before closing"""

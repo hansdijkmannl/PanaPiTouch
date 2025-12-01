@@ -617,7 +617,7 @@ class SettingsPage(QWidget):
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
         
-        restore_btn = QPushButton("Restore Selected")
+        restore_btn = QPushButton("Restore")
         restore_btn.setStyleSheet(self._get_button_style(primary=True))
         restore_btn.clicked.connect(self._restore_backup)
         action_row.addWidget(restore_btn)
