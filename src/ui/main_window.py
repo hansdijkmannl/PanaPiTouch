@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(80, 28)
+        self.osd_on_btn.setFixedSize(80, 20)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(80, 28)
+        self.osd_off_btn.setFixedSize(80, 20)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -658,8 +658,8 @@ class MainWindow(QMainWindow):
         
         osd_layout.addWidget(onoff_container)
         
-        # Spacing after ON/OFF
-        osd_layout.addSpacing(8)
+        # Spacing after ON/OFF (10px margin at bottom)
+        osd_layout.addSpacing(10)
         
         # ===== D-Pad Navigation with OK in center =====
         dpad_total_width = 160  # Fixed container width
@@ -963,7 +963,7 @@ class MainWindow(QMainWindow):
         color_row = QWidget()
         color_row.setFixedHeight(45)
         color_row_layout = QHBoxLayout(color_row)
-        color_row_layout.setContentsMargins(0, 10, 0, 10)
+        color_row_layout.setContentsMargins(0, 5, 0, 20)
         color_row_layout.setSpacing(8)
         color_row_layout.addStretch()
         
