@@ -757,40 +757,43 @@ class MainWindow(QMainWindow):
         osd_btn_row.addStretch()
         osd_layout.addLayout(osd_btn_row)
         
-        # Scene File picker
+        # Scene File picker (touch-friendly)
         osd_layout.addSpacing(15)
-        scene_label = QLabel("Scene File")
-        scene_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 600;")
-        osd_layout.addWidget(scene_label)
         
         self.scene_combo = QComboBox()
         self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
-        self.scene_combo.setFixedHeight(32)
+        self.scene_combo.setFixedHeight(44)
         self.scene_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 14px;
+                font-weight: 600;
                 color: {COLORS['text']};
             }}
             QComboBox::drop-down {{
                 border: none;
-                width: 20px;
+                width: 30px;
             }}
             QComboBox::down-arrow {{
                 image: none;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 6px solid {COLORS['text']};
-                margin-right: 8px;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-top: 8px solid {COLORS['text']};
+                margin-right: 10px;
             }}
             QComboBox QAbstractItemView {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 selection-background-color: {COLORS['primary']};
                 color: {COLORS['text']};
+                padding: 4px;
+            }}
+            QComboBox QAbstractItemView::item {{
+                min-height: 36px;
+                padding: 8px;
             }}
         """)
         self.scene_combo.currentIndexChanged.connect(self._on_scene_changed)
