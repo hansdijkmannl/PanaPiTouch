@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(80, 25)
+        self.osd_on_btn.setFixedSize(80, 28)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(80, 25)
+        self.osd_off_btn.setFixedSize(80, 28)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -961,10 +961,9 @@ class MainWindow(QMainWindow):
         }
         
         color_row = QWidget()
-        color_row.setMinimumHeight(40)
-        color_row.setMaximumHeight(40)
+        color_row.setFixedHeight(45)
         color_row_layout = QHBoxLayout(color_row)
-        color_row_layout.setContentsMargins(0, 8, 0, 8)
+        color_row_layout.setContentsMargins(0, 10, 0, 10)
         color_row_layout.setSpacing(8)
         color_row_layout.addStretch()
         
