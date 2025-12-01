@@ -1984,7 +1984,6 @@ class MainWindow(QMainWindow):
         if self._multiview_active:
             self.preview_widget.update_frame(frame)
     
-    
     def _select_camera(self, camera_id: int):
         """Select a camera to preview"""
         # Stop current stream

@@ -110,7 +110,7 @@ class SettingsPage(QWidget):
                 min-height: 20px;
             }
             QLineEdit:focus, QComboBox:focus {
-                border-color: #00b4d8;
+                border-color: #FF9500;
             }
             QLineEdit::placeholder {
                 color: #666676;
@@ -122,7 +122,7 @@ class SettingsPage(QWidget):
             QComboBox QAbstractItemView {
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
-                selection-background-color: #00b4d8;
+                selection-background-color: #FF9500;
                 color: #FFFFFF;
             }
         """
@@ -132,7 +132,7 @@ class SettingsPage(QWidget):
         if primary:
             return """
                 QPushButton {
-                    background-color: #00b4d8;
+                    background-color: #FF9500;
                     border: none;
                     border-radius: 8px;
                     color: #0a0a0f;
@@ -142,10 +142,10 @@ class SettingsPage(QWidget):
                     min-height: 20px;
                 }
                 QPushButton:hover {
-                    background-color: #0099bb;
+                    background-color: #CC7700;
                 }
                 QPushButton:pressed {
-                    background-color: #007799;
+                    background-color: #AA6600;
                 }
             """
         else:
@@ -161,7 +161,7 @@ class SettingsPage(QWidget):
                     min-height: 20px;
                 }
                 QPushButton:hover {
-                    border-color: #00b4d8;
+                    border-color: #FF9500;
                     background-color: #3a3a48;
                 }
                 QPushButton:pressed {
@@ -220,7 +220,7 @@ class SettingsPage(QWidget):
                 padding: 10px 16px;
                 border-radius: 8px;
                 background-color: rgba(0, 180, 216, 0.15);
-                color: #00b4d8;
+                color: #FF9500;
                 border: 1px solid rgba(0, 180, 216, 0.3);
                 font-size: 13px;
             }
@@ -842,7 +842,7 @@ class SettingsPage(QWidget):
         colors = {
             "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
             "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#00b4d8", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
+            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
         }
         text_color, bg_color, border_color = colors.get(status_type, colors["info"])
         
@@ -1053,7 +1053,7 @@ class SettingsPage(QWidget):
         colors = {
             "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
             "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#00b4d8", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
+            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
         }
         text_color, bg_color, border_color = colors.get(status_type, colors["info"])
         
@@ -1074,7 +1074,7 @@ class SettingsPage(QWidget):
         colors = {
             "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
             "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#00b4d8", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
+            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
         }
         text_color, bg_color, border_color = colors.get(status_type, colors["info"])
         

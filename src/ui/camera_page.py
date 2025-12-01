@@ -73,7 +73,7 @@ class DiscoveredCameraCard(QFrame):
                 border-radius: 8px;
             }
             QFrame:hover {
-                border-color: #00b4d8;
+                border-color: #FF9500;
             }
         """)
         
@@ -179,7 +179,7 @@ class DiscoveredCameraCard(QFrame):
         add_btn.setToolTip("Add to form")
         add_btn.setStyleSheet("""
             QPushButton {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 border: none;
                 border-radius: 6px;
                 color: #0a0a0f;
@@ -187,10 +187,10 @@ class DiscoveredCameraCard(QFrame):
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #0099bb;
+                background-color: #CC7700;
             }
             QPushButton:pressed {
-                background-color: #007799;
+                background-color: #AA6600;
             }
         """)
         add_btn.clicked.connect(lambda: self.add_clicked.emit(self.camera))
@@ -327,7 +327,7 @@ class CameraListItem(QFrame):
         edit_btn.setFixedSize(80, 40)
         edit_btn.setStyleSheet("""
             QPushButton {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 border: none;
                 border-radius: 6px;
                 color: #0a0a0f;
@@ -438,13 +438,13 @@ class CameraListItem(QFrame):
             self.status_indicator.setStyleSheet("""
                 QLabel {
                     font-size: 16px;
-                    color: #00b4d8;
+                    color: #FF9500;
                     background-color: transparent;
                     border: none;
                 }
             """)
             self.status_label.setText("Status: Testing...")
-            self.status_label.setStyleSheet("color: #00b4d8; font-size: 11px;")
+            self.status_label.setStyleSheet("color: #FF9500; font-size: 11px;")
         else:  # unknown
             self.status_indicator.setStyleSheet("""
                 QLabel {
@@ -550,7 +550,7 @@ class CameraPage(QWidget):
         self.discover_btn.setFixedHeight(50)
         self.discover_btn.setStyleSheet("""
             QPushButton {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 border: none;
                 border-radius: 8px;
                 color: #0a0a0f;
@@ -579,14 +579,14 @@ class CameraPage(QWidget):
                 font-weight: 600;
             }
             QPushButton:checked {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 color: #0a0a0f;
             }
             QPushButton:hover {
                 background-color: #3a3a48;
             }
             QPushButton:checked:hover {
-                background-color: #0099bb;
+                background-color: #CC7700;
             }
         """)
         self.manual_toggle_btn.toggled.connect(self._toggle_manual_form)
@@ -607,7 +607,7 @@ class CameraPage(QWidget):
                 height: 24px;
             }
             QProgressBar::chunk {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 border-radius: 3px;
             }
         """)
@@ -673,7 +673,7 @@ class CameraPage(QWidget):
                 min-height: 24px;
             }
             QLineEdit:focus, QComboBox:focus {
-                border-color: #00b4d8;
+                border-color: #FF9500;
             }
             QLineEdit::placeholder {
                 color: #666676;
@@ -685,7 +685,7 @@ class CameraPage(QWidget):
             QComboBox QAbstractItemView {
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
-                selection-background-color: #00b4d8;
+                selection-background-color: #FF9500;
                 color: #FFFFFF;
                 padding: 4px;
             }
@@ -694,7 +694,7 @@ class CameraPage(QWidget):
                 padding: 12px 16px;
             }
             QComboBox QAbstractItemView::item:selected {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 color: #0a0a0f;
             }
             QLabel {
@@ -839,7 +839,7 @@ class CameraPage(QWidget):
                 font-weight: 500;
             }
             QPushButton:hover {
-                border-color: #00b4d8;
+                border-color: #FF9500;
                 background-color: #3a3a48;
             }
             QPushButton:disabled {
@@ -856,16 +856,16 @@ class CameraPage(QWidget):
         self.save_camera_btn.setFixedHeight(44)
         self.save_camera_btn.setStyleSheet("""
             QPushButton {
-                background-color: #00b4d8;
-                border: 2px solid #00b4d8;
+                background-color: #FF9500;
+                border: 2px solid #FF9500;
                 border-radius: 8px;
                 color: #0a0a0f;
                 font-size: 13px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #0099bb;
-                border-color: #0099bb;
+                background-color: #CC7700;
+                border-color: #CC7700;
             }
             QPushButton:disabled {
                 background-color: #2a2a38;
@@ -953,7 +953,7 @@ class CameraPage(QWidget):
                 font-size: 12px;
             }
             QProgressBar::chunk {
-                background-color: #00b4d8;
+                background-color: #FF9500;
                 border-radius: 3px;
             }
         """)
@@ -1349,13 +1349,13 @@ class CameraPage(QWidget):
         # Show empty state initially
         self.discovery_empty_label.show()
         self.discovery_empty_label.setText("🔍 Searching network for Panasonic cameras...")
-        self.discovery_empty_label.setStyleSheet("color: #00b4d8; font-size: 11px; padding: 20px;")
+        self.discovery_empty_label.setStyleSheet("color: #FF9500; font-size: 11px; padding: 20px;")
         
         # Update UI state
         self.discover_btn.setEnabled(False)
         self.discover_btn.setText("⏳ Scanning...")
         self.discovery_status.setText("🔍 Searching network for Panasonic cameras...")
-        self.discovery_status.setStyleSheet("color: #00b4d8; font-size: 12px; padding: 4px;")
+        self.discovery_status.setStyleSheet("color: #FF9500; font-size: 12px; padding: 4px;")
         self.discovery_progress.show()
         self.discovery_progress.setValue(0)
         
@@ -1567,7 +1567,7 @@ class CameraPage(QWidget):
         self.test_camera_btn.setEnabled(False)
         self.test_camera_btn.setText("⏳ Testing...")
         self.test_status_label.setText("🔄 Testing connection...")
-        self.test_status_label.setStyleSheet("color: #00b4d8; font-size: 11px; padding: 4px;")
+        self.test_status_label.setStyleSheet("color: #FF9500; font-size: 11px; padding: 4px;")
         self.test_status_label.show()
         
         port = 80  # Default port

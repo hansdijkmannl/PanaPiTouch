@@ -13,8 +13,8 @@ COLORS = {
     'border': '#2a2a38',
     'border_light': '#3a3a4a',
     
-    'primary': '#00b4d8',      # Cyan accent
-    'primary_dark': '#0090ad',
+    'primary': '#FF9500',      # Orange accent
+    'primary_dark': '#CC7700',
     'secondary': '#7b68ee',    # Purple accent
     
     'text': '#e8e8f0',
@@ -29,7 +29,7 @@ COLORS = {
     'warning': '#f59e0b',
     'error': '#ef4444',
     
-    'button_active': '#00b4d8',
+    'button_active': '#FF9500',  # Orange
     'button_inactive': '#1a1a24',
 }
 
