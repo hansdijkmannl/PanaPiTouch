@@ -594,7 +594,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedHeight(25)
+        self.osd_on_btn.setFixedSize(85, 25)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedHeight(25)
+        self.osd_off_btn.setFixedSize(85, 25)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -656,8 +656,8 @@ class MainWindow(QMainWindow):
         osd_layout.addSpacing(8)
         
         # ===== D-Pad Navigation with OK in center =====
-        dpad_btn_size = 36
-        dpad_spacing = 3
+        dpad_btn_size = 34
+        dpad_spacing = 2
         
         dpad_style = f"""
             QPushButton {{
@@ -735,7 +735,7 @@ class MainWindow(QMainWindow):
         
         # ===== Cancel Button =====
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(25)
+        cancel_btn.setFixedSize(170, 25)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
@@ -761,14 +761,14 @@ class MainWindow(QMainWindow):
         
         self.scene_combo = QComboBox()
         self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
-        self.scene_combo.setFixedHeight(44)
+        self.scene_combo.setFixedSize(170, 32)
         self.scene_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-size: 14px;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
                 font-weight: 600;
                 color: {COLORS['text']};
             }}
