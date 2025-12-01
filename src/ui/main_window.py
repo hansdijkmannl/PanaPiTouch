@@ -356,7 +356,7 @@ class MainWindow(QMainWindow):
         """Create right side panel with collapsible PTZ controls, OSD menu, overlays, and multiview"""
         # Outer container with fixed width
         panel = QFrame()
-        panel.setFixedWidth(180)
+        panel.setFixedWidth(200)
         panel.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS['surface']};
