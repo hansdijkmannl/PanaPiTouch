@@ -670,6 +670,12 @@ class MainWindow(QMainWindow):
                 font-size: 12px;
                 font-weight: 600;
                 color: {COLORS['text']};
+                padding: 0px;
+                margin: 0px;
+                min-width: {dpad_btn_size}px;
+                max-width: {dpad_btn_size}px;
+                min-height: {dpad_btn_size}px;
+                max-height: {dpad_btn_size}px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['surface_hover']};
@@ -691,10 +697,18 @@ class MainWindow(QMainWindow):
         dpad_grid_layout = QGridLayout(dpad_grid)
         dpad_grid_layout.setContentsMargins(0, 0, 0, 0)
         dpad_grid_layout.setSpacing(dpad_spacing)
+        # Prevent columns from stretching
+        dpad_grid_layout.setColumnStretch(0, 0)
+        dpad_grid_layout.setColumnStretch(1, 0)
+        dpad_grid_layout.setColumnStretch(2, 0)
+        dpad_grid_layout.setRowStretch(0, 0)
+        dpad_grid_layout.setRowStretch(1, 0)
+        dpad_grid_layout.setRowStretch(2, 0)
         
         # Up arrow
         osd_up = QPushButton("▲")
         osd_up.setFixedSize(dpad_btn_size, dpad_btn_size)
+        osd_up.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         osd_up.setStyleSheet(dpad_style)
         osd_up.clicked.connect(lambda: self._osd_navigate("up"))
         dpad_grid_layout.addWidget(osd_up, 0, 1)
@@ -702,6 +716,7 @@ class MainWindow(QMainWindow):
         # Left arrow
         osd_left = QPushButton("◀")
         osd_left.setFixedSize(dpad_btn_size, dpad_btn_size)
+        osd_left.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         osd_left.setStyleSheet(dpad_style)
         osd_left.clicked.connect(lambda: self._osd_navigate("left"))
         dpad_grid_layout.addWidget(osd_left, 1, 0)
@@ -709,6 +724,7 @@ class MainWindow(QMainWindow):
         # OK button (center)
         osd_ok = QPushButton("OK")
         osd_ok.setFixedSize(dpad_btn_size, dpad_btn_size)
+        osd_ok.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         osd_ok.setStyleSheet(dpad_style)
         osd_ok.clicked.connect(lambda: self._osd_navigate("ok"))
         dpad_grid_layout.addWidget(osd_ok, 1, 1)
@@ -716,6 +732,7 @@ class MainWindow(QMainWindow):
         # Right arrow
         osd_right = QPushButton("▶")
         osd_right.setFixedSize(dpad_btn_size, dpad_btn_size)
+        osd_right.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         osd_right.setStyleSheet(dpad_style)
         osd_right.clicked.connect(lambda: self._osd_navigate("right"))
         dpad_grid_layout.addWidget(osd_right, 1, 2)
@@ -723,6 +740,7 @@ class MainWindow(QMainWindow):
         # Down arrow
         osd_down = QPushButton("▼")
         osd_down.setFixedSize(dpad_btn_size, dpad_btn_size)
+        osd_down.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         osd_down.setStyleSheet(dpad_style)
         osd_down.clicked.connect(lambda: self._osd_navigate("down"))
         dpad_grid_layout.addWidget(osd_down, 2, 1)
