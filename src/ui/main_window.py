@@ -574,18 +574,18 @@ class MainWindow(QMainWindow):
         self.osd_toggle_btn.clicked.connect(self._toggle_osd_panel)
         layout.addWidget(self.osd_toggle_btn)
         
-        # OSD Menu Panel - Panasonic style
+        # OSD Menu Panel (collapsible) - matches app style
         self.osd_panel = QFrame()
         self.osd_panel.setStyleSheet(f"""
             QFrame {{
-                background-color: #2d2d2d;
+                background-color: {COLORS['surface_light']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
             }}
         """)
         osd_layout = QVBoxLayout(self.osd_panel)
-        osd_layout.setContentsMargins(12, 12, 12, 12)
-        osd_layout.setSpacing(0)
+        osd_layout.setContentsMargins(6, 8, 6, 8)
+        osd_layout.setSpacing(6)
         
         # ===== ON / OFF Segmented Toggle =====
         onoff_container = QWidget()
@@ -594,102 +594,85 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(75, 36)
+        self.osd_on_btn.setFixedHeight(32)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #3a3a3a;
-                border: 1px solid #555555;
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
                 border-right: none;
                 border-top-left-radius: 4px;
                 border-bottom-left-radius: 4px;
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
-                font-size: 14px;
-                font-weight: bold;
-                color: #888888;
+                font-size: 12px;
+                font-weight: 600;
+                color: {COLORS['text_dim']};
             }}
             QPushButton:checked {{
-                background-color: #555555;
-                color: #ffffff;
+                background-color: {COLORS['surface_hover']};
+                color: {COLORS['text']};
             }}
             QPushButton:pressed {{
-                background-color: #666666;
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
             }}
         """)
         self.osd_on_btn.clicked.connect(self._osd_on)
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(75, 36)
+        self.osd_off_btn.setFixedHeight(32)
         self.osd_off_btn.setCheckable(True)
-        self.osd_off_btn.setChecked(True)  # Default OFF
+        self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #3a3a3a;
-                border: 1px solid #555555;
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
                 border-left: none;
                 border-top-left-radius: 0px;
                 border-bottom-left-radius: 0px;
                 border-top-right-radius: 4px;
                 border-bottom-right-radius: 4px;
-                font-size: 14px;
-                font-weight: bold;
-                color: #888888;
+                font-size: 12px;
+                font-weight: 600;
+                color: {COLORS['text_dim']};
             }}
             QPushButton:checked {{
-                background-color: #555555;
-                color: #ffffff;
+                background-color: {COLORS['surface_hover']};
+                color: {COLORS['text']};
             }}
             QPushButton:pressed {{
-                background-color: #666666;
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
             }}
         """)
         self.osd_off_btn.clicked.connect(self._osd_off)
         onoff_layout.addWidget(self.osd_off_btn)
         
-        osd_layout.addWidget(onoff_container, alignment=Qt.AlignmentFlag.AlignCenter)
+        osd_layout.addWidget(onoff_container)
         
         # Spacing after ON/OFF
-        osd_layout.addSpacing(25)
+        osd_layout.addSpacing(10)
         
         # ===== D-Pad Navigation with OK in center =====
-        # Panasonic style: ~60x60 buttons with 8px spacing
-        dpad_btn_size = 55
-        dpad_spacing = 6
+        dpad_btn_size = 40
+        dpad_spacing = 4
         
         dpad_style = f"""
             QPushButton {{
-                background-color: #3a3a3a;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-                font-size: 18px;
-                color: #999999;
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 14px;
+                color: {COLORS['text']};
             }}
             QPushButton:hover {{
-                background-color: #444444;
+                background-color: {COLORS['surface_hover']};
             }}
             QPushButton:pressed {{
-                background-color: #555555;
-                color: #ffffff;
-            }}
-        """
-        
-        dpad_ok_style = f"""
-            QPushButton {{
-                background-color: #3a3a3a;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-                font-size: 16px;
-                font-weight: bold;
-                color: #999999;
-            }}
-            QPushButton:hover {{
-                background-color: #444444;
-            }}
-            QPushButton:pressed {{
-                background-color: #555555;
-                color: #ffffff;
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
             }}
         """
         
@@ -704,35 +687,35 @@ class MainWindow(QMainWindow):
         dpad_grid_layout.setContentsMargins(0, 0, 0, 0)
         dpad_grid_layout.setSpacing(dpad_spacing)
         
-        # Up arrow (row 0, col 1)
+        # Up arrow
         osd_up = QPushButton("▲")
         osd_up.setFixedSize(dpad_btn_size, dpad_btn_size)
         osd_up.setStyleSheet(dpad_style)
         osd_up.clicked.connect(lambda: self._osd_navigate("up"))
         dpad_grid_layout.addWidget(osd_up, 0, 1)
         
-        # Left arrow (row 1, col 0)
+        # Left arrow
         osd_left = QPushButton("◀")
         osd_left.setFixedSize(dpad_btn_size, dpad_btn_size)
         osd_left.setStyleSheet(dpad_style)
         osd_left.clicked.connect(lambda: self._osd_navigate("left"))
         dpad_grid_layout.addWidget(osd_left, 1, 0)
         
-        # OK button (row 1, col 1) - CENTER
+        # OK button (center)
         osd_ok = QPushButton("OK")
         osd_ok.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_ok.setStyleSheet(dpad_ok_style)
+        osd_ok.setStyleSheet(dpad_style)
         osd_ok.clicked.connect(lambda: self._osd_navigate("ok"))
         dpad_grid_layout.addWidget(osd_ok, 1, 1)
         
-        # Right arrow (row 1, col 2)
+        # Right arrow
         osd_right = QPushButton("▶")
         osd_right.setFixedSize(dpad_btn_size, dpad_btn_size)
         osd_right.setStyleSheet(dpad_style)
         osd_right.clicked.connect(lambda: self._osd_navigate("right"))
         dpad_grid_layout.addWidget(osd_right, 1, 2)
         
-        # Down arrow (row 2, col 1)
+        # Down arrow
         osd_down = QPushButton("▼")
         osd_down.setFixedSize(dpad_btn_size, dpad_btn_size)
         osd_down.setStyleSheet(dpad_style)
@@ -744,33 +727,33 @@ class MainWindow(QMainWindow):
         osd_layout.addWidget(dpad_container)
         
         # Spacing before Cancel button
-        osd_layout.addSpacing(20)
+        osd_layout.addSpacing(8)
         
         # ===== Cancel Button =====
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(40)
+        cancel_btn.setFixedHeight(32)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: #3a3a3a;
-                border: 1px solid #4a4a4a;
-                border-radius: 6px;
-                font-size: 14px;
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 12px;
                 font-weight: 600;
-                color: #999999;
+                color: {COLORS['text']};
             }}
             QPushButton:hover {{
-                background-color: #444444;
+                background-color: {COLORS['surface_hover']};
             }}
             QPushButton:pressed {{
-                background-color: #555555;
-                color: #ffffff;
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
             }}
         """)
         cancel_btn.clicked.connect(lambda: self._osd_navigate("back"))
         osd_layout.addWidget(cancel_btn)
         
         # Spacing before Scene picker
-        osd_layout.addSpacing(15)
+        osd_layout.addSpacing(8)
         
         self.scene_combo = QComboBox()
         self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
