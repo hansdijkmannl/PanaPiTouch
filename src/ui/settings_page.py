@@ -138,7 +138,8 @@ class SettingsPage(QWidget):
                     color: #0a0a0f;
                     font-size: 14px;
                     font-weight: 600;
-                    padding: 12px 20px;
+                    padding: 0px;
+                    margin: 0px;
                     min-height: 20px;
                 }
                 QPushButton:hover {
@@ -157,6 +158,8 @@ class SettingsPage(QWidget):
                     color: #ffffff;
                     font-size: 14px;
                     font-weight: 500;
+                    padding: 0px;
+                    margin: 0px;
                     padding: 12px 20px;
                     min-height: 20px;
                 }

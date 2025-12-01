@@ -162,6 +162,8 @@ class DiscoveredCameraCard(QFrame):
                 border: none;
                 border-radius: 6px;
                 font-size: 12px;
+                padding: 0px;
+                margin: 0px;
             }
             QPushButton:hover {
                 background-color: #3a3a48;
@@ -185,6 +187,8 @@ class DiscoveredCameraCard(QFrame):
                 color: #0a0a0f;
                 font-size: 12px;
                 font-weight: 600;
+                padding: 0px;
+                margin: 0px;
             }
             QPushButton:hover {
                 background-color: #CC7700;
@@ -333,6 +337,8 @@ class CameraListItem(QFrame):
                 color: #0a0a0f;
                 font-size: 13px;
                 font-weight: 600;
+                padding: 0px;
+                margin: 0px;
             }
         """)
         edit_btn.clicked.connect(lambda: self.edit_clicked.emit(self.camera.id))

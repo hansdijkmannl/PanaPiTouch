@@ -58,7 +58,8 @@ QPushButton {{
     color: {COLORS['text']};
     border: 2px solid {COLORS['border']};
     border-radius: 8px;
-    padding: 12px 24px;
+    padding: 0px;
+    margin: 0px;
     font-size: 15px;
     font-weight: 500;
     min-height: 48px;
@@ -93,7 +94,8 @@ QPushButton#navButton {{
     border-radius: 0px;
     border: none;
     border-bottom: 3px solid transparent;
-    padding: 16px 32px;
+    padding: 0px;
+    margin: 0px;
     font-size: 16px;
     font-weight: 600;
 }}
@@ -118,7 +120,8 @@ QPushButton#cameraButton {{
     background-color: transparent;
     border: 3px solid {COLORS['tally_off']};
     border-radius: 10px;
-    padding: 4px;
+    padding: 0px;
+    margin: 0px;
     font-size: 12px;
     font-weight: 600;
     color: {COLORS['text']};
@@ -167,7 +170,8 @@ QPushButton#overlayButton {{
     background-color: {COLORS['surface']};
     border: none;
     border-radius: 8px;
-    padding: 4px 16px;
+    padding: 0px;
+    margin: 0px;
     font-size: 12px;
     font-weight: 600;
     min-width: 80px;

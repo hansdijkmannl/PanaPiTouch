@@ -205,7 +205,8 @@ class MainWindow(QMainWindow):
                 color: #0a0a0f;
                 font-size: 13px;
                 font-weight: 600;
-                padding: 8px 16px;
+                padding: 0px;
+                margin: 0px;
                 margin-left: 12px;
             }}
             QPushButton:hover {{
@@ -412,7 +413,8 @@ class MainWindow(QMainWindow):
                 border-radius: 6px;
                 font-weight: bold;
                 font-size: 12px;
-                padding: 8px;
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:checked {{
                 background-color: #FF9500;
@@ -608,6 +610,8 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text_dim']};
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:checked {{
                 background-color: {COLORS['surface_hover']};
@@ -637,6 +641,8 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text_dim']};
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:checked {{
                 background-color: {COLORS['surface_hover']};
@@ -763,6 +769,8 @@ class MainWindow(QMainWindow):
                 font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text']};
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['surface_hover']};
@@ -995,6 +1003,8 @@ class MainWindow(QMainWindow):
                 color: {COLORS['text']};
                 font-size: 10px;
                 font-weight: 600;
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['primary']};
@@ -1029,6 +1039,8 @@ class MainWindow(QMainWindow):
                 color: {COLORS['text']};
                 font-size: 10px;
                 font-weight: 600;
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:pressed {{
                 background-color: #ff4444;
@@ -1057,6 +1069,8 @@ class MainWindow(QMainWindow):
                 color: {COLORS['text']};
                 font-size: 10px;
                 font-weight: 600;
+                padding: 0px;
+                margin: 0px;
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['primary']};
