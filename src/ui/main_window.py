@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(85, 25)
+        self.osd_on_btn.setFixedSize(80, 25)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(85, 25)
+        self.osd_off_btn.setFixedSize(80, 25)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -662,10 +662,10 @@ class MainWindow(QMainWindow):
         osd_layout.addSpacing(8)
         
         # ===== D-Pad Navigation with OK in center =====
-        dpad_total_width = 170  # Fixed container width (200px sidebar - 12px margins)
+        dpad_total_width = 160  # Fixed container width
         dpad_spacing = 4
         
-        # Calculate button size: (170px - 2 spacings × 4px) / 3 buttons = 54px
+        # Calculate button size: (160px - 2 spacings × 4px) / 3 buttons = 50px
         dpad_btn_size = (dpad_total_width - (dpad_spacing * 2)) // 3
         
         dpad_style = f"""
@@ -760,7 +760,7 @@ class MainWindow(QMainWindow):
         
         # ===== Cancel Button =====
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedSize(170, 25)
+        cancel_btn.setFixedSize(160, 25)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
@@ -788,7 +788,7 @@ class MainWindow(QMainWindow):
         
         self.scene_combo = QComboBox()
         self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
-        self.scene_combo.setFixedSize(170, 32)
+        self.scene_combo.setFixedSize(160, 32)
         self.scene_combo.setStyleSheet(f"""
             QComboBox {{
                 background-color: {COLORS['surface']};
