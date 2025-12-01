@@ -64,9 +64,15 @@ QPushButton {{
     min-height: 48px;
 }}
 
+QPushButton:hover {{
+    background-color: {COLORS['surface_hover']};
+    border-color: {COLORS['border_light']};
+}}
+
 QPushButton:pressed {{
-    background-color: {COLORS['primary_dark']};
+    background-color: {COLORS['primary']};
     border-color: {COLORS['primary']};
+    color: {COLORS['background']};
 }}
 
 QPushButton:checked {{
@@ -92,6 +98,15 @@ QPushButton#navButton {{
     font-weight: 600;
 }}
 
+QPushButton#navButton:hover {{
+    background-color: {COLORS['surface_hover']};
+}}
+
+QPushButton#navButton:pressed {{
+    background-color: {COLORS['primary']};
+    color: {COLORS['background']};
+}}
+
 QPushButton#navButton:checked {{
     background-color: {COLORS['surface_light']};
     border-bottom: 3px solid {COLORS['primary']};
@@ -107,6 +122,16 @@ QPushButton#cameraButton {{
     font-size: 12px;
     font-weight: 600;
     color: {COLORS['text']};
+}}
+
+QPushButton#cameraButton:hover {{
+    background-color: {COLORS['surface_hover']};
+    border-color: {COLORS['border_light']};
+}}
+
+QPushButton#cameraButton:pressed {{
+    background-color: {COLORS['primary']};
+    border-color: {COLORS['primary']};
 }}
 
 QPushButton#cameraButton:checked {{

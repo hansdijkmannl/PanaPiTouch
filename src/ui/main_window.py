@@ -890,11 +890,11 @@ class MainWindow(QMainWindow):
         }
         
         color_row = QWidget()
-        color_row.setMinimumHeight(35)
-        color_row.setMaximumHeight(35)
+        color_row.setMinimumHeight(40)
+        color_row.setMaximumHeight(40)
         color_row_layout = QHBoxLayout(color_row)
-        color_row_layout.setContentsMargins(0, 5, 0, 5)
-        color_row_layout.setSpacing(6)
+        color_row_layout.setContentsMargins(0, 8, 0, 8)
+        color_row_layout.setSpacing(8)
         color_row_layout.addStretch()
         
         self._color_buttons = {}
@@ -924,7 +924,7 @@ class MainWindow(QMainWindow):
         # Default to white selected
         self._color_buttons["White"].setChecked(True)
         frame_guide_layout.addWidget(color_row)
-        frame_guide_layout.addSpacing(4)  # Space after color buttons
+        frame_guide_layout.addSpacing(8)  # Space after color buttons
         
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
@@ -1115,18 +1115,22 @@ class MainWindow(QMainWindow):
         scroll.setWidget(content)
         panel_layout.addWidget(scroll)
         
-        # Status indicators at bottom of sidebar - two rows, 10px font, no background
+        # Status indicators at bottom of sidebar
         status_container = QWidget()
-        status_container.setStyleSheet("background: transparent; border: none;")
+        status_container.setStyleSheet(f"""
+            background-color: {COLORS['surface']};
+            border-top: 1px solid {COLORS['border']};
+            border-radius: 0;
+        """)
         status_layout = QVBoxLayout(status_container)
-        status_layout.setContentsMargins(10, 8, 10, 8)
-        status_layout.setSpacing(4)
+        status_layout.setContentsMargins(12, 10, 12, 10)
+        status_layout.setSpacing(6)
         
         self.connection_status = QLabel("CAM: ● Disconnected")
         self.connection_status.setTextFormat(Qt.TextFormat.RichText)
         self.connection_status.setStyleSheet(f"""
-            color: {COLORS['text_dim']}; 
-            font-size: 10px;
+            color: {COLORS['text']}; 
+            font-size: 12px;
             font-weight: 600;
             background: transparent;
             border: none;
@@ -1139,8 +1143,8 @@ class MainWindow(QMainWindow):
         self.atem_status = QLabel("ATEM: ● Not Configured")
         self.atem_status.setTextFormat(Qt.TextFormat.RichText)
         self.atem_status.setStyleSheet(f"""
-            color: {COLORS['text_dim']}; 
-            font-size: 10px;
+            color: {COLORS['text']}; 
+            font-size: 12px;
             font-weight: 600;
             background: transparent;
             border: none;
@@ -2259,82 +2263,53 @@ class MainWindow(QMainWindow):
     
     def _update_status(self):
         """Update status indicators"""
-        # Camera connection status - 10px font, no background
+        # Camera connection status
+        status_style = f"""
+            color: {COLORS['text']}; 
+            font-size: 12px;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        """
+        status_style_dim = f"""
+            color: {COLORS['text_dim']}; 
+            font-size: 12px;
+            font-weight: 600;
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin: 0;
+        """
+        
         if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
             stream = self.camera_streams[self.current_camera_id]
             if stream.is_connected:
                 self.connection_status.setText(f"CAM: <span style='color:{COLORS['success']}'>●</span> Connected")
-                self.connection_status.setStyleSheet(f"""
-                    color: {COLORS['text']}; 
-                    font-size: 10px;
-                    font-weight: 600;
-                    background: transparent;
-                    border: none;
-                    padding: 0;
-                    margin: 0;
-                """)
+                self.connection_status.setStyleSheet(status_style)
                 self.connection_status.setToolTip("Camera connected")
             else:
                 self.connection_status.setText(f"CAM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
-                self.connection_status.setStyleSheet(f"""
-                    color: {COLORS['text']}; 
-                    font-size: 10px;
-                    font-weight: 600;
-                    background: transparent;
-                    border: none;
-                    padding: 0;
-                    margin: 0;
-                """)
+                self.connection_status.setStyleSheet(status_style)
                 self.connection_status.setToolTip(f"Camera disconnected: {stream.error_message}")
         else:
             self.connection_status.setText(f"CAM: <span style='color:{COLORS['text_dark']}'>●</span> No Camera")
-            self.connection_status.setStyleSheet(f"""
-                color: {COLORS['text_dim']}; 
-                font-size: 10px;
-                font-weight: 600;
-                background: transparent;
-                border: none;
-                padding: 0;
-                margin: 0;
-            """)
+            self.connection_status.setStyleSheet(status_style_dim)
             self.connection_status.setToolTip("No camera selected")
         
-        # ATEM connection status - 10px font, no background
+        # ATEM connection status
         if self.atem_controller.is_connected:
             self.atem_status.setText(f"ATEM: <span style='color:{COLORS['success']}'>●</span> Connected")
-            self.atem_status.setStyleSheet(f"""
-                color: {COLORS['text']}; 
-                font-size: 10px;
-                font-weight: 600;
-                background: transparent;
-                border: none;
-                padding: 0;
-                margin: 0;
-            """)
+            self.atem_status.setStyleSheet(status_style)
             self.atem_status.setToolTip("ATEM connected")
         elif self.settings.atem.enabled:
             self.atem_status.setText(f"ATEM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
-            self.atem_status.setStyleSheet(f"""
-                color: {COLORS['text']}; 
-                font-size: 10px;
-                font-weight: 600;
-                background: transparent;
-                border: none;
-                padding: 0;
-                margin: 0;
-            """)
+            self.atem_status.setStyleSheet(status_style)
             self.atem_status.setToolTip("ATEM disconnected")
         else:
             self.atem_status.setText(f"ATEM: <span style='color:{COLORS['text_dark']}'>●</span> Not Configured")
-            self.atem_status.setStyleSheet(f"""
-                color: {COLORS['text_dim']}; 
-                font-size: 10px;
-                font-weight: 600;
-                background: transparent;
-                border: none;
-                padding: 0;
-                margin: 0;
-            """)
+            self.atem_status.setStyleSheet(status_style_dim)
             self.atem_status.setToolTip("ATEM not configured")
     
     def _update_fps(self):

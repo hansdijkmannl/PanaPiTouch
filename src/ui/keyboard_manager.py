@@ -45,7 +45,7 @@ class KeyboardManager(QObject):
         self.keyboard_container.setStyleSheet(f"""
             QWidget {{
                 background-color: {COLORS['surface']};
-                border-top: 1px solid {COLORS['border']};
+                border-top: 2px solid {COLORS['primary']};
             }}
         """)
         
