@@ -83,17 +83,17 @@ class MainWindow(QMainWindow):
         """Setup window properties"""
         self.setWindowTitle("PanaPiTouch - PTZ Camera Monitor")
         
+        # Remove window decorations for fullscreen app look (no title bar, no borders)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        
         # Set window size based on display
         self.setMinimumSize(1280, 720)
         
         # Set stylesheet
         self.setStyleSheet(STYLESHEET)
         
-        # Fullscreen if configured
-        if self.settings.fullscreen:
-            self.showFullScreen()
-        else:
-            self.resize(self.settings.display_width, self.settings.display_height)
+        # Always show fullscreen for immersive experience (hides OS top bar)
+        self.showFullScreen()
     
     def _setup_ui(self):
         """Setup the main UI"""
