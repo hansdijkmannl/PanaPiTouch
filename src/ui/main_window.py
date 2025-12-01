@@ -289,11 +289,15 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(16, 12, 16, 12)
         main_layout.setSpacing(12)
         
-        # Middle: Preview + Side panel
+        # Middle: Quick buttons + Preview + Side panel
         middle_layout = QHBoxLayout()
         middle_layout.setSpacing(12)
         
-        # Left: Preview container + Camera bar (same width)
+        # Left: Quick Buttons sidebar (50px wide, 6 buttons evenly spaced)
+        quick_buttons_panel = self._create_quick_buttons_panel()
+        middle_layout.addWidget(quick_buttons_panel)
+        
+        # Center: Preview container + Camera bar (same width)
         preview_column = QWidget()
         preview_column_layout = QVBoxLayout(preview_column)
         preview_column_layout.setContentsMargins(0, 0, 0, 0)
@@ -351,6 +355,142 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(middle_layout, stretch=1)
         
         return page
+    
+    def _create_quick_buttons_panel(self) -> QWidget:
+        """Create left sidebar with 6 customizable quick action buttons"""
+        panel = QFrame()
+        panel.setFixedWidth(50)
+        panel.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(6, 12, 6, 12)
+        layout.setSpacing(0)
+        
+        # Create 6 quick buttons evenly distributed
+        self.quick_buttons = []
+        quick_btn_style = f"""
+            QPushButton {{
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 6px;
+                font-size: 16px;
+                color: {COLORS['text']};
+                min-width: 36px;
+                min-height: 36px;
+                max-width: 36px;
+                max-height: 36px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+                border-color: {COLORS['border_light']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """
+        
+        # Default button configurations (can be customized later)
+        default_actions = [
+            ("🏠", "Home Position", self._quick_home),
+            ("🎯", "Auto Focus", self._quick_autofocus),
+            ("📷", "Screenshot", self._quick_screenshot),
+            ("🔄", "Refresh", self._quick_refresh),
+            ("⬛", "Black Out", self._quick_blackout),
+            ("💡", "Tally Off", self._tally_off),
+        ]
+        
+        for i, (icon, tooltip, action) in enumerate(default_actions):
+            btn = QPushButton(icon)
+            btn.setStyleSheet(quick_btn_style)
+            btn.setToolTip(tooltip)
+            btn.clicked.connect(action)
+            self.quick_buttons.append(btn)
+            layout.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+            
+            # Add stretch between buttons for even distribution
+            if i < len(default_actions) - 1:
+                layout.addStretch(1)
+        
+        return panel
+    
+    def _quick_home(self):
+        """Quick button: Send camera to home position"""
+        self._ptz_home()
+    
+    def _quick_autofocus(self):
+        """Quick button: Trigger one-push auto focus"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Panasonic one-push auto focus command
+            url = f"http://{camera.ip_address}/cgi-bin/aw_cam?cmd=OSE:69:1&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=1.0)
+            print("Auto focus triggered")
+        except Exception as e:
+            print(f"Auto focus error: {e}")
+    
+    def _quick_screenshot(self):
+        """Quick button: Save current preview frame"""
+        if self.preview_widget._display_frame is None:
+            return
+        
+        import cv2
+        from datetime import datetime
+        import os
+        
+        # Create screenshots directory
+        screenshots_dir = os.path.expanduser("~/Pictures/PanaPiTouch")
+        os.makedirs(screenshots_dir, exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"screenshot_{timestamp}.jpg"
+        filepath = os.path.join(screenshots_dir, filename)
+        
+        # Save frame
+        cv2.imwrite(filepath, self.preview_widget._display_frame)
+        print(f"Screenshot saved: {filepath}")
+    
+    def _quick_refresh(self):
+        """Quick button: Reconnect current camera stream"""
+        if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
+            stream = self.camera_streams[self.current_camera_id]
+            stream.stop()
+            stream.start()
+            print("Camera stream refreshed")
+    
+    def _quick_blackout(self):
+        """Quick button: Toggle black frame output (privacy)"""
+        # Toggle a blackout state (this could be expanded)
+        if not hasattr(self, '_blackout_enabled'):
+            self._blackout_enabled = False
+        
+        self._blackout_enabled = not self._blackout_enabled
+        
+        if self._blackout_enabled:
+            self.preview_widget.clear_frame()
+            print("Blackout enabled")
+        else:
+            # Refresh stream to restore video
+            self._quick_refresh()
+            print("Blackout disabled")
     
     def _create_side_panel(self) -> QWidget:
         """Create right side panel with collapsible PTZ controls, OSD menu, overlays, and multiview"""
@@ -757,6 +897,96 @@ class MainWindow(QMainWindow):
         osd_btn_row.addStretch()
         osd_layout.addLayout(osd_btn_row)
         
+        # Camera Flip controls
+        osd_layout.addSpacing(15)
+        flip_label = QLabel("Image Flip")
+        flip_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 600;")
+        osd_layout.addWidget(flip_label)
+        
+        flip_row = QHBoxLayout()
+        flip_row.setSpacing(8)
+        
+        self.hflip_btn = QPushButton("H-Flip")
+        self.hflip_btn.setCheckable(True)
+        self.hflip_btn.setFixedHeight(32)
+        self.hflip_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                color: {COLORS['text']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        self.hflip_btn.clicked.connect(self._toggle_hflip)
+        flip_row.addWidget(self.hflip_btn)
+        
+        self.vflip_btn = QPushButton("V-Flip")
+        self.vflip_btn.setCheckable(True)
+        self.vflip_btn.setFixedHeight(32)
+        self.vflip_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                color: {COLORS['text']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        self.vflip_btn.clicked.connect(self._toggle_vflip)
+        flip_row.addWidget(self.vflip_btn)
+        
+        osd_layout.addLayout(flip_row)
+        
+        # Scene File picker
+        osd_layout.addSpacing(10)
+        scene_label = QLabel("Scene File")
+        scene_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 10px; font-weight: 600;")
+        osd_layout.addWidget(scene_label)
+        
+        self.scene_combo = QComboBox()
+        self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
+        self.scene_combo.setFixedHeight(32)
+        self.scene_combo.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 11px;
+                color: {COLORS['text']};
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                image: none;
+                border-left: 5px solid transparent;
+                border-right: 5px solid transparent;
+                border-top: 6px solid {COLORS['text']};
+                margin-right: 8px;
+            }}
+            QComboBox QAbstractItemView {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                selection-background-color: {COLORS['primary']};
+                color: {COLORS['text']};
+            }}
+        """)
+        self.scene_combo.currentIndexChanged.connect(self._on_scene_changed)
+        osd_layout.addWidget(self.scene_combo)
+        
         self.osd_panel.setVisible(False)
         layout.addWidget(self.osd_panel)
         
@@ -788,6 +1018,8 @@ class MainWindow(QMainWindow):
             ("Waveform", "waveform"),
             ("Vectorscope", "vectorscope"),
             ("Focus Assist", "focus_assist"),
+            ("Histogram", "histogram"),
+            ("Zebra 90%", "zebra"),
         ]
         
         for name, key in overlays:
@@ -1531,6 +1763,67 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Tally off error: {e}")
     
+    def _toggle_hflip(self):
+        """Toggle horizontal flip on camera"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Panasonic H-flip command
+            enabled = self.hflip_btn.isChecked()
+            value = "1" if enabled else "0"
+            # Command for image H flip: OSI:4A:value
+            url = f"http://{camera.ip_address}/cgi-bin/aw_cam?cmd=OSI:4A:{value}&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=1.0)
+            print(f"H-Flip {'enabled' if enabled else 'disabled'}")
+        except Exception as e:
+            print(f"H-Flip error: {e}")
+    
+    def _toggle_vflip(self):
+        """Toggle vertical flip on camera"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Panasonic V-flip command
+            enabled = self.vflip_btn.isChecked()
+            value = "1" if enabled else "0"
+            # Command for image V flip: OSI:4B:value
+            url = f"http://{camera.ip_address}/cgi-bin/aw_cam?cmd=OSI:4B:{value}&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=1.0)
+            print(f"V-Flip {'enabled' if enabled else 'disabled'}")
+        except Exception as e:
+            print(f"V-Flip error: {e}")
+    
+    def _on_scene_changed(self, index: int):
+        """Load scene file on camera"""
+        if self.current_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return
+        
+        import requests
+        try:
+            # Panasonic scene file recall: XSF:scene_number (0-3 for scenes 1-4)
+            scene_num = index
+            url = f"http://{camera.ip_address}/cgi-bin/aw_cam?cmd=XSF:{scene_num}&res=1"
+            requests.get(url, auth=(camera.username, camera.password), timeout=1.0)
+            print(f"Scene {index + 1} loaded")
+        except Exception as e:
+            print(f"Scene load error: {e}")
+    
     def _update_osd_button_style(self):
         """Update OSD button style based on active state"""
         if self._osd_active:
@@ -1901,6 +2194,10 @@ class MainWindow(QMainWindow):
             enabled = self.preview_widget.toggle_vectorscope()
         elif overlay_key == "focus_assist":
             enabled = self.preview_widget.toggle_focus_assist()
+        elif overlay_key == "histogram":
+            enabled = self.preview_widget.toggle_histogram()
+        elif overlay_key == "zebra":
+            enabled = self.preview_widget.toggle_zebra()
         else:
             return
         
