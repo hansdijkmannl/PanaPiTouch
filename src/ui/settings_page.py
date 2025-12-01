@@ -140,7 +140,7 @@ class SettingsPage(QWidget):
                     font-weight: 600;
                     padding: 0px;
                     margin: 0px;
-                    min-height: 20px;
+                    min-height: 44px;
                 }
                 QPushButton:hover {
                     background-color: #CC7700;
@@ -160,8 +160,7 @@ class SettingsPage(QWidget):
                     font-weight: 500;
                     padding: 0px;
                     margin: 0px;
-                    padding: 12px 20px;
-                    min-height: 20px;
+                    min-height: 44px;
                 }
                 QPushButton:hover {
                     border-color: #FF9500;
