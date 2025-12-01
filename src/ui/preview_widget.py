@@ -12,7 +12,7 @@ from PyQt6.QtGui import QImage, QPixmap
 
 from ..overlays import (
     FalseColorOverlay, WaveformOverlay, VectorscopeOverlay, FocusAssistOverlay,
-    GridOverlay, FrameGuideOverlay, HistogramOverlay, ZebraOverlay
+    GridOverlay, FrameGuideOverlay
 )
 from ..atem.tally import TallyState
 
@@ -45,8 +45,6 @@ class PreviewWidget(QWidget):
         self.focus_assist = FocusAssistOverlay()
         self.grid_overlay = GridOverlay()
         self.frame_guide = FrameGuideOverlay()
-        self.histogram = HistogramOverlay()
-        self.zebra = ZebraOverlay()
         
         # Tally state
         self._tally_state = TallyState.OFF
@@ -179,9 +177,7 @@ class PreviewWidget(QWidget):
             self.waveform.enabled or 
             self.vectorscope.enabled or
             self.grid_overlay.enabled or
-            self.frame_guide.enabled or
-            self.histogram.enabled or
-            self.zebra.enabled
+            self.frame_guide.enabled
         )
         
         if overlays_active:
@@ -191,10 +187,8 @@ class PreviewWidget(QWidget):
             # Apply overlays in order (analysis first, then guides on top)
             frame = self.false_color.apply(frame)
             frame = self.focus_assist.apply(frame)
-            frame = self.zebra.apply(frame)  # Zebra before other overlays
             frame = self.waveform.apply(frame)
             frame = self.vectorscope.apply(frame)
-            frame = self.histogram.apply(frame)  # Histogram in corner
             # Grid and frame guides applied last so they're always visible
             frame = self.grid_overlay.apply(frame)
             frame = self.frame_guide.apply(frame)
@@ -278,20 +272,6 @@ class PreviewWidget(QWidget):
         """Toggle frame guide overlay"""
         self.frame_guide.toggle()
         return self.frame_guide.enabled
-    
-    def toggle_histogram(self):
-        """Toggle histogram overlay"""
-        self.histogram.toggle()
-        return self.histogram.enabled
-    
-    def toggle_zebra(self):
-        """Toggle zebra pattern overlay"""
-        self.zebra.toggle()
-        return self.zebra.enabled
-    
-    def set_zebra_threshold(self, percent: int):
-        """Set zebra threshold percentage"""
-        self.zebra.set_threshold(percent)
     
     def clear_frame(self):
         """Clear the current frame and show no signal"""

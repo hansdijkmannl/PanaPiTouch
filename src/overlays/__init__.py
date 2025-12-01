@@ -5,8 +5,6 @@ from .vectorscope import VectorscopeOverlay
 from .focus_assist import FocusAssistOverlay
 from .grid_overlay import GridOverlay
 from .frame_guide_overlay import FrameGuideOverlay, FrameGuide
-from .histogram_overlay import HistogramOverlay
-from .zebra_overlay import ZebraOverlay
 
 __all__ = [
     'FalseColorOverlay', 
@@ -16,7 +14,5 @@ __all__ = [
     'GridOverlay',
     'FrameGuideOverlay',
     'FrameGuide',
-    'HistogramOverlay',
-    'ZebraOverlay',
 ]
 
