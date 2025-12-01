@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(80, 20)
+        self.osd_on_btn.setFixedSize(80, 25)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -626,7 +626,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(80, 20)
+        self.osd_off_btn.setFixedSize(80, 25)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -971,11 +971,14 @@ class MainWindow(QMainWindow):
         for name, (bgr, hex_color) in self._frame_colors.items():
             btn = QPushButton()
             btn.setFixedSize(25, 25)
+            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {hex_color};
                     border: 2px solid {COLORS['border']};
                     border-radius: 6px;
+                    padding: 0px;
+                    margin: 0px;
                 }}
                 QPushButton:hover {{
                     border-color: {COLORS['text']};
