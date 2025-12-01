@@ -656,20 +656,19 @@ class MainWindow(QMainWindow):
         osd_layout.addSpacing(8)
         
         # ===== D-Pad Navigation with OK in center =====
-        dpad_btn_size = 34
+        dpad_btn_size = 32
         dpad_spacing = 2
+        
+        # Calculate total D-pad width: 3 buttons × 32px + 2 spacings × 2px = 100px
+        dpad_total_width = (dpad_btn_size * 3) + (dpad_spacing * 2)
         
         dpad_style = f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 11px;
                 color: {COLORS['text']};
-                min-width: {dpad_btn_size}px;
-                max-width: {dpad_btn_size}px;
-                min-height: {dpad_btn_size}px;
-                max-height: {dpad_btn_size}px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['surface_hover']};
@@ -687,6 +686,7 @@ class MainWindow(QMainWindow):
         dpad_container_layout.addStretch()
         
         dpad_grid = QWidget()
+        dpad_grid.setFixedWidth(dpad_total_width)
         dpad_grid_layout = QGridLayout(dpad_grid)
         dpad_grid_layout.setContentsMargins(0, 0, 0, 0)
         dpad_grid_layout.setSpacing(dpad_spacing)
