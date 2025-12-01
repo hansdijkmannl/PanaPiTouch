@@ -594,7 +594,7 @@ class MainWindow(QMainWindow):
         onoff_layout.setSpacing(0)
         
         self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedHeight(32)
+        self.osd_on_btn.setFixedHeight(25)
         self.osd_on_btn.setCheckable(True)
         self.osd_on_btn.setStyleSheet(f"""
             QPushButton {{
@@ -605,7 +605,7 @@ class MainWindow(QMainWindow):
                 border-bottom-left-radius: 4px;
                 border-top-right-radius: 0px;
                 border-bottom-right-radius: 0px;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text_dim']};
             }}
@@ -622,7 +622,7 @@ class MainWindow(QMainWindow):
         onoff_layout.addWidget(self.osd_on_btn)
         
         self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedHeight(32)
+        self.osd_off_btn.setFixedHeight(25)
         self.osd_off_btn.setCheckable(True)
         self.osd_off_btn.setChecked(True)
         self.osd_off_btn.setStyleSheet(f"""
@@ -634,7 +634,7 @@ class MainWindow(QMainWindow):
                 border-bottom-left-radius: 0px;
                 border-top-right-radius: 4px;
                 border-bottom-right-radius: 4px;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text_dim']};
             }}
@@ -653,19 +653,23 @@ class MainWindow(QMainWindow):
         osd_layout.addWidget(onoff_container)
         
         # Spacing after ON/OFF
-        osd_layout.addSpacing(10)
+        osd_layout.addSpacing(8)
         
         # ===== D-Pad Navigation with OK in center =====
-        dpad_btn_size = 40
-        dpad_spacing = 4
+        dpad_btn_size = 36
+        dpad_spacing = 3
         
         dpad_style = f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                font-size: 14px;
+                font-size: 12px;
                 color: {COLORS['text']};
+                min-width: {dpad_btn_size}px;
+                max-width: {dpad_btn_size}px;
+                min-height: {dpad_btn_size}px;
+                max-height: {dpad_btn_size}px;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['surface_hover']};
@@ -727,17 +731,17 @@ class MainWindow(QMainWindow):
         osd_layout.addWidget(dpad_container)
         
         # Spacing before Cancel button
-        osd_layout.addSpacing(8)
+        osd_layout.addSpacing(6)
         
         # ===== Cancel Button =====
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedHeight(32)
+        cancel_btn.setFixedHeight(25)
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 11px;
                 font-weight: 600;
                 color: {COLORS['text']};
             }}
@@ -753,7 +757,7 @@ class MainWindow(QMainWindow):
         osd_layout.addWidget(cancel_btn)
         
         # Spacing before Scene picker
-        osd_layout.addSpacing(8)
+        osd_layout.addSpacing(6)
         
         self.scene_combo = QComboBox()
         self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
