@@ -30,12 +30,26 @@ class KeyboardManager(QObject):
     
     def _find_line_edits(self, widget):
         """Recursively find all QLineEdit widgets and install event filters"""
-        from PyQt6.QtWidgets import QLineEdit
+        from PyQt6.QtWidgets import QLineEdit, QComboBox
         
+        # Find QLineEdit widgets (but not those inside QComboBox)
         for child in widget.findChildren(QLineEdit):
-            if child not in self.line_edits:
+            # Skip QLineEdit widgets that are part of QComboBox (they're internal)
+            parent = child.parent()
+            is_combo_edit = False
+            while parent:
+                if isinstance(parent, QComboBox):
+                    is_combo_edit = True
+                    break
+                parent = parent.parent()
+            
+            if not is_combo_edit and child not in self.line_edits:
                 child.installEventFilter(self)
                 self.line_edits.append(child)
+        
+        # Also find QComboBox widgets to exclude them from keyboard triggers
+        for combo in widget.findChildren(QComboBox):
+            combo.installEventFilter(self)
     
     def setup_keyboard_overlay(self, parent_widget):
         """Setup keyboard overlay as floating widget on top of content"""
@@ -133,10 +147,25 @@ class KeyboardManager(QObject):
     def eventFilter(self, obj, event):
         """Filter events to detect QLineEdit focus, parent resize, and clicks outside keyboard"""
         from PyQt6.QtCore import QEvent
+        from PyQt6.QtWidgets import QLineEdit, QComboBox
         
         if event.type() == QEvent.Type.FocusIn:
+            # Don't show keyboard for QComboBox widgets
+            if isinstance(obj, QComboBox):
+                return super().eventFilter(obj, event)
+            # Only show keyboard for QLineEdit widgets
             if isinstance(obj, QLineEdit):
-                self._show_keyboard(obj)
+                # Double-check it's not part of a QComboBox
+                parent = obj.parent()
+                is_combo_edit = False
+                while parent:
+                    if isinstance(parent, QComboBox):
+                        is_combo_edit = True
+                        break
+                    parent = parent.parent()
+                
+                if not is_combo_edit:
+                    self._show_keyboard(obj)
         elif event.type() == QEvent.Type.FocusOut:
             if isinstance(obj, QLineEdit):
                 # Don't hide immediately - wait a bit in case focus moves to keyboard
@@ -375,6 +404,13 @@ class KeyboardManager(QObject):
         # Also schedule delayed updates to catch any async changes
         QTimer.singleShot(10, update_preview_delayed)
         QTimer.singleShot(100, update_preview_delayed)
+        
+        # Preserve cursor position - don't select all text when keyboard opens
+        # Get current cursor position and restore it (prevents Qt's default select-all behavior)
+        cursor_pos = line_edit.cursorPosition()
+        line_edit.setCursorPosition(cursor_pos)
+        # Clear any selection that might have been created by focus
+        line_edit.deselect()
         
         self.keyboard_container.setVisible(True)
         self._position_keyboard()

@@ -140,8 +140,13 @@ class CompanionPage(QWidget):
         js_code = """
         (function() {
             var el = document.activeElement;
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+            // Exclude SELECT (dropdown) elements - they don't need keyboard
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.tagName !== 'SELECT') {
                 var inputType = el.type || 'text';
+                // Also exclude input types that don't need keyboard (like 'select-one' dropdowns)
+                if (inputType === 'select-one' || inputType === 'select-multiple') {
+                    return JSON.stringify({focused: false});
+                }
                 var inputId = el.id || el.name || 'input';
                 var inputValue = el.value || '';
                 var placeholder = el.placeholder || '';
@@ -188,6 +193,19 @@ class CompanionPage(QWidget):
             field_name = placeholder.replace('...', '').strip() if placeholder else "Input"
         self.field_name_label.setText(f"{field_name}:")
         self.preview_field.setText(value)
+        
+        # Preserve cursor position in web input - don't select all text
+        js_code = """
+        (function() {
+            var el = document.activeElement;
+            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+                // Preserve cursor position, don't select all
+                var pos = el.selectionStart || el.value.length;
+                el.setSelectionRange(pos, pos);
+            }
+        })();
+        """
+        self.web_view.page().runJavaScript(js_code)
         
         self.keyboard_container.setVisible(True)
         self._position_keyboard()

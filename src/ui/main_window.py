@@ -6,7 +6,7 @@ The main window with page navigation, camera preview, and controls.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
-    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu
+    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
 from PyQt6.QtGui import QFont
@@ -86,14 +86,34 @@ class MainWindow(QMainWindow):
         # Remove window decorations for fullscreen app look (no title bar, no borders)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         
-        # Set window size based on display
-        self.setMinimumSize(1280, 720)
+        # Calculate window size to match 10.5" physical size on 15.4" screen
+        # Screen: 15.4" diagonal, 16:9, 1920x1080 → Physical: 13.42" x 7.55"
+        # Target: 10.5" diagonal, 16:10 → Physical: 8.90" x 5.56"
+        # Scale factor (width): 8.90 / 13.42 = 0.663
+        # Window size: 1273x795px (matches 8.90" x 5.56" physical size)
+        
+        screen_width = 1920
+        screen_height = 1080
+        scale_factor = 0.663  # 8.90" / 13.42"
+        
+        window_width = int(screen_width * scale_factor)  # 1273px
+        window_height = int(window_width * 10 / 16)  # 795px (16:10 aspect)
         
         # Set stylesheet
         self.setStyleSheet(STYLESHEET)
         
-        # Always show fullscreen for immersive experience (hides OS top bar)
-        self.showFullScreen()
+        # Set window size
+        self.setFixedSize(window_width, window_height)
+        
+        # Show window first to ensure screen geometry is available
+        self.show()
+        
+        # Center window on screen (creates black bars automatically)
+        # Use full screen geometry (not availableGeometry) to center on entire display
+        screen_geometry = self.screen().geometry()
+        x = (screen_geometry.width() - window_width) // 2
+        y = (screen_geometry.height() - window_height) // 2
+        self.move(x, y)
     
     def _setup_ui(self):
         """Setup the main UI"""
@@ -2075,8 +2095,8 @@ class MainWindow(QMainWindow):
             stream.add_frame_callback(self._on_frame_received)
             self.camera_streams[camera_id] = stream
         
-        # Start stream
-        self.camera_streams[camera_id].start()
+        # Start stream - try RTSP first, falls back to MJPEG automatically if RTSP fails
+        self.camera_streams[camera_id].start(use_rtsp=True)
         
         # Update UI
         self._update_camera_selection_ui(camera_id)
@@ -2383,30 +2403,146 @@ class MainWindow(QMainWindow):
     
     def _show_system_popup(self):
         """Show system popup with Reboot, Shutdown, and Close options"""
-        from PyQt6.QtWidgets import QMessageBox
+        # Create custom frameless dialog
+        dialog = QDialog(self)
+        dialog.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        dialog.setModal(True)
         
-        msg = QMessageBox(self)
-        msg.setWindowTitle("System Options")
-        msg.setText("Choose an action:")
-        msg.setIcon(QMessageBox.Icon.Question)
+        # Style the dialog
+        dialog.setStyleSheet(f"""
+            QDialog {{
+                background-color: {COLORS['surface']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 12px;
+            }}
+        """)
         
-        reboot_btn = msg.addButton("Reboot", QMessageBox.ButtonRole.AcceptRole)
-        shutdown_btn = msg.addButton("Shutdown", QMessageBox.ButtonRole.AcceptRole)
-        close_btn = msg.addButton("Close", QMessageBox.ButtonRole.AcceptRole)
-        cancel_btn = msg.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        # Main vertical layout to center content
+        main_layout = QVBoxLayout(dialog)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.addStretch()
         
-        msg.setDefaultButton(cancel_btn)
-        msg.exec()
+        # Grid layout for proper alignment
+        grid_layout = QGridLayout()
+        # Consistent 5px spacing between buttons (horizontal and vertical)
+        grid_layout.setSpacing(5)
+        grid_layout.setColumnStretch(0, 1)
+        grid_layout.setColumnStretch(1, 1)
+        grid_layout.setColumnStretch(2, 1)
+        grid_layout.setColumnStretch(3, 1)
         
-        clicked = msg.clickedButton()
+        # Row 0 - actions without save
+        reboot_btn = QPushButton("Reboot")
+        reboot_btn.setStyleSheet(self._get_popup_button_style())
+        reboot_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "reboot"))
         
-        if clicked == reboot_btn:
-            self._reboot_system()
-        elif clicked == shutdown_btn:
-            self._shutdown_system()
-        elif clicked == close_btn:
-            self._confirm_close()
-        # If cancel, do nothing
+        shutdown_btn = QPushButton("Shutdown")
+        shutdown_btn.setStyleSheet(self._get_popup_button_style())
+        shutdown_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "shutdown"))
+        
+        close_btn = QPushButton("Close")
+        close_btn.setStyleSheet(self._get_popup_button_style())
+        close_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "close"))
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        
+        grid_layout.addWidget(reboot_btn, 0, 0)
+        grid_layout.addWidget(shutdown_btn, 0, 1)
+        grid_layout.addWidget(close_btn, 0, 2)
+        grid_layout.addWidget(cancel_btn, 0, 3, 2, 1)  # Span 2 rows, 1 column
+        
+        # Row 1 - actions with save (aligned underneath, multiline text)
+        save_reboot_btn = QPushButton("Save &&\nReboot")
+        save_reboot_btn.setStyleSheet(self._get_popup_button_style(multiline=True))
+        save_reboot_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "save_reboot"))
+        
+        save_shutdown_btn = QPushButton("Save &&\nShutdown")
+        save_shutdown_btn.setStyleSheet(self._get_popup_button_style(multiline=True))
+        save_shutdown_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "save_shutdown"))
+        
+        save_close_btn = QPushButton("Save &&\nClose")
+        save_close_btn.setStyleSheet(self._get_popup_button_style(multiline=True))
+        save_close_btn.clicked.connect(lambda: self._handle_popup_action(dialog, "save_close"))
+        
+        grid_layout.addWidget(save_reboot_btn, 1, 0)
+        grid_layout.addWidget(save_shutdown_btn, 1, 1)
+        grid_layout.addWidget(save_close_btn, 1, 2)
+        
+        # Cancel button height: row 1 button height (44px) + spacing (5px) + row 2 button height (44px) = 93px
+        cancel_btn.setStyleSheet(self._get_popup_button_style(tall=True, height=93))
+        
+        # Add grid to main layout
+        main_layout.addLayout(grid_layout)
+        main_layout.addStretch()
+        
+        # Size and position - adjust for two rows with spacing
+        dialog.setFixedSize(650, 200)
+        dialog.move(
+            self.geometry().center().x() - dialog.width() // 2,
+            self.geometry().center().y() - dialog.height() // 2
+        )
+        
+        dialog.exec()
+    
+    def _get_popup_button_style(self, tall=False, height=None, multiline=False):
+        """Get button style for popup with floating effect"""
+        if tall and height:
+            height_style = f"min-height: {height}px; max-height: {height}px;"
+        elif tall:
+            height_style = "min-height: 100px;"
+        else:
+            height_style = "min-height: 44px;"
+        
+        # Multiline buttons need different padding and alignment
+        if multiline:
+            padding_style = "padding: 8px 12px;"
+            text_align = "text-align: center;"
+        else:
+            padding_style = "padding: 12px;"
+            text_align = ""
+            
+        return f"""
+            QPushButton {{
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: 600;
+                {padding_style}
+                {height_style}
+                margin: 0px;
+                {text_align}
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+                border-color: {COLORS['primary']};
+                margin: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+                color: {COLORS['background']};
+                margin: 0px;
+            }}
+        """
+    
+    def _handle_popup_action(self, dialog, action):
+        """Handle popup button action"""
+        dialog.accept()
+        if action == "reboot":
+            self._reboot_without_save()
+        elif action == "shutdown":
+            self._shutdown_without_save()
+        elif action == "close":
+            self._close_without_save()
+        elif action == "save_reboot":
+            self._save_and_reboot()
+        elif action == "save_shutdown":
+            self._save_and_shutdown()
+        elif action == "save_close":
+            self._save_and_close()
     
     def _confirm_close(self):
         """Show confirmation dialog before closing"""
@@ -2456,6 +2592,63 @@ class MainWindow(QMainWindow):
             subprocess.run(['sudo', 'reboot'], check=True)
         except Exception as e:
             print(f"Reboot failed: {e}")
+    
+    def _reboot_without_save(self):
+        """Reboot system without saving"""
+        import subprocess
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        try:
+            subprocess.run(['sudo', 'reboot'], check=True)
+        except Exception as e:
+            print(f"Reboot failed: {e}")
+    
+    def _shutdown_without_save(self):
+        """Shutdown system without saving"""
+        import subprocess
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        try:
+            subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=True)
+        except Exception as e:
+            print(f"Shutdown failed: {e}")
+    
+    def _close_without_save(self):
+        """Close application without saving"""
+        self._skip_close_dialog = True
+        self.close()
+    
+    def _save_and_reboot(self):
+        """Save settings and reboot system"""
+        import subprocess
+        self.settings.save()
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        try:
+            subprocess.run(['sudo', 'reboot'], check=True)
+        except Exception as e:
+            print(f"Reboot failed: {e}")
+    
+    def _save_and_shutdown(self):
+        """Save settings and shutdown system"""
+        import subprocess
+        self.settings.save()
+        # Perform cleanup without triggering closeEvent save dialog
+        self._skip_close_dialog = True
+        self.close()
+        try:
+            subprocess.run(['sudo', 'shutdown', '-h', 'now'], check=True)
+        except Exception as e:
+            print(f"Shutdown failed: {e}")
+    
+    def _save_and_close(self):
+        """Save settings and close application"""
+        self.settings.save()
+        self._skip_close_dialog = True
+        self.close()
     
     def _shutdown_system(self):
         """Show confirmation dialog with save option and shutdown the system"""

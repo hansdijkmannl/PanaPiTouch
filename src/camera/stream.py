@@ -65,12 +65,63 @@ class CameraStream:
     def error_message(self) -> str:
         return self._error_message
     
+    def enable_rtsp_and_set_fps(self) -> Tuple[bool, str]:
+        """Enable RTSP streaming and set frame rate to 25fps"""
+        auth = (self.config.username, self.config.password) if self.config.username else None
+        base_url = f"http://{self.config.ip_address}:{self.config.port}"
+        
+        try:
+            # Set frame rate to 25fps (command format may vary by camera model)
+            # Try common Panasonic commands for setting frame rate
+            fps_commands = [
+                f"{base_url}/cgi-bin/aw_cam?cmd=%23FPS25&res=1",  # Set FPS to 25
+                f"{base_url}/cgi-bin/aw_cam?cmd=FPS:25&res=1",    # Alternative format
+            ]
+            
+            for cmd_url in fps_commands:
+                try:
+                    response = requests.get(cmd_url, timeout=3, auth=auth)
+                    if response.status_code == 200:
+                        print(f"Frame rate set to 25fps: {cmd_url}")
+                        break
+                except:
+                    continue
+            
+            # Enable RTSP streaming (if needed)
+            rtsp_commands = [
+                f"{base_url}/cgi-bin/aw_cam?cmd=%23RTSP1&res=1",   # Enable RTSP
+                f"{base_url}/cgi-bin/aw_cam?cmd=RTSP:1&res=1",   # Alternative format
+            ]
+            
+            for cmd_url in rtsp_commands:
+                try:
+                    response = requests.get(cmd_url, timeout=3, auth=auth)
+                    if response.status_code == 200:
+                        print(f"RTSP enabled: {cmd_url}")
+                        break
+                except:
+                    continue
+            
+            return True, "RTSP configured"
+            
+        except Exception as e:
+            return False, str(e)
+    
+    def get_rtsp_url(self) -> str:
+        """Get RTSP stream URL for H.264 streaming"""
+        # Panasonic PTZ cameras RTSP URL format (from camera settings)
+        rtsp_port = 554  # Standard RTSP port
+        auth = f"{self.config.username}:{self.config.password}@" if self.config.username else ""
+        
+        # Camera RTSP URL format: MediaInput/h264/stream_1
+        return f"rtsp://{auth}{self.config.ip_address}:{rtsp_port}/MediaInput/h264/stream_1"
+    
     def get_stream_url(self) -> str:
         """Get MJPEG stream URL with resolution parameter for better performance"""
         auth = f"{self.config.username}:{self.config.password}@" if self.config.username else ""
         # Request specific resolution from camera to reduce bandwidth and processing
         w, h = self.config.resolution
-        return f"http://{auth}{self.config.ip_address}:{self.config.port}/cgi-bin/mjpeg?resolution={w}x{h}"
+        return f"http://{auth}{self.config.ip_address}:{self.config.port}/cgi-bin/mjpeg?resolution={w}x{h}&fps=25"
     
     def get_snapshot_url(self) -> str:
         """Get single frame URL"""
@@ -104,7 +155,7 @@ class CameraStream:
                 
                 # Optimize capture settings for performance
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
-                cap.set(cv2.CAP_PROP_FPS, 30)  # Request 30fps
+                cap.set(cv2.CAP_PROP_FPS, 25)  # Request 25fps
                 # Try to use hardware acceleration if available
                 try:
                     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -166,6 +217,100 @@ class CameraStream:
                 print(f"Stream error: {e}")
                 time.sleep(2)
     
+    def _capture_rtsp(self):
+        """Capture frames from RTSP stream (H.264) - Much better performance than MJPEG"""
+        # Enable RTSP and set frame rate to 25fps before starting stream
+        try:
+            success, message = self.enable_rtsp_and_set_fps()
+            if not success:
+                print(f"Warning: Could not configure RTSP: {message}, continuing anyway...")
+        except Exception as e:
+            print(f"Warning: RTSP configuration error: {e}, continuing anyway...")
+        
+        rtsp_url = self.get_rtsp_url()
+        rtsp_attempts = 0
+        max_rtsp_attempts = 2  # Try RTSP 2 times before falling back to MJPEG
+        
+        while self._running:
+            try:
+                # Create video capture with RTSP stream
+                print(f"Attempting to connect to RTSP stream: {rtsp_url}")
+                cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+                
+                # Give it a moment to open
+                time.sleep(0.5)
+                
+                # Optimize capture settings for RTSP
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
+                cap.set(cv2.CAP_PROP_FPS, 25)  # Set to 25fps
+                
+                if not cap.isOpened():
+                    rtsp_attempts += 1
+                    self._connected = False
+                    self._error_message = "Failed to open RTSP stream"
+                    print(f"Failed to open RTSP stream (attempt {rtsp_attempts}/{max_rtsp_attempts}): {rtsp_url}")
+                    
+                    # Fall back to MJPEG if RTSP fails
+                    if rtsp_attempts >= max_rtsp_attempts:
+                        print(f"RTSP failed after {max_rtsp_attempts} attempts, falling back to MJPEG...")
+                        try:
+                            cap.release()
+                        except:
+                            pass
+                        self._capture_mjpeg()
+                        return
+                    
+                    time.sleep(1)
+                    continue
+                
+                print(f"RTSP stream opened successfully: {rtsp_url}")
+                rtsp_attempts = 0  # Reset attempts on success
+                self._connected = True
+                self._error_message = ""
+                frame_count = 0
+                start_time = time.time()
+                
+                target_w, target_h = self.config.resolution
+                
+                while self._running:
+                    ret, frame = cap.read()
+                    
+                    if not ret:
+                        self._connected = False
+                        self._error_message = "RTSP stream disconnected"
+                        print("RTSP stream disconnected, will retry...")
+                        break
+                    
+                    # Resize if needed
+                    frame_h, frame_w = frame.shape[:2]
+                    if frame_w > target_w or frame_h > target_h:
+                        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_AREA)
+                    elif frame_w != target_w or frame_h != target_h:
+                        frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+                    
+                    # Update current frame
+                    with self._frame_lock:
+                        self._current_frame = frame
+                    
+                    # Calculate FPS
+                    frame_count += 1
+                    elapsed = time.time() - start_time
+                    if elapsed >= 1.0:
+                        self._fps = frame_count / elapsed
+                        frame_count = 0
+                        start_time = time.time()
+                    
+                    # Notify callbacks
+                    self._notify_callbacks(frame)
+                
+                cap.release()
+                
+            except Exception as e:
+                self._connected = False
+                self._error_message = str(e)
+                print(f"RTSP stream error: {e}")
+                time.sleep(2)
+    
     def _capture_snapshot(self):
         """Capture frames via repeated snapshots (fallback)"""
         snapshot_url = self.get_snapshot_url()
@@ -203,17 +348,24 @@ class CameraStream:
             # Limit snapshot rate
             time.sleep(0.033)  # ~30fps
     
-    def start(self, use_mjpeg: bool = True):
-        """Start capturing frames"""
+    def start(self, use_rtsp: bool = True, use_snapshot: bool = False):
+        """Start capturing frames
+        
+        Args:
+            use_rtsp: If True, use RTSP (H.264) streaming. If False, use MJPEG.
+            use_snapshot: If True, use snapshot mode (for thumbnails). Overrides use_rtsp.
+        """
         if self._running:
             return
         
         self._running = True
         
-        if use_mjpeg:
-            self._thread = threading.Thread(target=self._capture_mjpeg, daemon=True)
-        else:
+        if use_snapshot:
             self._thread = threading.Thread(target=self._capture_snapshot, daemon=True)
+        elif use_rtsp:
+            self._thread = threading.Thread(target=self._capture_rtsp, daemon=True)
+        else:
+            self._thread = threading.Thread(target=self._capture_mjpeg, daemon=True)
         
         self._thread.start()
     

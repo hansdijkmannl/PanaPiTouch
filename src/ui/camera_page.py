@@ -1195,7 +1195,7 @@ class CameraPage(QWidget):
         # Create and start stream
         stream = CameraStream(config)
         self._thumbnail_streams[camera.id] = stream
-        stream.start(use_mjpeg=False)  # Use snapshot mode for thumbnails
+        stream.start(use_rtsp=False, use_snapshot=True)  # Use snapshot mode for thumbnails
     
     def _update_all_thumbnails(self):
         """Update all camera thumbnails"""

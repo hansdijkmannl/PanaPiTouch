@@ -613,14 +613,14 @@ class SettingsPage(QWidget):
         self.backup_combo.setStyleSheet(self._get_input_style())
         restore_layout.addWidget(self.backup_combo)
         
-        # Action buttons row
+        # Action buttons row - equal width to match module width
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
         
         restore_btn = QPushButton("Restore")
         restore_btn.setStyleSheet(self._get_button_style(primary=True))
         restore_btn.clicked.connect(self._restore_backup)
-        action_row.addWidget(restore_btn)
+        action_row.addWidget(restore_btn, 1)  # Equal stretch
         
         delete_btn = QPushButton("Delete")
         delete_btn.setStyleSheet("""
@@ -631,8 +631,9 @@ class SettingsPage(QWidget):
                 color: #ef4444;
                 font-size: 14px;
                 font-weight: 500;
-                padding: 12px 20px;
-                min-height: 20px;
+                padding: 0px;
+                margin: 0px;
+                min-height: 44px;
             }
             QPushButton:hover {
                 background-color: rgba(239, 68, 68, 0.2);
@@ -642,7 +643,7 @@ class SettingsPage(QWidget):
             }
         """)
         delete_btn.clicked.connect(self._delete_backup)
-        action_row.addWidget(delete_btn)
+        action_row.addWidget(delete_btn, 1)  # Equal stretch
         
         action_row.addStretch()
         restore_layout.addLayout(action_row)
