@@ -6,7 +6,7 @@ The main window with page navigation, camera preview, and controls.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
-    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog
+    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
 from PyQt6.QtGui import QFont
@@ -2068,17 +2068,28 @@ class MainWindow(QMainWindow):
     
     def _select_camera(self, camera_id: int):
         """Select a camera to preview"""
-        # Stop current stream
-        if self.current_camera_id is not None:
-            if self.current_camera_id in self.camera_streams:
-                self.camera_streams[self.current_camera_id].stop()
+        # Store previous camera ID BEFORE changing current_camera_id
+        prev_camera_id = self.current_camera_id
         
-        self.current_camera_id = camera_id
         camera = self.settings.get_camera(camera_id)
         
         if not camera:
+            # Only clear if no valid camera
+            if prev_camera_id is not None and prev_camera_id in self.camera_streams:
+                self.camera_streams[prev_camera_id].remove_frame_callback(self._on_frame_received)
+                self.camera_streams[prev_camera_id].stop()
+            self.current_camera_id = None
             self.preview_widget.clear_frame()
             return
+        
+        # Remove callback from previous stream immediately to prevent flashing
+        # This stops old camera frames from updating the preview
+        if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
+            prev_stream = self.camera_streams[prev_camera_id]
+            prev_stream.remove_frame_callback(self._on_frame_received)
+        
+        # Update current camera ID
+        self.current_camera_id = camera_id
         
         # Create or reuse stream
         if camera_id not in self.camera_streams:
@@ -2092,17 +2103,30 @@ class MainWindow(QMainWindow):
                 resolution=(1280, 720)  # Reduced from 1920x1080 for better framerate
             )
             stream = CameraStream(config)
-            stream.add_frame_callback(self._on_frame_received)
             self.camera_streams[camera_id] = stream
         
-        # Start stream - try RTSP first, falls back to MJPEG automatically if RTSP fails
-        self.camera_streams[camera_id].start(use_rtsp=True)
+        # Add callback to new stream (only new camera will update preview)
+        self.camera_streams[camera_id].add_frame_callback(self._on_frame_received)
         
-        # Update UI
+        # Start new stream
+        self.camera_streams[camera_id].start()
+        
+        # Stop previous stream after a delay (allows new stream to start)
+        # This prevents resource waste but doesn't affect preview (callback already removed)
+        if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
+            # Stop previous stream after 1000ms (gives new stream time to connect)
+            QTimer.singleShot(1000, lambda: self._stop_previous_stream(prev_camera_id))
+        
+        # Update UI immediately
         self._update_camera_selection_ui(camera_id)
         
         # Update tally state for preview
         self._update_preview_tally()
+    
+    def _stop_previous_stream(self, camera_id: int):
+        """Stop a previous camera stream (called with delay to prevent flash)"""
+        if camera_id != self.current_camera_id and camera_id in self.camera_streams:
+            self.camera_streams[camera_id].stop()
     
     def _on_frame_received(self, frame):
         """Handle received frame from camera"""

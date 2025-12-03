@@ -92,6 +92,7 @@ class PreviewWidget(QWidget):
         # Set object name for styling
         self.setObjectName("previewFrame")
     
+    
     def _set_no_signal(self):
         """Display no signal message"""
         # Create a black frame with "No Signal" text

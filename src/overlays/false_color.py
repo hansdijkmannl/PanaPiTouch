@@ -1,8 +1,13 @@
 """
 False Color Overlay
 
-Displays exposure information using a color-coded overlay.
-Similar to professional broadcast monitors.
+Displays exposure information using IRE scale color-coded overlay.
+Matches Atomos monitor false color display standards.
+
+IRE (Institute of Radio Engineers) scale:
+- 0 IRE = Black level (7.5 IRE for NTSC, 0 IRE for PAL)
+- 100 IRE = White level
+- Standard video levels mapped to IRE values
 """
 import cv2
 import numpy as np
@@ -11,44 +16,93 @@ from typing import Tuple
 
 class FalseColorOverlay:
     """
-    False color overlay for exposure analysis.
+    False color overlay for exposure analysis using IRE scale.
     
-    Maps luminance values to colors:
-    - Purple/Blue: Underexposed (<5%)
-    - Blue: Very dark (5-10%)
-    - Cyan: Dark (10-20%)
-    - Green: Shadows (20-40%)
-    - Yellow-Green: Midtones (40-50%)
-    - Yellow: Skin tones (50-70%)
-    - Orange: Highlights (70-85%)
-    - Red: Overexposed (85-95%)
-    - White/Pink: Clipped (>95%)
+    Maps luminance values to IRE scale colors (Atomos-style):
+    - 0-10 IRE: Purple/Black - Crushed blacks
+    - 10-20 IRE: Blue - Underexposed shadows
+    - 20-30 IRE: Cyan - Dark areas
+    - 30-40 IRE: Green - Shadows
+    - 40-50 IRE: Yellow-Green - Lower midtones
+    - 50-60 IRE: Yellow - Midtones
+    - 60-70 IRE: Orange - Upper midtones
+    - 70-80 IRE: Red-Orange - Skin tones (typical)
+    - 80-90 IRE: Red - Highlights
+    - 90-100 IRE: Magenta/Pink - Overexposed
+    - 100+ IRE: White - Clipped whites
     """
     
     def __init__(self):
         self.enabled = False
         self.opacity = 0.8
-        self._lut = self._create_false_color_lut()
+        self._lut = self._create_ire_false_color_lut()
     
-    def _create_false_color_lut(self) -> np.ndarray:
-        """Create lookup table for false color mapping"""
+    def _luma_to_ire(self, luma_value: int) -> float:
+        """
+        Convert luma value (0-255) to IRE scale (0-100).
+        
+        IRE scale assumes:
+        - 0-16 = Black level (0 IRE for PAL, 7.5 IRE for NTSC)
+        - 16-235 = Video range (7.5-100 IRE for NTSC, 0-100 IRE for PAL)
+        - 235-255 = Above white (100+ IRE)
+        
+        Using standard PAL mapping (0 IRE = black):
+        - 0-16: 0 IRE (black)
+        - 16-235: 0-100 IRE (video range)
+        - 235-255: 100+ IRE (above white)
+        """
+        if luma_value <= 16:
+            return 0.0  # Black level
+        elif luma_value >= 235:
+            # Above white level - map to 100-120 IRE
+            excess = luma_value - 235
+            return 100.0 + (excess / 20.0) * 20.0  # Scale to 100-120 IRE
+        else:
+            # Video range: 16-235 maps to 0-100 IRE
+            return ((luma_value - 16) / (235 - 16)) * 100.0
+    
+    def _create_ire_false_color_lut(self) -> np.ndarray:
+        """Create lookup table for IRE-based false color mapping (Atomos-style)"""
         lut = np.zeros((256, 1, 3), dtype=np.uint8)
         
-        # Define color ranges (BGR format)
-        ranges = [
-            (0, 13, (128, 0, 128)),      # Purple - crushed blacks
-            (13, 26, (255, 0, 0)),        # Blue - underexposed
-            (26, 51, (255, 255, 0)),      # Cyan - dark
-            (51, 102, (0, 255, 0)),       # Green - shadows/dark mid
-            (102, 128, (0, 255, 128)),    # Yellow-green - midtones
-            (128, 179, (0, 255, 255)),    # Yellow - skin tones
-            (179, 217, (0, 165, 255)),    # Orange - highlights
-            (217, 243, (0, 0, 255)),      # Red - overexposed
-            (243, 256, (255, 200, 255)),  # Pink/white - clipped
-        ]
-        
-        for start, end, color in ranges:
-            lut[start:end] = color
+        # Atomos-style IRE color mapping (BGR format)
+        # Colors match professional monitor false color displays
+        for luma in range(256):
+            ire = self._luma_to_ire(luma)
+            
+            if ire < 10:
+                # 0-10 IRE: Purple/Black - Crushed blacks
+                lut[luma] = (128, 0, 128)
+            elif ire < 20:
+                # 10-20 IRE: Blue - Underexposed shadows
+                lut[luma] = (255, 0, 0)
+            elif ire < 30:
+                # 20-30 IRE: Cyan - Dark areas
+                lut[luma] = (255, 255, 0)
+            elif ire < 40:
+                # 30-40 IRE: Green - Shadows
+                lut[luma] = (0, 255, 0)
+            elif ire < 50:
+                # 40-50 IRE: Yellow-Green - Lower midtones
+                lut[luma] = (0, 255, 128)
+            elif ire < 60:
+                # 50-60 IRE: Yellow - Midtones
+                lut[luma] = (0, 255, 255)
+            elif ire < 70:
+                # 60-70 IRE: Orange - Upper midtones
+                lut[luma] = (0, 165, 255)
+            elif ire < 80:
+                # 70-80 IRE: Red-Orange - Skin tones (typical range)
+                lut[luma] = (0, 100, 255)
+            elif ire < 90:
+                # 80-90 IRE: Red - Highlights
+                lut[luma] = (0, 0, 255)
+            elif ire < 100:
+                # 90-100 IRE: Magenta/Pink - Overexposed
+                lut[luma] = (255, 0, 255)
+            else:
+                # 100+ IRE: White - Clipped whites
+                lut[luma] = (255, 255, 255)
         
         return lut
     
