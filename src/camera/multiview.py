@@ -385,7 +385,12 @@ class MultiviewManager:
             
             # Send to callback
             if self._frame_callback:
-                self._frame_callback(composite)
+                # Notify callback (error-handled)
+                if self._frame_callback:
+                    try:
+                        self._frame_callback(composite)
+                    except Exception as e:
+                        print(f"Multiview frame callback error: {e}")
             
             # Calculate FPS
             frame_count += 1

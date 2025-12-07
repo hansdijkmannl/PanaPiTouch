@@ -73,10 +73,15 @@ class PreviewWidget(QWidget):
         
         self._setup_ui()
         
-        # Update timer for display - 33ms = ~30fps target (matches camera framerate)
+        # Update timer for display - 40ms = ~25fps target (optimized for Pi)
+        # Lower frequency reduces CPU load while maintaining smooth playback
         self._update_timer = QTimer()
         self._update_timer.timeout.connect(self._update_display)
-        self._update_timer.start(33)
+        self._update_timer.start(40)  # 25fps - good balance for Pi
+        
+        # Frame rate limiting - track last update time
+        self._last_update_time = 0
+        self._min_update_interval = 0.04  # 25fps max
     
     def _setup_ui(self):
         """Setup the UI"""
@@ -173,27 +178,40 @@ class PreviewWidget(QWidget):
             pass
     
     def update_frame(self, frame: np.ndarray):
-        """Update the current frame from camera"""
-        if frame is None:
-            return
-        
-        # Store reference
-        self._current_frame = frame
-        
-        # Start worker if not already started (runs continuously)
-        if not self._worker_started:
-            self.frame_worker.start_processing()
-            self._worker_started = True
-        
-        # Send frame to worker (worker handles overlay vs pass-through internally)
-        self.frame_worker.update_frame(frame)
+        """Update the current frame from camera (error-handled)"""
+        try:
+            if frame is None:
+                return
+            
+            # Store reference
+            self._current_frame = frame
+            
+            # Start worker if not already started (runs continuously)
+            if not self._worker_started:
+                try:
+                    self.frame_worker.start_processing()
+                    self._worker_started = True
+                except Exception as e:
+                    # Worker might already be running or destroyed
+                    pass
+            
+            # Send frame to worker (worker handles overlay vs pass-through internally)
+            if hasattr(self, 'frame_worker') and self.frame_worker is not None:
+                self.frame_worker.update_frame(frame)
+        except Exception as e:
+            # Don't crash on frame update errors
+            pass
     
     def _on_frame_processed(self, processed_frame: np.ndarray):
-        """Handle processed frame from worker thread"""
-        if processed_frame is None:
-            return
-        
+        """Handle processed frame from worker thread (error-handled)"""
         try:
+            if processed_frame is None:
+                return
+            
+            # Check if widget still exists
+            if not hasattr(self, 'preview_label') or self.preview_label is None:
+                return
+            
             self._display_frame = processed_frame
             self._frame_dirty = True
         except Exception:
@@ -201,18 +219,34 @@ class PreviewWidget(QWidget):
             pass
     
     def _update_display(self):
-        """Update the display with current frame"""
+        """Update the display with current frame (rate-limited)"""
+        import time
+        
+        # Rate limiting - don't update more than 25fps
+        current_time = time.time()
+        if current_time - self._last_update_time < self._min_update_interval:
+            return  # Skip this update
+        
         if self._display_frame is not None and self._frame_dirty:
-            self._frame_dirty = False
-            self._update_pixmap(self._display_frame)
-            self.frame_updated.emit()
+            try:
+                self._frame_dirty = False
+                self._update_pixmap(self._display_frame)
+                self.frame_updated.emit()
+                self._last_update_time = current_time
+            except Exception as e:
+                # Widget might be destroyed - ignore errors
+                pass
     
     def set_tally_state(self, state: TallyState):
-        """Set tally state (affects border color)"""
-        self._tally_state = state
-        
-        # Update border style based on tally
-        if state == TallyState.PROGRAM:
+        """Set tally state (affects border color) (error-handled)"""
+        try:
+            if not hasattr(self, 'preview_label') or self.preview_label is None:
+                return
+            
+            self._tally_state = state
+            
+            # Update border style based on tally
+            if state == TallyState.PROGRAM:
             self.preview_label.setStyleSheet("""
                 QLabel {
                     background-color: #0a0a0f;
@@ -236,6 +270,9 @@ class PreviewWidget(QWidget):
                     border-radius: 4px;
                 }
             """)
+        except Exception:
+            # Ignore errors during tally state update
+            pass
     
     def toggle_false_color(self):
         """Toggle false color overlay"""
@@ -280,17 +317,25 @@ class PreviewWidget(QWidget):
         return self.frame_guide.enabled
     
     def clear_frame(self):
-        """Clear the current frame and show no signal"""
-        self._current_frame = None
-        self._display_frame = None
-        self._frame_dirty = False
-        
-        # Stop worker when clearing frame
-        if self._worker_started:
-            self.frame_worker.stop_processing()
-            self._worker_started = False
-        
-        self._set_no_signal()
+        """Clear the current frame and show no signal (error-handled)"""
+        try:
+            self._current_frame = None
+            self._display_frame = None
+            self._frame_dirty = False
+            
+            # Stop worker when clearing frame
+            if self._worker_started and hasattr(self, 'frame_worker') and self.frame_worker is not None:
+                try:
+                    self.frame_worker.stop_processing()
+                except Exception:
+                    pass
+                finally:
+                    self._worker_started = False
+            
+            self._set_no_signal()
+        except Exception:
+            # Ignore errors during cleanup
+            pass
     
     def resizeEvent(self, event):
         """Handle resize events"""
@@ -300,10 +345,14 @@ class PreviewWidget(QWidget):
             self._frame_dirty = True
     
     def closeEvent(self, event):
-        """Clean up worker thread on close"""
-        if self._worker_started:
-            self.frame_worker.stop_processing()
-        super().closeEvent(event)
+        """Clean up worker thread on close (error-handled)"""
+        try:
+            if self._worker_started and hasattr(self, 'frame_worker') and self.frame_worker is not None:
+                self.frame_worker.stop_processing()
+        except Exception:
+            pass
+        finally:
+            super().closeEvent(event)
     
     def mousePressEvent(self, event):
         """Handle mouse press for frame guide drag/resize"""

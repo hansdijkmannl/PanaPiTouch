@@ -65,9 +65,16 @@ class CameraStream:
     
     @property
     def current_frame(self) -> Optional[np.ndarray]:
-        with self._frame_lock:
-            # Return a copy to prevent external modification
-            return self._current_frame.copy() if self._current_frame is not None else None
+        """Get current frame (returns copy for thread safety)"""
+        try:
+            with self._frame_lock:
+                # Return a copy to prevent external modification
+                if self._current_frame is not None:
+                    return self._current_frame.copy()
+                return None
+        except Exception:
+            # Lock might fail if stream is being destroyed
+            return None
     
     @property
     def fps(self) -> float:
@@ -153,12 +160,21 @@ class CameraStream:
             self._callbacks.remove(callback)
     
     def _notify_callbacks(self, frame: np.ndarray):
-        """Notify all callbacks of new frame"""
-        for callback in self._callbacks:
+        """Notify all callbacks of new frame (thread-safe, error-handled)"""
+        # Create a copy of callbacks list to avoid modification during iteration
+        callbacks_to_call = list(self._callbacks)
+        
+        for callback in callbacks_to_call:
             try:
                 callback(frame)
             except Exception as e:
-                print(f"Frame callback error: {e}")
+                # Log error but don't crash - remove problematic callback
+                print(f"Frame callback error (removing callback): {e}")
+                try:
+                    if callback in self._callbacks:
+                        self._callbacks.remove(callback)
+                except:
+                    pass  # Ignore errors during cleanup
     
     def _capture_mjpeg(self):
         """Capture frames from MJPEG stream - optimized for Raspberry Pi"""
@@ -418,10 +434,12 @@ class CameraStream:
         if self._thread is not None:
             self._running = False  # Signal thread to stop
             try:
-                self._thread.join(timeout=0.5)  # Wait briefly for cleanup
-            except:
+                if self._thread.is_alive():
+                    self._thread.join(timeout=1.0)  # Wait for cleanup
+            except Exception:
                 pass
-            self._thread = None
+            finally:
+                self._thread = None
         
         self._running = True
         
@@ -444,11 +462,28 @@ class CameraStream:
         self._thread.start()
     
     def stop(self):
-        """Stop capturing frames"""
+        """Stop capturing frames (thread-safe)"""
+        if not self._running:
+            return  # Already stopped
+        
         self._running = False
+        
+        # Clear callbacks to prevent memory leaks
+        self._callbacks.clear()
+        
+        # Wait for thread to finish
         if self._thread:
-            self._thread.join(timeout=2)
-            self._thread = None
+            try:
+                self._thread.join(timeout=3)  # Increased timeout for cleanup
+            except Exception as e:
+                print(f"Error joining stream thread: {e}")
+            finally:
+                self._thread = None
+        
+        # Clear frame data
+        with self._frame_lock:
+            self._current_frame = None
+        
         self._connected = False
     
     def capture_single_frame(self) -> Optional[np.ndarray]:

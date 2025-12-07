@@ -1616,14 +1616,15 @@ class MainWindow(QMainWindow):
             # Don't crash - camera selection will happen later if user manually selects
     
     def _stop_demo_video(self):
-        """Stop demo video"""
+        """Stop demo video (thread-safe)"""
         # Set flag first to stop the loop
         self._demo_running = False
         
         # Wait for thread to finish (with timeout)
         if hasattr(self, '_demo_thread') and self._demo_thread:
             try:
-                self._demo_thread.join(timeout=2)  # Increased timeout
+                if self._demo_thread.is_alive():
+                    self._demo_thread.join(timeout=2)  # Increased timeout
             except Exception as e:
                 logger.warning(f"Error joining demo thread: {e}")
             finally:
@@ -1886,9 +1887,13 @@ class MainWindow(QMainWindow):
         print("Stopped multiview")
     
     def _on_multiview_frame(self, frame):
-        """Handle composite frame from multiview manager"""
-        if self._multiview_active:
-            self.preview_widget.update_frame(frame)
+        """Handle composite frame from multiview manager (error-handled)"""
+        try:
+            if self._multiview_active and frame is not None:
+                if hasattr(self, 'preview_widget') and self.preview_widget is not None:
+                    self.preview_widget.update_frame(frame)
+        except Exception as e:
+            logger.warning(f"Error in multiview frame callback: {e}")
     
     def _select_camera(self, camera_id: int):
         """Select a camera to preview with visual feedback"""
@@ -1900,12 +1905,17 @@ class MainWindow(QMainWindow):
         if not camera:
             # Only clear if no valid camera
             if prev_camera_id is not None and prev_camera_id in self.camera_streams:
-                self.camera_streams[prev_camera_id].remove_frame_callback(self._on_frame_received)
-                self.camera_streams[prev_camera_id].stop()
+                try:
+                    self.camera_streams[prev_camera_id].remove_frame_callback(self._on_frame_received)
+                    self.camera_streams[prev_camera_id].stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping previous camera: {e}")
             self.current_camera_id = None
-            self.preview_widget.clear_frame()
+            if hasattr(self, 'preview_widget') and self.preview_widget is not None:
+                self.preview_widget.clear_frame()
             logger.warning(f"Camera {camera_id} not found")
-            self.toast.show_message("Camera not found", duration=2000, error=True)
+            if hasattr(self, 'toast'):
+                self.toast.show_message("Camera not found", duration=2000, error=True)
             return
         
         try:
@@ -1948,13 +1958,21 @@ class MainWindow(QMainWindow):
             stream = self.camera_streams[camera_id]
             
             # Remove callback first to prevent duplicates, then add it
-            stream.remove_frame_callback(self._on_frame_received)
-            stream.add_frame_callback(self._on_frame_received)
+            try:
+                stream.remove_frame_callback(self._on_frame_received)
+                stream.add_frame_callback(self._on_frame_received)
+            except Exception as e:
+                logger.warning(f"Error managing callbacks: {e}")
             
             # Start new stream
             # The start() method checks if already running and returns early if so
             # Ensure consistent streaming method - use RTSP with MJPEG fallback (not snapshot)
-            stream.start(use_rtsp=True, use_snapshot=False, force_mjpeg=False)
+            try:
+                stream.start(use_rtsp=True, use_snapshot=False, force_mjpeg=False)
+            except Exception as e:
+                logger.error(f"Error starting stream: {e}", exc_info=True)
+                self.toast.show_message(f"Error starting {camera.name}", duration=2000, error=True)
+                return
             
             # Stop previous stream after a delay (allows new stream to start)
             # This prevents resource waste but doesn't affect preview (callback already removed)
@@ -1963,13 +1981,23 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(1000, lambda: self._stop_previous_stream(prev_camera_id))
             
             # Update UI immediately
-            self._update_camera_selection_ui(camera_id)
+            try:
+                self._update_camera_selection_ui(camera_id)
+            except Exception as e:
+                logger.warning(f"Error updating camera selection UI: {e}")
             
             # Update tally state for preview
-            self._update_preview_tally()
+            try:
+                self._update_preview_tally()
+            except Exception as e:
+                logger.warning(f"Error updating preview tally: {e}")
             
             # Show visual feedback
-            self.toast.show_message(f"Switched to {camera.name}", duration=1500)
+            try:
+                if hasattr(self, 'toast'):
+                    self.toast.show_message(f"Switched to {camera.name}", duration=1500)
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Error selecting camera {camera_id}: {e}")
             camera_name = camera.name if camera else f"Camera {camera_id}"
@@ -1977,90 +2005,123 @@ class MainWindow(QMainWindow):
     
     def _stop_previous_stream(self, camera_id: int):
         """Stop a previous camera stream (called with delay to prevent flash)"""
-        if camera_id != self.current_camera_id and camera_id in self.camera_streams:
-            self.camera_streams[camera_id].stop()
+        try:
+            if camera_id != self.current_camera_id and camera_id in self.camera_streams:
+                stream = self.camera_streams[camera_id]
+                # Remove callback before stopping
+                stream.remove_frame_callback(self._on_frame_received)
+                stream.stop()
+        except Exception as e:
+            logger.warning(f"Error stopping previous stream {camera_id}: {e}")
     
     def _on_frame_received(self, frame):
-        """Handle received frame from camera"""
-        import cv2
-        import numpy as np
-        
-        # Handle split view if enabled
-        if self._split_enabled and self._split_camera_id is not None:
-            split_frame = self._get_split_frame(frame)
-            if split_frame is not None:
-                frame = split_frame
-        
-        self.preview_widget.update_frame(frame)
+        """Handle received frame from camera (error-handled)"""
+        try:
+            if frame is None:
+                return
+            
+            # Safety check - ensure preview widget exists
+            if not hasattr(self, 'preview_widget') or self.preview_widget is None:
+                return
+            
+            import cv2
+            import numpy as np
+            
+            # Handle split view if enabled
+            if self._split_enabled and self._split_camera_id is not None:
+                try:
+                    split_frame = self._get_split_frame(frame)
+                    if split_frame is not None:
+                        frame = split_frame
+                except Exception as e:
+                    logger.warning(f"Error in split view: {e}")
+                    # Continue with main frame if split fails
+            
+            # Update preview widget (has its own error handling)
+            if hasattr(self, 'preview_widget') and self.preview_widget is not None:
+                self.preview_widget.update_frame(frame)
+        except Exception as e:
+            logger.error(f"Error in frame received callback: {e}", exc_info=True)
+            # Don't crash - just skip this frame
     
     def _get_split_frame(self, main_frame):
-        """Combine main frame with split camera frame"""
-        import cv2
-        import numpy as np
-        
-        # Get frame from second camera
-        if self._split_camera_id not in self.camera_streams:
+        """Combine main frame with split camera frame (error-handled)"""
+        try:
+            import cv2
+            import numpy as np
+            
+            if main_frame is None:
+                return None
+            
+            # Get frame from second camera
+            if self._split_camera_id not in self.camera_streams:
+                return None
+            
+            split_stream = self.camera_streams[self._split_camera_id]
+            if not hasattr(split_stream, 'current_frame'):
+                return None
+            
+            split_frame = split_stream.current_frame
+            
+            if split_frame is None:
+                return None
+            
+            h, w = main_frame.shape[:2]
+
+            if self._split_mode == 'side':
+                # Side by side - each camera gets half width
+                half_w = w // 2
+                
+                # Resize both frames to half width
+                main_resized = cv2.resize(main_frame, (half_w, h), interpolation=cv2.INTER_AREA)
+                split_resized = cv2.resize(split_frame, (half_w, h), interpolation=cv2.INTER_AREA)
+                
+                # Combine horizontally
+                combined = np.hstack([main_resized, split_resized])
+                
+                # Draw divider line
+                cv2.line(combined, (half_w, 0), (half_w, h), (255, 255, 255), 2)
+                
+                # Add labels
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                main_camera = self.settings.get_camera(self.current_camera_id)
+                split_camera = self.settings.get_camera(self._split_camera_id)
+                
+                if main_camera:
+                    cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
+                if split_camera:
+                    cv2.putText(combined, split_camera.name, (half_w + 10, 30), font, 0.7, (255, 255, 255), 2)
+                
+                return combined
+            
+            else:  # top/bottom
+                # Top and bottom - each camera gets half height
+                half_h = h // 2
+                
+                # Resize both frames to half height
+                main_resized = cv2.resize(main_frame, (w, half_h), interpolation=cv2.INTER_AREA)
+                split_resized = cv2.resize(split_frame, (w, half_h), interpolation=cv2.INTER_AREA)
+                
+                # Combine vertically
+                combined = np.vstack([main_resized, split_resized])
+                
+                # Draw divider line
+                cv2.line(combined, (0, half_h), (w, half_h), (255, 255, 255), 2)
+                
+                # Add labels
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                main_camera = self.settings.get_camera(self.current_camera_id)
+                split_camera = self.settings.get_camera(self._split_camera_id)
+                
+                if main_camera:
+                    cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
+                if split_camera:
+                    cv2.putText(combined, split_camera.name, (10, half_h + 30), font, 0.7, (255, 255, 255), 2)
+                
+                return combined
+        except Exception as e:
+            logger.error(f"Error in split frame generation: {e}", exc_info=True)
             return None
-        
-        split_stream = self.camera_streams[self._split_camera_id]
-        split_frame = split_stream.get_frame()
-        
-        if split_frame is None:
-            return None
-        
-        h, w = main_frame.shape[:2]
-        
-        if self._split_mode == 'side':
-            # Side by side - each camera gets half width
-            half_w = w // 2
-            
-            # Resize both frames to half width
-            main_resized = cv2.resize(main_frame, (half_w, h), interpolation=cv2.INTER_AREA)
-            split_resized = cv2.resize(split_frame, (half_w, h), interpolation=cv2.INTER_AREA)
-            
-            # Combine horizontally
-            combined = np.hstack([main_resized, split_resized])
-            
-            # Draw divider line
-            cv2.line(combined, (half_w, 0), (half_w, h), (255, 255, 255), 2)
-            
-            # Add labels
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            main_camera = self.settings.get_camera(self.current_camera_id)
-            split_camera = self.settings.get_camera(self._split_camera_id)
-            
-            if main_camera:
-                cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
-            if split_camera:
-                cv2.putText(combined, split_camera.name, (half_w + 10, 30), font, 0.7, (255, 255, 255), 2)
-            
-            return combined
-        
-        else:  # top/bottom
-            # Top and bottom - each camera gets half height
-            half_h = h // 2
-            
-            # Resize both frames to half height
-            main_resized = cv2.resize(main_frame, (w, half_h), interpolation=cv2.INTER_AREA)
-            split_resized = cv2.resize(split_frame, (w, half_h), interpolation=cv2.INTER_AREA)
-            
-            # Combine vertically
-            combined = np.vstack([main_resized, split_resized])
-            
-            # Draw divider line
-            cv2.line(combined, (0, half_h), (w, half_h), (255, 255, 255), 2)
-            
-            # Add labels
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            main_camera = self.settings.get_camera(self.current_camera_id)
-            split_camera = self.settings.get_camera(self._split_camera_id)
-            
-            if main_camera:
-                cv2.putText(combined, main_camera.name, (10, 30), font, 0.7, (255, 255, 255), 2)
-            if split_camera:
-                cv2.putText(combined, split_camera.name, (10, half_h + 30), font, 0.7, (255, 255, 255), 2)
-            
-            return combined
     
     def _update_camera_buttons(self):
         """Update camera buttons - rebuild to match settings"""
@@ -2136,16 +2197,24 @@ class MainWindow(QMainWindow):
                 break
     
     def _update_preview_tally(self):
-        """Update preview tally based on ATEM state"""
-        if self.current_camera_id is None:
-            self.preview_widget.set_tally_state(TallyState.OFF)
-            return
-        
-        # Get ATEM input for current camera
-        atem_input = self.settings.atem.input_mapping.get(str(self.current_camera_id))
-        if atem_input:
-            state = self.atem_controller.get_tally_state(atem_input)
-            self.preview_widget.set_tally_state(state)
+        """Update preview tally based on ATEM state (error-handled)"""
+        try:
+            if not hasattr(self, 'preview_widget') or self.preview_widget is None:
+                return
+            
+            if self.current_camera_id is None:
+                self.preview_widget.set_tally_state(TallyState.OFF)
+                return
+            
+            # Get ATEM input for current camera
+            atem_input = self.settings.atem.input_mapping.get(str(self.current_camera_id))
+            if atem_input:
+                state = self.atem_controller.get_tally_state(atem_input)
+                self.preview_widget.set_tally_state(state)
+            else:
+                self.preview_widget.set_tally_state(TallyState.OFF)
+        except Exception as e:
+            logger.warning(f"Error updating preview tally: {e}")
         else:
             self.preview_widget.set_tally_state(TallyState.OFF)
     
@@ -2267,15 +2336,25 @@ class MainWindow(QMainWindow):
             self.atem_status.setToolTip("ATEM not configured")
     
     def _update_fps(self):
-        """Update FPS display"""
-        if self._multiview_active:
-            # Show multiview FPS
-            self.fps_label.setText(f"{self.multiview_manager.fps:.1f} fps")
-        elif self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
-            stream = self.camera_streams[self.current_camera_id]
-            self.fps_label.setText(f"{stream.fps:.1f} fps")
-        else:
-            self.fps_label.setText("-- fps")
+        """Update FPS display (error-handled)"""
+        try:
+            if not hasattr(self, 'fps_label') or self.fps_label is None:
+                return
+            
+            if self._multiview_active:
+                # Show multiview FPS
+                if hasattr(self, 'multiview_manager'):
+                    self.fps_label.setText(f"{self.multiview_manager.fps:.1f} fps")
+                else:
+                    self.fps_label.setText("-- fps")
+            elif self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
+                stream = self.camera_streams[self.current_camera_id]
+                self.fps_label.setText(f"{stream.fps:.1f} fps")
+            else:
+                self.fps_label.setText("-- fps")
+        except Exception as e:
+            # Don't crash on FPS update errors
+            pass
     
     def _show_system_popup(self):
         """Show system popup with Reboot, Shutdown, and Close options"""

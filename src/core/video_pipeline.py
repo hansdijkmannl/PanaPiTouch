@@ -40,9 +40,15 @@ class FrameWorker(QThread):
                 return
             
             # Keep only the latest frame (drop old ones)
+            # Only copy if we need to (when queue is not empty, we'll process it)
             self._frame_queue.clear()
+            # Copy frame to avoid modification during processing
+            # This is necessary for thread safety
             self._frame_queue.append(frame.copy())
             self._condition.wakeOne()  # Wake up the processing loop
+        except Exception as e:
+            # Prevent crashes from mutex errors
+            pass
         finally:
             self._mutex.unlock()
     
