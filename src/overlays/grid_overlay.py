@@ -84,7 +84,7 @@ class GridOverlay(Overlay):
     
     def toggle(self):
         """Toggle grid overlay"""
-        # Toggle is handled by base class
+        super().toggle()
     
     def toggle_rule_of_thirds(self) -> bool:
         """Toggle rule of thirds"""
