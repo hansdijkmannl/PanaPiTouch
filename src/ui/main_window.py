@@ -6,7 +6,8 @@ The main window with page navigation, camera preview, and controls.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
-    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog, QComboBox
+    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog, QComboBox,
+    QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
 from PyQt6.QtGui import QFont
@@ -20,8 +21,13 @@ from .settings_page import SettingsPage
 from .camera_page import CameraPage
 from .companion_page import CompanionPage
 from .joystick_widget import JoystickWidget
-from .keyboard_manager import KeyboardManager
+# OSK disabled - using Pi OS built-in keyboard instead
+# from .keyboard_manager import KeyboardManager
+from .toast import ToastWidget
 from .styles import STYLESHEET, COLORS
+from ..core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -53,8 +59,6 @@ class MainWindow(QMainWindow):
         self.multiview_manager.set_frame_callback(self._on_multiview_frame)
         self._multiview_active = False
         
-        # OSD state tracking
-        self._osd_active = False
         
         # Split view state
         self._split_enabled = False
@@ -64,20 +68,33 @@ class MainWindow(QMainWindow):
         # ATEM controller
         self.atem_controller = ATEMTallyController()
         
-        # Keyboard manager for on-screen keyboard
+        # OSK disabled - using Pi OS built-in keyboard instead
         self.keyboard_manager = None
+        
+        # Pi OS keyboard management
+        self._keyboard_command = self._find_keyboard_command()
+        
+        # Toast notification widget
+        self.toast = ToastWidget(self)
         
         self._setup_window()
         self._setup_ui()
         self._setup_connections()
+        self._setup_keyboard_dismissal()
         
         # Initialize ATEM connection if configured
         if self.settings.atem.enabled and self.settings.atem.ip_address:
             self.atem_controller.connect(self.settings.atem.ip_address)
         
-        # Select first camera if available
+        # Start with demo mode to give services time to initialize
+        # This ensures all system services are ready before connecting to cameras
+        # Delay ensures UI is fully set up before starting demo
+        QTimer.singleShot(500, self._start_demo_on_init)
+        
+        # Switch to first camera after delay (gives services time to start)
         if self.settings.cameras:
-            self._select_camera(self.settings.cameras[0].id)
+            # Longer delay to ensure services are fully initialized
+            QTimer.singleShot(3000, lambda: self._switch_from_demo_to_camera(self.settings.cameras[0].id))
     
     def _setup_window(self):
         """Setup window properties"""
@@ -147,9 +164,10 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.page_stack, stretch=1)
         
+        # OSK disabled - using Pi OS built-in keyboard instead
         # Setup keyboard manager and overlay (as floating overlay, not in layout)
-        self.keyboard_manager = KeyboardManager(self)
-        self.keyboard_manager.setup_keyboard_overlay(central_widget)
+        # self.keyboard_manager = KeyboardManager(self)
+        # self.keyboard_manager.setup_keyboard_overlay(central_widget)
     
     def _create_nav_bar(self) -> QWidget:
         """Create the top navigation bar"""
@@ -347,7 +365,7 @@ class MainWindow(QMainWindow):
         """Create right side panel with collapsible PTZ controls, OSD menu, overlays, and multiview"""
         # Outer container with fixed width
         panel = QFrame()
-        panel.setFixedWidth(200)
+        panel.setFixedWidth(250)
         panel.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS['surface']};
@@ -558,268 +576,7 @@ class MainWindow(QMainWindow):
         self.ptz_panel.setVisible(False)
         layout.addWidget(self.ptz_panel)
         
-        # ===== OSD Menu Toggle Button =====
-        self.osd_toggle_btn = QPushButton("▼ OSD Menu")
-        self.osd_toggle_btn.setCheckable(True)
-        self.osd_toggle_btn.setFixedHeight(36)
-        self.osd_toggle_btn.setStyleSheet(toggle_btn_style)
-        self.osd_toggle_btn.clicked.connect(self._toggle_osd_panel)
-        layout.addWidget(self.osd_toggle_btn)
-        
-        # OSD Menu Panel (collapsible) - matches app style
-        self.osd_panel = QFrame()
-        self.osd_panel.setStyleSheet(f"""
-            QFrame {{
-                background-color: {COLORS['surface_light']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-            }}
-        """)
-        osd_layout = QVBoxLayout(self.osd_panel)
-        osd_layout.setContentsMargins(6, 8, 6, 8)
-        osd_layout.setSpacing(6)
-        
-        # ===== ON / OFF Segmented Toggle =====
-        onoff_container = QWidget()
-        onoff_layout = QHBoxLayout(onoff_container)
-        onoff_layout.setContentsMargins(0, 0, 0, 0)
-        onoff_layout.setSpacing(0)
-        
-        self.osd_on_btn = QPushButton("ON")
-        self.osd_on_btn.setFixedSize(80, 25)
-        self.osd_on_btn.setCheckable(True)
-        self.osd_on_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-right: none;
-                border-top-left-radius: 4px;
-                border-bottom-left-radius: 4px;
-                border-top-right-radius: 0px;
-                border-bottom-right-radius: 0px;
-                font-size: 11px;
-                font-weight: 600;
-                color: {COLORS['text_dim']};
-                padding: 0px;
-                margin: 0px;
-            }}
-            QPushButton:checked {{
-                background-color: {COLORS['surface_hover']};
-                color: {COLORS['text']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['primary']};
-                color: {COLORS['background']};
-            }}
-        """)
-        self.osd_on_btn.clicked.connect(self._osd_on)
-        onoff_layout.addWidget(self.osd_on_btn)
-        
-        self.osd_off_btn = QPushButton("OFF")
-        self.osd_off_btn.setFixedSize(80, 25)
-        self.osd_off_btn.setCheckable(True)
-        self.osd_off_btn.setChecked(True)
-        self.osd_off_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-left: none;
-                border-top-left-radius: 0px;
-                border-bottom-left-radius: 0px;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-                font-size: 11px;
-                font-weight: 600;
-                color: {COLORS['text_dim']};
-                padding: 0px;
-                margin: 0px;
-            }}
-            QPushButton:checked {{
-                background-color: {COLORS['surface_hover']};
-                color: {COLORS['text']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['primary']};
-                color: {COLORS['background']};
-            }}
-        """)
-        self.osd_off_btn.clicked.connect(self._osd_off)
-        onoff_layout.addWidget(self.osd_off_btn)
-        
-        osd_layout.addWidget(onoff_container)
-        
-        # Spacing after ON/OFF (10px margin at bottom)
-        osd_layout.addSpacing(10)
-        
-        # ===== D-Pad Navigation with OK in center =====
-        dpad_total_width = 160  # Fixed container width
-        dpad_spacing = 4
-        
-        # Calculate button size: (160px - 2 spacings × 4px) / 3 buttons = 50px
-        dpad_btn_size = (dpad_total_width - (dpad_spacing * 2)) // 3
-        
-        dpad_style = f"""
-            QPushButton {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                font-size: 12px;
-                font-weight: 600;
-                color: {COLORS['text']};
-                padding: 0px;
-                margin: 0px;
-                min-width: {dpad_btn_size}px;
-                max-width: {dpad_btn_size}px;
-                min-height: {dpad_btn_size}px;
-                max-height: {dpad_btn_size}px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['surface_hover']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['primary']};
-                color: {COLORS['background']};
-            }}
-        """
-        
-        # D-pad container (centered)
-        dpad_container = QWidget()
-        dpad_container_layout = QHBoxLayout(dpad_container)
-        dpad_container_layout.setContentsMargins(0, 0, 0, 0)
-        dpad_container_layout.addStretch()
-        
-        dpad_grid = QWidget()
-        dpad_grid.setFixedWidth(dpad_total_width)
-        dpad_grid_layout = QGridLayout(dpad_grid)
-        dpad_grid_layout.setContentsMargins(0, 0, 0, 0)
-        dpad_grid_layout.setSpacing(dpad_spacing)
-        # Prevent columns from stretching
-        dpad_grid_layout.setColumnStretch(0, 0)
-        dpad_grid_layout.setColumnStretch(1, 0)
-        dpad_grid_layout.setColumnStretch(2, 0)
-        dpad_grid_layout.setRowStretch(0, 0)
-        dpad_grid_layout.setRowStretch(1, 0)
-        dpad_grid_layout.setRowStretch(2, 0)
-        
-        # Up arrow
-        osd_up = QPushButton("▲")
-        osd_up.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_up.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        osd_up.setStyleSheet(dpad_style)
-        osd_up.clicked.connect(lambda: self._osd_navigate("up"))
-        dpad_grid_layout.addWidget(osd_up, 0, 1)
-        
-        # Left arrow
-        osd_left = QPushButton("◀")
-        osd_left.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_left.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        osd_left.setStyleSheet(dpad_style)
-        osd_left.clicked.connect(lambda: self._osd_navigate("left"))
-        dpad_grid_layout.addWidget(osd_left, 1, 0)
-        
-        # OK button (center)
-        osd_ok = QPushButton("OK")
-        osd_ok.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_ok.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        osd_ok.setStyleSheet(dpad_style)
-        osd_ok.clicked.connect(lambda: self._osd_navigate("ok"))
-        dpad_grid_layout.addWidget(osd_ok, 1, 1)
-        
-        # Right arrow
-        osd_right = QPushButton("▶")
-        osd_right.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_right.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        osd_right.setStyleSheet(dpad_style)
-        osd_right.clicked.connect(lambda: self._osd_navigate("right"))
-        dpad_grid_layout.addWidget(osd_right, 1, 2)
-        
-        # Down arrow
-        osd_down = QPushButton("▼")
-        osd_down.setFixedSize(dpad_btn_size, dpad_btn_size)
-        osd_down.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        osd_down.setStyleSheet(dpad_style)
-        osd_down.clicked.connect(lambda: self._osd_navigate("down"))
-        dpad_grid_layout.addWidget(osd_down, 2, 1)
-        
-        dpad_container_layout.addWidget(dpad_grid)
-        dpad_container_layout.addStretch()
-        osd_layout.addWidget(dpad_container)
-        
-        # Spacing before Cancel button
-        osd_layout.addSpacing(6)
-        
-        # ===== Cancel Button =====
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFixedSize(160, 25)
-        cancel_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: 600;
-                color: {COLORS['text']};
-                padding: 0px;
-                margin: 0px;
-            }}
-            QPushButton:hover {{
-                background-color: {COLORS['surface_hover']};
-            }}
-            QPushButton:pressed {{
-                background-color: {COLORS['primary']};
-                color: {COLORS['background']};
-            }}
-        """)
-        cancel_btn.clicked.connect(lambda: self._osd_navigate("back"))
-        osd_layout.addWidget(cancel_btn)
-        
-        # Spacing before Scene picker
-        osd_layout.addSpacing(6)
-        
-        self.scene_combo = QComboBox()
-        self.scene_combo.addItems(["Scene 1", "Scene 2", "Scene 3", "Scene 4"])
-        self.scene_combo.setFixedSize(160, 32)
-        self.scene_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 12px;
-                font-weight: 600;
-                color: {COLORS['text']};
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 30px;
-            }}
-            QComboBox::down-arrow {{
-                image: none;
-                border-left: 6px solid transparent;
-                border-right: 6px solid transparent;
-                border-top: 8px solid {COLORS['text']};
-                margin-right: 10px;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                selection-background-color: {COLORS['primary']};
-                color: {COLORS['text']};
-                padding: 4px;
-            }}
-            QComboBox QAbstractItemView::item {{
-                min-height: 36px;
-                padding: 8px;
-            }}
-        """)
-        self.scene_combo.currentIndexChanged.connect(self._on_scene_changed)
-        osd_layout.addWidget(self.scene_combo)
-        
-        # Add spacing at bottom after Scene dropdown
-        osd_layout.addSpacing(12)
-        
-        self.osd_panel.setVisible(False)
-        layout.addWidget(self.osd_panel)
+        # Camera Control UI removed
         
         # ===== Overlays Toggle Button =====
         self.overlays_toggle_btn = QPushButton("▼ Overlays")
@@ -841,6 +598,28 @@ class MainWindow(QMainWindow):
         overlays_layout = QVBoxLayout(self.overlays_panel)
         overlays_layout.setContentsMargins(8, 8, 8, 8)
         overlays_layout.setSpacing(6)
+        
+        # Overlay disable all button (for performance)
+        disable_all_btn = QPushButton("Disable All Overlays")
+        disable_all_btn.setObjectName("overlayButton")
+        disable_all_btn.setFixedHeight(32)
+        disable_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 10px;
+                font-weight: 600;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+            }}
+        """)
+        disable_all_btn.clicked.connect(self._disable_all_overlays)
+        overlays_layout.addWidget(disable_all_btn)
         
         # Overlay toggle buttons
         self.overlay_buttons = {}
@@ -1233,17 +1012,36 @@ class MainWindow(QMainWindow):
         self.ptz_panel.setVisible(visible)
         self.ptz_toggle_btn.setText("▲ PTZ Control" if visible else "▼ PTZ Control")
     
-    def _toggle_osd_panel(self):
-        """Toggle OSD menu panel visibility"""
-        visible = self.osd_toggle_btn.isChecked()
-        self.osd_panel.setVisible(visible)
-        self.osd_toggle_btn.setText("▲ OSD Menu" if visible else "▼ OSD Menu")
     
     def _toggle_overlays_panel(self):
         """Toggle Overlays panel visibility"""
         visible = self.overlays_toggle_btn.isChecked()
         self.overlays_panel.setVisible(visible)
         self.overlays_toggle_btn.setText("▲ Overlays" if visible else "▼ Overlays")
+    
+    def _disable_all_overlays(self):
+        """Disable all overlays for better performance"""
+        try:
+            # Disable all overlays
+            self.preview_widget.false_color.disable()
+            self.preview_widget.waveform.disable()
+            self.preview_widget.vectorscope.disable()
+            self.preview_widget.focus_assist.disable()
+            self.preview_widget.grid_overlay.disable()
+            self.preview_widget.frame_guide.disable()
+            
+            # Update worker state
+            self.preview_widget._update_worker_state()
+            
+            # Update button states
+            for btn in self.overlay_buttons.values():
+                btn.setChecked(False)
+            
+            self.toast.show_message("All overlays disabled", duration=1500)
+            logger.info("All overlays disabled for performance")
+        except Exception as e:
+            logger.error(f"Error disabling overlays: {e}")
+            self.toast.show_message("Error disabling overlays", duration=2000, error=True)
     
     def _toggle_grid_panel(self):
         """Toggle Grid panel visibility"""
@@ -1259,7 +1057,7 @@ class MainWindow(QMainWindow):
         
         # When opening, enable the last used frame guide if one exists
         if visible and self.preview_widget.frame_guide.active_guide is not None:
-            self.preview_widget.frame_guide.enabled = True
+            self.preview_widget.frame_guide.set_enabled(True)
     
     def _toggle_split_panel(self):
         """Toggle Split Compare panel visibility"""
@@ -1309,7 +1107,7 @@ class MainWindow(QMainWindow):
         category = self.frame_category_combo.currentText()
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
             # Enable frame guide when user explicitly selects from dropdown
-            self.preview_widget.frame_guide.enabled = True
+            self.preview_widget.frame_guide.set_enabled(True)
             # Update Custom Frame button state based on whether guide has custom_rect
             if self.preview_widget.frame_guide.drag_mode:
                 self.drag_mode_btn.setChecked(True)
@@ -1320,7 +1118,7 @@ class MainWindow(QMainWindow):
         """Toggle drag/resize mode for frame guide"""
         if self.drag_mode_btn.isChecked():
             self.preview_widget.frame_guide.enable_drag_mode()
-            self.preview_widget.frame_guide.enabled = True
+            self.preview_widget.frame_guide.set_enabled(True)
         else:
             self.preview_widget.frame_guide.disable_drag_mode()
     
@@ -1362,7 +1160,7 @@ class MainWindow(QMainWindow):
     def _clear_frame_guide(self):
         """Clear the active frame guide"""
         self.preview_widget.frame_guide.clear()
-        self.preview_widget.frame_guide.enabled = False
+        self.preview_widget.frame_guide.set_enabled(False)
         self.drag_mode_btn.setChecked(False)
     
     def _populate_split_cameras(self):
@@ -1512,57 +1310,6 @@ class MainWindow(QMainWindow):
         # Reset slider to center
         self.zoom_slider.setValue(0)
     
-    def _osd_toggle_menu(self):
-        """Toggle camera OSD on/off"""
-        if self.current_camera_id is None:
-            print("OSD toggle: No camera selected")
-            return
-        
-        camera = self.settings.get_camera(self.current_camera_id)
-        if not camera:
-            print("OSD toggle: Camera not found")
-            return
-        
-        import requests
-        try:
-            # Try multiple OSD command formats - different camera models may use different formats
-            base_url = f"http://{camera.ip_address}"
-            auth = (camera.username, camera.password)
-            
-            # Try multiple OSD command formats - different camera models may use different formats
-            osd_commands = [
-                f"{base_url}/cgi-bin/aw_ptz?cmd=%23DA1&res=1",  # Standard format with URL encoding
-                f"{base_url}/cgi-bin/aw_ptz?cmd=%23DA1",        # Without res parameter
-                f"{base_url}/cgi-bin/aw_ptz?cmd=#DA1&res=1",   # Without URL encoding
-                f"{base_url}/cgi-bin/aw_cam?cmd=%23DA1&res=1", # Alternative endpoint
-            ]
-            
-            success = False
-            for url in osd_commands:
-                try:
-                    response = requests.get(url, auth=auth, timeout=2.0)
-                    if response.status_code == 200:
-                        print(f"OSD command sent successfully: {url}")
-                        success = True
-                        break
-                    else:
-                        print(f"OSD command returned status {response.status_code}: {url}")
-                except requests.exceptions.RequestException as e:
-                    print(f"OSD command failed: {url} - {e}")
-                    continue
-            
-            if success:
-                # Toggle OSD state and update button appearance
-                self._osd_active = not self._osd_active
-                self._update_osd_button_style()
-                
-                # Delay tally off command to avoid interfering with OSD opening
-                # Send tally off command after a short delay to prevent tally from getting stuck
-                QTimer.singleShot(500, self._tally_off)
-            else:
-                print("OSD toggle: All command attempts failed")
-        except Exception as e:
-            print(f"OSD toggle error: {e}")
     
     def _tally_off(self):
         """Turn off camera tally light to fix stuck tally issue"""
@@ -1576,29 +1323,56 @@ class MainWindow(QMainWindow):
         import requests
         import time
         try:
-            # Try multiple Panasonic tally off commands
-            # Different camera models may use different commands
-            tally_commands = [
-                "%23TAL0",  # Tally off (common command)
-                "%23TL0",   # Alternative format
-            ]
-            
-            base_url = f"http://{camera.ip_address}/cgi-bin/aw_ptz"
+            base_url = f"http://{camera.ip_address}"
             auth = (camera.username, camera.password)
             
-            # Try each command (some cameras may respond to different formats)
-            for cmd in tally_commands:
-                try:
-                    url = f"{base_url}?cmd={cmd}&res=1"
-                    requests.get(url, auth=auth, timeout=0.5)
-                    # Small delay between commands
-                    time.sleep(0.1)
-                except:
-                    pass
-                    
-            print("Tally off command sent")
+            # Try multiple Panasonic tally/LED off commands
+            # Different camera models and endpoints may use different commands
+            # LED0/LED1 commands are often used for tally control
+            tally_commands = [
+                # aw_cam endpoint commands (often more reliable for tally)
+                ("aw_cam", "%23LED0"),  # LED off (tally off) via aw_cam
+                ("aw_cam", "LED0"),     # Without URL encoding
+                ("aw_cam", "%23TAL0"), # Tally off via aw_cam
+                ("aw_cam", "TAL0"),    # Without encoding
+                
+                # aw_ptz endpoint commands
+                ("aw_ptz", "%23LED0"),  # LED off via aw_ptz
+                ("aw_ptz", "LED0"),     # Without encoding
+                ("aw_ptz", "%23TAL0"), # Tally off via aw_ptz
+                ("aw_ptz", "TAL0"),     # Without encoding
+                ("aw_ptz", "%23TL0"),   # Alternative format
+                ("aw_ptz", "TL0"),      # Without encoding
+            ]
+            
+            # Send each command multiple times with delays to ensure it's received
+            for attempt in range(5):  # Send 5 times
+                for endpoint, cmd in tally_commands:
+                    try:
+                        # Try with res parameter
+                        url = f"{base_url}/cgi-bin/{endpoint}?cmd={cmd}&res=1"
+                        response = requests.get(url, auth=auth, timeout=0.5)
+                        if response.status_code == 200:
+                            print(f"Tally off command sent successfully: {endpoint}?cmd={cmd}")
+                        
+                        # Also try without res parameter
+                        url2 = f"{base_url}/cgi-bin/{endpoint}?cmd={cmd}"
+                        response2 = requests.get(url2, auth=auth, timeout=0.5)
+                        if response2.status_code == 200:
+                            print(f"Tally off command sent successfully (no res): {endpoint}?cmd={cmd}")
+                        
+                        time.sleep(0.03)
+                    except Exception as e:
+                        pass
+                
+                if attempt < 4:  # Don't sleep after last attempt
+                    time.sleep(0.15)  # Delay between batches
+            
+            print(f"Tally off commands sent (5 attempts, {len(tally_commands)} command variants)")
         except Exception as e:
             print(f"Tally off error: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _on_scene_changed(self, index: int):
         """Load scene file on camera"""
@@ -1619,51 +1393,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Scene load error: {e}")
     
-    def _update_osd_button_style(self):
-        """Update OSD ON/OFF toggle based on active state"""
-        self.osd_on_btn.setChecked(self._osd_active)
-        self.osd_off_btn.setChecked(not self._osd_active)
-    
-    def _osd_on(self):
-        """Turn OSD ON"""
-        if not self._osd_active:
-            self._osd_toggle_menu()
-        else:
-            self._update_osd_button_style()
-    
-    def _osd_off(self):
-        """Turn OSD OFF"""
-        if self._osd_active:
-            self._osd_toggle_menu()
-        else:
-            self._update_osd_button_style()
-    
-    def _osd_navigate(self, direction: str):
-        """Navigate camera OSD menu"""
-        if self.current_camera_id is None:
-            return
-        
-        camera = self.settings.get_camera(self.current_camera_id)
-        if not camera:
-            return
-        
-        import requests
-        try:
-            # Panasonic OSD navigation commands
-            cmd_map = {
-                "up": "#TAU",      # Menu up
-                "down": "#TAD",    # Menu down
-                "left": "#TAL",    # Menu left
-                "right": "#TAR",   # Menu right
-                "ok": "#TAA",      # Menu enter/select
-                "back": "#TAB",    # Menu back
-            }
-            
-            if direction in cmd_map:
-                url = f"http://{camera.ip_address}/cgi-bin/aw_ptz?cmd=%23{cmd_map[direction][1:]}&res=1"
-                requests.get(url, auth=(camera.username, camera.password), timeout=0.5)
-        except Exception as e:
-            print(f"OSD navigate error: {e}")
     
     def _create_camera_bar(self) -> QWidget:
         """Create bottom camera selection bar"""
@@ -1795,46 +1524,117 @@ class MainWindow(QMainWindow):
     def _toggle_demo_mode(self):
         """Toggle demo video mode"""
         if self.demo_btn.isChecked():
-            # Stop multiview if running
-            if self._multiview_active:
-                self._stop_multiview()
-            
-            # Stop current camera stream
-            if self.current_camera_id is not None:
-                if self.current_camera_id in self.camera_streams:
-                    self.camera_streams[self.current_camera_id].stop()
-            
-            # Uncheck all camera buttons
-            checked_btn = self.camera_button_group.checkedButton()
-            if checked_btn:
-                self.camera_button_group.setExclusive(False)
-                checked_btn.setChecked(False)
-                self._set_camera_button_unchecked_style(checked_btn)
-                checked_btn.update()
-                self.camera_button_group.setExclusive(True)
-            
-            self.current_camera_id = None
-            
-            # Start demo mode
-            self._start_demo_video()
+            try:
+                # Stop multiview if running
+                if self._multiview_active:
+                    self._stop_multiview()
+                
+                # Stop current camera stream and remove callbacks
+                if self.current_camera_id is not None:
+                    if self.current_camera_id in self.camera_streams:
+                        stream = self.camera_streams[self.current_camera_id]
+                        stream.remove_frame_callback(self._on_frame_received)
+                        stream.stop()
+                
+                # Uncheck all camera buttons
+                checked_btn = self.camera_button_group.checkedButton()
+                if checked_btn:
+                    self.camera_button_group.setExclusive(False)
+                    checked_btn.setChecked(False)
+                    self._set_camera_button_unchecked_style(checked_btn)
+                    checked_btn.update()
+                    self.camera_button_group.setExclusive(True)
+                
+                self.current_camera_id = None
+                
+                # Small delay to ensure camera streams are fully stopped
+                QTimer.singleShot(100, self._start_demo_video)
+            except Exception as e:
+                logger.error(f"Error starting demo mode: {e}", exc_info=True)
+                self.demo_btn.setChecked(False)
         else:
             # Stop demo mode
-            self._stop_demo_video()
+            try:
+                self._stop_demo_video()
+            except Exception as e:
+                logger.error(f"Error stopping demo mode: {e}", exc_info=True)
     
     def _start_demo_video(self):
         """Start playing demo video with test pattern"""
         import threading
         
-        self._demo_running = True
-        self._demo_thread = threading.Thread(target=self._demo_video_loop, daemon=True)
-        self._demo_thread.start()
+        # Ensure demo is not already running
+        if self._demo_running:
+            logger.warning("Demo mode already running, skipping start")
+            return
+        
+        # Ensure preview widget exists
+        if not hasattr(self, 'preview_widget') or self.preview_widget is None:
+            logger.warning("Preview widget not available, cannot start demo")
+            return
+        
+        try:
+            self._demo_running = True
+            self._demo_thread = threading.Thread(target=self._demo_video_loop, daemon=True)
+            self._demo_thread.start()
+        except Exception as e:
+            logger.error(f"Error starting demo video thread: {e}", exc_info=True)
+            self._demo_running = False
+            self._demo_thread = None
+            if hasattr(self, 'demo_btn'):
+                self.demo_btn.setChecked(False)
+    
+    def _start_demo_on_init(self):
+        """Start demo mode on initialization (called with delay to ensure UI is ready)"""
+        try:
+            # Ensure preview widget exists before starting demo
+            if not hasattr(self, 'preview_widget') or self.preview_widget is None:
+                logger.warning("Preview widget not ready, skipping demo mode start")
+                return
+            
+            # Set demo button to checked state
+            if hasattr(self, 'demo_btn'):
+                self.demo_btn.setChecked(True)
+            # Start demo video
+            self._start_demo_video()
+        except Exception as e:
+            logger.error(f"Error starting demo mode on init: {e}", exc_info=True)
+            # Don't crash - just skip demo mode
+    
+    def _switch_from_demo_to_camera(self, camera_id: int):
+        """Switch from demo mode to a camera (called after initialization delay)"""
+        try:
+            # Stop demo mode if running
+            if self._demo_running:
+                self._stop_demo_video()
+                if hasattr(self, 'demo_btn'):
+                    self.demo_btn.setChecked(False)
+            # Select the camera
+            self._select_camera(camera_id)
+        except Exception as e:
+            logger.error(f"Error switching from demo to camera {camera_id}: {e}", exc_info=True)
+            # Don't crash - camera selection will happen later if user manually selects
     
     def _stop_demo_video(self):
         """Stop demo video"""
+        # Set flag first to stop the loop
         self._demo_running = False
+        
+        # Wait for thread to finish (with timeout)
         if hasattr(self, '_demo_thread') and self._demo_thread:
-            self._demo_thread.join(timeout=1)
-        self.preview_widget.clear_frame()
+            try:
+                self._demo_thread.join(timeout=2)  # Increased timeout
+            except Exception as e:
+                logger.warning(f"Error joining demo thread: {e}")
+            finally:
+                self._demo_thread = None
+        
+        # Clear preview after thread is stopped
+        if hasattr(self, 'preview_widget') and self.preview_widget is not None:
+            try:
+                self.preview_widget.clear_frame()
+            except Exception as e:
+                logger.warning(f"Error clearing preview frame: {e}")
     
     def _demo_video_loop(self):
         """Generate demo video frames with test pattern"""
@@ -1893,8 +1693,15 @@ class MainWindow(QMainWindow):
             cv2.putText(frame, "Demo Video", (width // 2 - 150, height // 2 + 60), 
                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 2)
             
-            # Send frame to preview
-            self.preview_widget.update_frame(frame)
+            # Send frame to preview (safety check - only if demo is still running)
+            if self._demo_running and hasattr(self, 'preview_widget') and self.preview_widget is not None:
+                try:
+                    self.preview_widget.update_frame(frame)
+                except Exception as e:
+                    # If preview widget is destroyed or in bad state, stop demo
+                    logger.warning(f"Error updating preview in demo mode: {e}")
+                    self._demo_running = False
+                    break
             
             frame_count += 1
             
@@ -1966,17 +1773,34 @@ class MainWindow(QMainWindow):
             self._select_camera(camera.id)
     
     def _toggle_overlay(self, overlay_key: str):
-        """Toggle an overlay"""
-        if overlay_key == "false_color":
-            enabled = self.preview_widget.toggle_false_color()
-        elif overlay_key == "waveform":
-            enabled = self.preview_widget.toggle_waveform()
-        elif overlay_key == "vectorscope":
-            enabled = self.preview_widget.toggle_vectorscope()
-        elif overlay_key == "focus_assist":
-            enabled = self.preview_widget.toggle_focus_assist()
-        else:
-            return
+        """Toggle an overlay with visual feedback"""
+        overlay_names = {
+            "false_color": "False Color",
+            "waveform": "Waveform",
+            "vectorscope": "Vectorscope",
+            "focus_assist": "Focus Assist"
+        }
+        
+        try:
+            if overlay_key == "false_color":
+                enabled = self.preview_widget.toggle_false_color()
+            elif overlay_key == "waveform":
+                enabled = self.preview_widget.toggle_waveform()
+            elif overlay_key == "vectorscope":
+                enabled = self.preview_widget.toggle_vectorscope()
+            elif overlay_key == "focus_assist":
+                enabled = self.preview_widget.toggle_focus_assist()
+            else:
+                return
+            
+            # Show visual feedback
+            name = overlay_names.get(overlay_key, overlay_key)
+            status = "ON" if enabled else "OFF"
+            self.toast.show_message(f"{name} {status}", duration=1500)
+            logger.debug(f"Toggled {overlay_key}: {enabled}")
+        except Exception as e:
+            logger.error(f"Error toggling overlay {overlay_key}: {e}")
+            self.toast.show_message(f"Error toggling overlay", duration=2000, error=True)
         
         self.overlay_buttons[overlay_key].setChecked(enabled)
     
@@ -2067,7 +1891,7 @@ class MainWindow(QMainWindow):
             self.preview_widget.update_frame(frame)
     
     def _select_camera(self, camera_id: int):
-        """Select a camera to preview"""
+        """Select a camera to preview with visual feedback"""
         # Store previous camera ID BEFORE changing current_camera_id
         prev_camera_id = self.current_camera_id
         
@@ -2080,48 +1904,76 @@ class MainWindow(QMainWindow):
                 self.camera_streams[prev_camera_id].stop()
             self.current_camera_id = None
             self.preview_widget.clear_frame()
+            logger.warning(f"Camera {camera_id} not found")
+            self.toast.show_message("Camera not found", duration=2000, error=True)
             return
         
-        # Remove callback from previous stream immediately to prevent flashing
-        # This stops old camera frames from updating the preview
-        if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
-            prev_stream = self.camera_streams[prev_camera_id]
-            prev_stream.remove_frame_callback(self._on_frame_received)
-        
-        # Update current camera ID
-        self.current_camera_id = camera_id
-        
-        # Create or reuse stream
-        if camera_id not in self.camera_streams:
-            # Use 1280x720 for better performance on Raspberry Pi
-            # This reduces processing overhead by ~56% (fewer pixels to process)
-            config = StreamConfig(
-                ip_address=camera.ip_address,
-                port=camera.port,
-                username=camera.username,
-                password=camera.password,
-                resolution=(1280, 720)  # Reduced from 1920x1080 for better framerate
-            )
-            stream = CameraStream(config)
-            self.camera_streams[camera_id] = stream
-        
-        # Add callback to new stream (only new camera will update preview)
-        self.camera_streams[camera_id].add_frame_callback(self._on_frame_received)
-        
-        # Start new stream
-        self.camera_streams[camera_id].start()
-        
-        # Stop previous stream after a delay (allows new stream to start)
-        # This prevents resource waste but doesn't affect preview (callback already removed)
-        if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
-            # Stop previous stream after 1000ms (gives new stream time to connect)
-            QTimer.singleShot(1000, lambda: self._stop_previous_stream(prev_camera_id))
-        
-        # Update UI immediately
-        self._update_camera_selection_ui(camera_id)
-        
-        # Update tally state for preview
-        self._update_preview_tally()
+        try:
+            logger.info(f"Selecting camera: {camera.name} ({camera.ip_address})")
+            
+            # Stop demo mode if running (must be done before starting camera)
+            if self._demo_running:
+                self._stop_demo_video()
+                if hasattr(self, 'demo_btn'):
+                    self.demo_btn.setChecked(False)
+            
+            # Stop multiview if running
+            if self._multiview_active:
+                self._stop_multiview()
+            
+            # Remove callback from previous stream immediately to prevent flashing
+            # This stops old camera frames from updating the preview
+            if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
+                prev_stream = self.camera_streams[prev_camera_id]
+                prev_stream.remove_frame_callback(self._on_frame_received)
+            
+            # Update current camera ID
+            self.current_camera_id = camera_id
+            
+            # Create or reuse stream
+            if camera_id not in self.camera_streams:
+                # Use 1280x720 for better performance on Raspberry Pi
+                # This reduces processing overhead by ~56% (fewer pixels to process)
+                config = StreamConfig(
+                    ip_address=camera.ip_address,
+                    port=camera.port,
+                    username=camera.username,
+                    password=camera.password,
+                    resolution=(1280, 720)  # Reduced from 1920x1080 for better framerate
+                )
+                stream = CameraStream(config)
+                self.camera_streams[camera_id] = stream
+            
+            # Get stream for this camera
+            stream = self.camera_streams[camera_id]
+            
+            # Remove callback first to prevent duplicates, then add it
+            stream.remove_frame_callback(self._on_frame_received)
+            stream.add_frame_callback(self._on_frame_received)
+            
+            # Start new stream
+            # The start() method checks if already running and returns early if so
+            # Ensure consistent streaming method - use RTSP with MJPEG fallback (not snapshot)
+            stream.start(use_rtsp=True, use_snapshot=False, force_mjpeg=False)
+            
+            # Stop previous stream after a delay (allows new stream to start)
+            # This prevents resource waste but doesn't affect preview (callback already removed)
+            if prev_camera_id is not None and prev_camera_id != camera_id and prev_camera_id in self.camera_streams:
+                # Stop previous stream after 1000ms (gives new stream time to connect)
+                QTimer.singleShot(1000, lambda: self._stop_previous_stream(prev_camera_id))
+            
+            # Update UI immediately
+            self._update_camera_selection_ui(camera_id)
+            
+            # Update tally state for preview
+            self._update_preview_tally()
+            
+            # Show visual feedback
+            self.toast.show_message(f"Switched to {camera.name}", duration=1500)
+        except Exception as e:
+            logger.error(f"Error selecting camera {camera_id}: {e}")
+            camera_name = camera.name if camera else f"Camera {camera_id}"
+            self.toast.show_message(f"Error connecting to {camera_name}", duration=2000, error=True)
     
     def _stop_previous_stream(self, camera_id: int):
         """Stop a previous camera stream (called with delay to prevent flash)"""
@@ -2796,4 +2648,119 @@ class MainWindow(QMainWindow):
         
         else:
             super().keyPressEvent(event)
+    
+    def _find_keyboard_command(self):
+        """Find available Pi OS keyboard command"""
+        import shutil
+        # Try common keyboard commands in order of preference
+        keyboard_commands = [
+            'matchbox-keyboard',  # Common on Raspberry Pi OS
+            'onboard',            # Alternative keyboard
+            'florence',           # Another alternative
+        ]
+        
+        for cmd in keyboard_commands:
+            if shutil.which(cmd):
+                return cmd
+        
+        return None
+    
+    def _dismiss_keyboard(self):
+        """Dismiss Pi OS on-screen keyboard"""
+        if not self._keyboard_command:
+            return
+        
+        import subprocess
+        try:
+            # Try to kill keyboard processes
+            if self._keyboard_command == 'matchbox-keyboard':
+                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif self._keyboard_command == 'onboard':
+                subprocess.run(['pkill', '-f', 'onboard'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif self._keyboard_command == 'florence':
+                subprocess.run(['pkill', '-f', 'florence'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            # Also try D-Bus method for Squeekboard (newer Pi OS)
+            try:
+                subprocess.run(['dbus-send', '--type=method_call', '--dest=org.gnome.Shell',
+                              '/org/gnome/Shell', 'org.gnome.Shell.ShowOSK', 'boolean:false'],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
+            except:
+                pass
+        except Exception:
+            pass
+    
+    def _setup_keyboard_dismissal(self):
+        """Setup keyboard dismissal on focus out and clicks outside input fields"""
+        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QComboBox
+        
+        # Install event filter on all input widgets
+        def install_filters(widget):
+            """Recursively install event filters on input widgets"""
+            for child in widget.findChildren(QLineEdit):
+                child.installEventFilter(self)
+            for child in widget.findChildren(QTextEdit):
+                child.installEventFilter(self)
+            for child in widget.findChildren(QPlainTextEdit):
+                child.installEventFilter(self)
+            # Note: QComboBox has internal QLineEdit, so we handle it separately
+        
+        # Install filters on all pages
+        install_filters(self.preview_page)
+        install_filters(self.camera_page)
+        install_filters(self.settings_page)
+        install_filters(self.companion_page)
+    
+    def eventFilter(self, obj, event):
+        """Filter events to dismiss keyboard when input fields lose focus"""
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit
+        
+        # Dismiss keyboard when input field loses focus
+        if isinstance(obj, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            if event.type() == QEvent.Type.FocusOut:
+                # Small delay to allow focus to move to another input field
+                QTimer.singleShot(100, self._check_and_dismiss_keyboard)
+        
+        return super().eventFilter(obj, event)
+    
+    def _check_and_dismiss_keyboard(self):
+        """Check if any input field has focus, dismiss keyboard if not"""
+        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit
+        
+        # Check if any input field currently has focus
+        focused_widget = QApplication.focusWidget()
+        if not isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            self._dismiss_keyboard()
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press to dismiss keyboard when clicking outside input fields"""
+        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QComboBox
+        
+        # Get the widget at the global click position
+        global_pos = self.mapToGlobal(event.pos())
+        clicked_widget = QApplication.widgetAt(global_pos)
+        
+        # Walk up the parent chain to find if we clicked on an input field
+        widget = clicked_widget
+        is_input_field = False
+        while widget:
+            if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                # Clicked on an input field, don't dismiss
+                is_input_field = True
+                break
+            if isinstance(widget, QComboBox):
+                # Clicked on a combo box, don't dismiss (it might open dropdown)
+                is_input_field = True
+                break
+            widget = widget.parent()
+        
+        # If we didn't click on an input field, dismiss the keyboard
+        if not is_input_field:
+            self._dismiss_keyboard()
+        
+        super().mousePressEvent(event)
 

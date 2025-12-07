@@ -9,6 +9,7 @@ from typing import Tuple, Dict, List, Optional
 from dataclasses import dataclass
 import json
 from pathlib import Path
+from .base import Overlay
 
 
 @dataclass
@@ -21,7 +22,7 @@ class FrameGuide:
     custom_rect: Optional[Tuple[int, int, int, int]] = None  # x, y, w, h (normalized 0-1000) for drag-created frames
 
 
-class FrameGuideOverlay:
+class FrameGuideOverlay(Overlay):
     """
     Frame guide overlay for aspect ratio markers.
     
@@ -55,7 +56,7 @@ class FrameGuideOverlay:
     }
     
     def __init__(self):
-        self.enabled = False
+        super().__init__()
         self.active_guide: Optional[FrameGuide] = None
         self.custom_guides: List[FrameGuide] = []
         
@@ -375,7 +376,7 @@ class FrameGuideOverlay:
         Returns:
             Frame with frame guide overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         if self.active_guide is None and not self.drag_mode:
@@ -449,7 +450,7 @@ class FrameGuideOverlay:
     
     def toggle(self):
         """Toggle frame guide overlay"""
-        self.enabled = not self.enabled
+        super().toggle()
     
     def clear(self):
         """Clear the active guide"""

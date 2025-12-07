@@ -6,9 +6,10 @@ Highlights in-focus areas using edge detection (focus peaking).
 import cv2
 import numpy as np
 from typing import Tuple
+from .base import Overlay
 
 
-class FocusAssistOverlay:
+class FocusAssistOverlay(Overlay):
     """
     Focus assist overlay (focus peaking).
     
@@ -17,7 +18,7 @@ class FocusAssistOverlay:
     """
     
     def __init__(self):
-        self.enabled = False
+        super().__init__()
         self.color = (0, 0, 255)  # Red highlighting (BGR)
         self.threshold = 50
         self.sensitivity = 'medium'  # 'low', 'medium', 'high'
@@ -33,33 +34,32 @@ class FocusAssistOverlay:
         return thresholds.get(self.sensitivity, 50)
     
     def _detect_focus(self, frame: np.ndarray) -> np.ndarray:
-        """Detect in-focus areas using edge detection"""
-        # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        """Detect in-focus areas using edge detection - optimized for performance"""
+        # Downsample frame first for faster processing
+        h, w = frame.shape[:2]
+        scale = 2  # Process at half resolution
+        small_frame = cv2.resize(frame, (w // scale, h // scale))
         
-        # Apply Gaussian blur to reduce noise
+        # Convert to grayscale
+        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+        
+        # Apply Gaussian blur to reduce noise (smaller kernel for speed)
         blurred = cv2.GaussianBlur(gray, (3, 3), 0)
         
-        # Use Laplacian for edge detection (good for focus detection)
+        # Use only Laplacian for speed (skip Sobel - it's expensive)
         laplacian = cv2.Laplacian(blurred, cv2.CV_64F)
         laplacian = np.uint8(np.absolute(laplacian))
         
-        # Also use Sobel for directional edges
-        sobel_x = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=3)
-        sobel_y = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=3)
-        sobel = np.sqrt(sobel_x**2 + sobel_y**2)
-        sobel = np.uint8(np.clip(sobel, 0, 255))
-        
-        # Combine edge maps
-        edges = cv2.addWeighted(laplacian, 0.5, sobel, 0.5, 0)
-        
         # Apply threshold
         threshold = self._get_threshold()
-        _, mask = cv2.threshold(edges, threshold, 255, cv2.THRESH_BINARY)
+        _, mask = cv2.threshold(laplacian, threshold, 255, cv2.THRESH_BINARY)
         
         # Optional: dilate to make edges more visible
         kernel = np.ones((2, 2), np.uint8)
         mask = cv2.dilate(mask, kernel, iterations=1)
+        
+        # Resize mask back to original frame size
+        mask = cv2.resize(mask, (w, h), interpolation=cv2.INTER_NEAREST)
         
         return mask
     
@@ -73,7 +73,7 @@ class FocusAssistOverlay:
         Returns:
             Frame with focus peaking overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         # Detect focus areas
@@ -102,7 +102,7 @@ class FocusAssistOverlay:
     
     def toggle(self):
         """Toggle focus assist"""
-        self.enabled = not self.enabled
+        super().toggle()
     
     def set_color(self, color: Tuple[int, int, int]):
         """Set highlight color (BGR)"""

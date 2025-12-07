@@ -7,9 +7,10 @@ import cv2
 import numpy as np
 from typing import Tuple, Optional
 import math
+from .base import Overlay
 
 
-class VectorscopeOverlay:
+class VectorscopeOverlay(Overlay):
     """
     Vectorscope overlay for color analysis.
     
@@ -18,10 +19,10 @@ class VectorscopeOverlay:
     """
     
     def __init__(self):
-        self.enabled = False
+        super().__init__()
         self.size = 200  # Diameter
         self.position = 'bottom-left'
-        self.opacity = 0.85
+        self._opacity = 0.85
         self.show_graticule = True
         self._graticule: Optional[np.ndarray] = None
     
@@ -94,8 +95,9 @@ class VectorscopeOverlay:
         # Convert to YCrCb
         ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
         
-        # Downsample for performance
-        scale = max(1, frame.shape[0] // 200)
+        # Aggressive downsampling for performance (process fewer pixels)
+        # Sample every Nth pixel based on frame size
+        scale = max(2, frame.shape[0] // 150)  # More aggressive downsampling
         ycrcb_small = ycrcb[::scale, ::scale]
         
         # Get Cr (red-diff) and Cb (blue-diff) channels
@@ -106,8 +108,9 @@ class VectorscopeOverlay:
         cr = (cr / 128) * radius
         cb = (cb / 128) * radius
         
-        # Plot points
-        for i in range(0, len(cr), 3):  # Skip some points for performance
+        # Plot points - skip more points for better performance
+        step = max(5, len(cr) // 10000)  # Adaptive step size based on data size
+        for i in range(0, len(cr), step):
             x = int(center + cb[i])
             y = int(center - cr[i])  # Invert Y
             
@@ -131,7 +134,7 @@ class VectorscopeOverlay:
         Returns:
             Frame with vectorscope overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         result = frame.copy()
@@ -157,14 +160,14 @@ class VectorscopeOverlay:
         
         # Create ROI and blend
         roi = result[y:y+vs_size, x:x+vs_size]
-        blended = cv2.addWeighted(roi, 1 - self.opacity, vectorscope, self.opacity, 0)
+        blended = cv2.addWeighted(roi, 1 - self._opacity, vectorscope, self._opacity, 0)
         result[y:y+vs_size, x:x+vs_size] = blended
         
         return result
     
     def toggle(self):
         """Toggle vectorscope overlay"""
-        self.enabled = not self.enabled
+        super().toggle()
     
     def set_size(self, size: int):
         """Set vectorscope size"""

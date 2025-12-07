@@ -2,7 +2,7 @@
 Preview Widget for camera display
 
 Displays the live camera feed with optional overlays.
-Optimized for Raspberry Pi performance.
+Uses background thread for overlay processing to keep UI responsive.
 """
 import cv2
 import numpy as np
@@ -12,8 +12,9 @@ from PyQt6.QtGui import QImage, QPixmap
 
 from ..overlays import (
     FalseColorOverlay, WaveformOverlay, VectorscopeOverlay, FocusAssistOverlay,
-    GridOverlay, FrameGuideOverlay
+    GridOverlay, FrameGuideOverlay, OverlayPipeline
 )
+from ..core.video_pipeline import FrameWorker
 from ..atem.tally import TallyState
 
 
@@ -27,7 +28,7 @@ class PreviewWidget(QWidget):
     Optimized for Raspberry Pi:
     - Uses fast scaling instead of smooth
     - Minimizes frame copies
-    - Caches scaled dimensions
+    - Background thread for overlay processing
     """
     
     frame_updated = pyqtSignal()
@@ -46,6 +47,22 @@ class PreviewWidget(QWidget):
         self.grid_overlay = GridOverlay()
         self.frame_guide = FrameGuideOverlay()
         
+        # Overlay Pipeline - chains overlays together for efficient processing
+        self.overlay_pipeline = OverlayPipeline()
+        # Add overlays to pipeline in processing order (analysis first, then guides on top)
+        self.overlay_pipeline.add(self.false_color)
+        self.overlay_pipeline.add(self.focus_assist)
+        self.overlay_pipeline.add(self.waveform)
+        self.overlay_pipeline.add(self.vectorscope)
+        self.overlay_pipeline.add(self.grid_overlay)
+        self.overlay_pipeline.add(self.frame_guide)
+        
+        # Video Pipeline Worker - processes frames in background thread
+        # Worker runs continuously and handles both overlay and pass-through cases
+        self.frame_worker = FrameWorker(self.overlay_pipeline, parent=self)
+        self.frame_worker.frame_processed.connect(self._on_frame_processed, Qt.ConnectionType.QueuedConnection)
+        self._worker_started = False
+        
         # Tally state
         self._tally_state = TallyState.OFF
         
@@ -54,16 +71,12 @@ class PreviewWidget(QWidget):
         self._display_frame: np.ndarray = None
         self._frame_dirty = False
         
-        # Cached display size for performance
-        self._cached_display_size = None
-        
         self._setup_ui()
         
         # Update timer for display - 33ms = ~30fps target (matches camera framerate)
-        # Lower update rate reduces CPU load and improves overall performance
         self._update_timer = QTimer()
         self._update_timer.timeout.connect(self._update_display)
-        self._update_timer.start(33)  # Changed from 16ms to 33ms for better performance
+        self._update_timer.start(33)
     
     def _setup_ui(self):
         """Setup the UI"""
@@ -119,88 +132,80 @@ class PreviewWidget(QWidget):
         if frame is None:
             return
         
-        h, w = frame.shape[:2]
-        
-        # Get target size
-        label_size = self.preview_label.size()
-        target_w = label_size.width()
-        target_h = label_size.height()
-        
-        if target_w <= 0 or target_h <= 0:
-            return
-        
-        # Calculate scaled size maintaining aspect ratio
-        scale = min(target_w / w, target_h / h)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        
-        # Resize frame using OpenCV (faster than Qt scaling on Pi)
-        if new_w != w or new_h != h:
-            # Use INTER_AREA for downscaling (faster and better quality), INTER_LINEAR for upscaling
-            if new_w < w or new_h < h:
-                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            else:
-                frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        try:
             h, w = frame.shape[:2]
-        
-        # Convert BGR to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        
-        # Create QImage directly from buffer (QImage will make a copy internally)
-        bytes_per_line = 3 * w
-        q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-        
-        # Create pixmap (this makes a copy, but necessary for display)
-        pixmap = QPixmap.fromImage(q_img)
-        
-        self.preview_label.setPixmap(pixmap)
+            
+            # Get target size
+            label_size = self.preview_label.size()
+            target_w = label_size.width()
+            target_h = label_size.height()
+            
+            if target_w <= 0 or target_h <= 0:
+                return
+            
+            # Calculate scaled size maintaining aspect ratio
+            scale = min(target_w / w, target_h / h)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            
+            # Resize frame using OpenCV (faster than Qt scaling on Pi)
+            if new_w != w or new_h != h:
+                # Use INTER_AREA for downscaling (faster and better quality), INTER_LINEAR for upscaling
+                if new_w < w or new_h < h:
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                h, w = frame.shape[:2]
+            
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Create QImage directly from buffer (QImage will make a copy internally)
+            bytes_per_line = 3 * w
+            q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # Create pixmap (this makes a copy, but necessary for display)
+            pixmap = QPixmap.fromImage(q_img)
+            
+            self.preview_label.setPixmap(pixmap)
+        except Exception:
+            # Ignore errors during display update (widget might be destroyed)
+            pass
     
     def update_frame(self, frame: np.ndarray):
         """Update the current frame from camera"""
         if frame is None:
             return
         
-        # Store reference (avoid copy if no overlays active)
+        # Store reference
         self._current_frame = frame
-        self._frame_dirty = True
+        
+        # Start worker if not already started (runs continuously)
+        if not self._worker_started:
+            self.frame_worker.start_processing()
+            self._worker_started = True
+        
+        # Send frame to worker (worker handles overlay vs pass-through internally)
+        self.frame_worker.update_frame(frame)
     
-    def _update_display(self):
-        """Update the display with current frame and overlays"""
-        if self._current_frame is None or not self._frame_dirty:
+    def _on_frame_processed(self, processed_frame: np.ndarray):
+        """Handle processed frame from worker thread"""
+        if processed_frame is None:
             return
         
-        self._frame_dirty = False
-        
-        # Check if any overlays are enabled
-        overlays_active = (
-            self.false_color.enabled or 
-            self.focus_assist.enabled or 
-            self.waveform.enabled or 
-            self.vectorscope.enabled or
-            self.grid_overlay.enabled or
-            self.frame_guide.enabled
-        )
-        
-        if overlays_active:
-            # Need to copy frame for overlay processing
-            frame = self._current_frame.copy()
-            
-            # Apply overlays in order (analysis first, then guides on top)
-            frame = self.false_color.apply(frame)
-            frame = self.focus_assist.apply(frame)
-            frame = self.waveform.apply(frame)
-            frame = self.vectorscope.apply(frame)
-            # Grid and frame guides applied last so they're always visible
-            frame = self.grid_overlay.apply(frame)
-            frame = self.frame_guide.apply(frame)
-            
-            self._display_frame = frame
-        else:
-            # No overlays - use frame directly (reference, not copy)
-            self._display_frame = self._current_frame
-        
-        self._update_pixmap(self._display_frame)
-        self.frame_updated.emit()
+        try:
+            self._display_frame = processed_frame
+            self._frame_dirty = True
+        except Exception:
+            # Ignore errors (widget might be destroyed)
+            pass
+    
+    def _update_display(self):
+        """Update the display with current frame"""
+        if self._display_frame is not None and self._frame_dirty:
+            self._frame_dirty = False
+            self._update_pixmap(self._display_frame)
+            self.frame_updated.emit()
     
     def set_tally_state(self, state: TallyState):
         """Set tally state (affects border color)"""
@@ -260,13 +265,13 @@ class PreviewWidget(QWidget):
     def toggle_rule_of_thirds(self):
         """Toggle rule of thirds in grid overlay"""
         if not self.grid_overlay.enabled:
-            self.grid_overlay.enabled = True
+            self.grid_overlay.set_enabled(True)
         return self.grid_overlay.toggle_rule_of_thirds()
     
     def toggle_full_grid(self):
         """Toggle full grid in grid overlay"""
         if not self.grid_overlay.enabled:
-            self.grid_overlay.enabled = True
+            self.grid_overlay.set_enabled(True)
         return self.grid_overlay.toggle_full_grid()
     
     def toggle_frame_guide(self):
@@ -277,7 +282,14 @@ class PreviewWidget(QWidget):
     def clear_frame(self):
         """Clear the current frame and show no signal"""
         self._current_frame = None
+        self._display_frame = None
         self._frame_dirty = False
+        
+        # Stop worker when clearing frame
+        if self._worker_started:
+            self.frame_worker.stop_processing()
+            self._worker_started = False
+        
         self._set_no_signal()
     
     def resizeEvent(self, event):
@@ -286,6 +298,12 @@ class PreviewWidget(QWidget):
         # Mark frame dirty to trigger redraw at new size
         if self._display_frame is not None:
             self._frame_dirty = True
+    
+    def closeEvent(self, event):
+        """Clean up worker thread on close"""
+        if self._worker_started:
+            self.frame_worker.stop_processing()
+        super().closeEvent(event)
     
     def mousePressEvent(self, event):
         """Handle mouse press for frame guide drag/resize"""

@@ -1,27 +1,50 @@
 """
-Configuration management for PanaPiTouch
+Enhanced Settings with Pydantic validation
+
+Migrated from dataclasses to Pydantic for better validation and type safety.
+
+NOTE: This module requires pydantic>=2.0.0 to be installed.
+It is optional - the app will continue to use config.settings (dataclass-based)
+until pydantic is installed and migration is complete.
 """
-import os
-import yaml
-from dataclasses import dataclass, field
-from typing import List, Optional
-from pathlib import Path
+try:
+    from pathlib import Path
+    from typing import List, Optional, Dict
+    import yaml
+    from pydantic import BaseModel, Field, field_validator
+except ImportError:
+    # Pydantic not installed - this module is not available yet
+    raise ImportError(
+        "core.settings requires pydantic>=2.0.0. "
+        "Install with: pip install pydantic>=2.0.0\n"
+        "The app will continue to use config.settings until pydantic is installed."
+    )
 
 
-@dataclass
-class CameraConfig:
+class CameraConfig(BaseModel):
     """Configuration for a single camera"""
     id: int
     name: str
-    ip_address: str
-    port: int = 80
-    username: str = "admin"
-    password: str = "admin"
-    enabled: bool = True
+    ip_address: str = Field(..., description="Camera IP address")
+    port: int = Field(default=80, ge=1, le=65535)
+    username: str = Field(default="admin")
+    password: str = Field(default="admin")
+    enabled: bool = Field(default=True)
+    
+    @field_validator('ip_address')
+    @classmethod
+    def validate_ip(cls, v: str) -> str:
+        """Basic IP address validation"""
+        parts = v.split('.')
+        if len(parts) != 4:
+            raise ValueError("Invalid IP address format")
+        for part in parts:
+            if not part.isdigit() or not (0 <= int(part) <= 255):
+                raise ValueError("Invalid IP address format")
+        return v
     
     def get_stream_url(self) -> str:
         """Get MJPEG stream URL for Panasonic PTZ cameras"""
-        # Panasonic PTZ cameras typically use this endpoint for live preview
         return f"http://{self.ip_address}:{self.port}/cgi-bin/mjpeg"
     
     def get_snapshot_url(self) -> str:
@@ -33,33 +56,28 @@ class CameraConfig:
         return f"http://{self.ip_address}:{self.port}/"
 
 
-@dataclass
-class ATEMConfig:
+class ATEMConfig(BaseModel):
     """Configuration for Blackmagic ATEM switcher"""
-    ip_address: str = ""
-    enabled: bool = False
-    # Camera to ATEM input mapping (camera_id -> atem_input)
-    input_mapping: dict = field(default_factory=dict)
+    ip_address: str = Field(default="")
+    enabled: bool = Field(default=False)
+    input_mapping: Dict[int, int] = Field(default_factory=dict)  # camera_id -> atem_input
 
 
-@dataclass
-class Settings:
-    """Main application settings"""
-    cameras: List[CameraConfig] = field(default_factory=list)
-    atem: ATEMConfig = field(default_factory=ATEMConfig)
-    selected_camera: int = 0
-    companion_url: str = "http://localhost:8000"
-    # Target display: Wisecoco 10.5" 2560x1600 (16:10)
-    fullscreen: bool = False  # False for development
-    display_width: int = 1600  # Dev window (16:10 aspect)
-    display_height: int = 1000
-    # Native resolution for fullscreen
-    native_width: int = 2560
-    native_height: int = 1600
-    preview_width: int = 1920
-    preview_height: int = 1080
+class Settings(BaseModel):
+    """Main application settings with Pydantic validation"""
+    cameras: List[CameraConfig] = Field(default_factory=list)
+    atem: ATEMConfig = Field(default_factory=ATEMConfig)
+    selected_camera: int = Field(default=0, ge=0)
+    companion_url: str = Field(default="http://localhost:8000")
     
-    _config_path: str = field(default="", repr=False)
+    # Display settings
+    fullscreen: bool = Field(default=False)
+    display_width: int = Field(default=1600, ge=640)
+    display_height: int = Field(default=1000, ge=480)
+    native_width: int = Field(default=2560, ge=640)
+    native_height: int = Field(default=1600, ge=480)
+    preview_width: int = Field(default=1920, ge=640)
+    preview_height: int = Field(default=1080, ge=480)
     
     @classmethod
     def get_config_path(cls) -> Path:
@@ -78,18 +96,11 @@ class Settings:
                 with open(config_path, 'r') as f:
                     data = yaml.safe_load(f) or {}
                 
-                cameras = []
-                for cam_data in data.get('cameras', []):
-                    cameras.append(CameraConfig(**cam_data))
+                # Convert to Pydantic models
+                cameras = [CameraConfig(**cam_data) for cam_data in data.get('cameras', [])]
+                atem = ATEMConfig(**data.get('atem', {}))
                 
-                atem_data = data.get('atem', {})
-                atem = ATEMConfig(
-                    ip_address=atem_data.get('ip_address', ''),
-                    enabled=atem_data.get('enabled', False),
-                    input_mapping=atem_data.get('input_mapping', {})
-                )
-                
-                settings = cls(
+                return cls(
                     cameras=cameras,
                     atem=atem,
                     selected_camera=data.get('selected_camera', 0),
@@ -102,38 +113,21 @@ class Settings:
                     preview_width=data.get('preview_width', 1920),
                     preview_height=data.get('preview_height', 1080),
                 )
-                settings._config_path = str(config_path)
-                return settings
             except Exception as e:
                 print(f"Error loading settings: {e}")
+                import traceback
+                traceback.print_exc()
         
         # Return default settings
-        settings = cls()
-        settings._config_path = str(config_path)
-        return settings
+        return cls()
     
     def save(self):
         """Save settings to file"""
         config_path = self.get_config_path()
         
         data = {
-            'cameras': [
-                {
-                    'id': cam.id,
-                    'name': cam.name,
-                    'ip_address': cam.ip_address,
-                    'port': cam.port,
-                    'username': cam.username,
-                    'password': cam.password,
-                    'enabled': cam.enabled,
-                }
-                for cam in self.cameras
-            ],
-            'atem': {
-                'ip_address': self.atem.ip_address,
-                'enabled': self.atem.enabled,
-                'input_mapping': self.atem.input_mapping,
-            },
+            'cameras': [cam.model_dump() for cam in self.cameras],
+            'atem': self.atem.model_dump(),
             'selected_camera': self.selected_camera,
             'companion_url': self.companion_url,
             'fullscreen': self.fullscreen,
@@ -177,23 +171,8 @@ class Settings:
     def to_dict(self) -> dict:
         """Convert settings to dictionary for backup"""
         return {
-            'cameras': [
-                {
-                    'id': cam.id,
-                    'name': cam.name,
-                    'ip_address': cam.ip_address,
-                    'port': cam.port,
-                    'username': cam.username,
-                    'password': cam.password,
-                    'enabled': cam.enabled,
-                }
-                for cam in self.cameras
-            ],
-            'atem': {
-                'ip_address': self.atem.ip_address,
-                'enabled': self.atem.enabled,
-                'input_mapping': self.atem.input_mapping,
-            },
+            'cameras': [cam.model_dump() for cam in self.cameras],
+            'atem': self.atem.model_dump(),
             'selected_camera': self.selected_camera,
             'companion_url': self.companion_url,
             'fullscreen': self.fullscreen,
@@ -207,20 +186,11 @@ class Settings:
     
     def load_from_dict(self, data: dict):
         """Load settings from dictionary (for restore from backup)"""
-        # Load cameras
-        self.cameras = []
-        for cam_data in data.get('cameras', []):
-            self.cameras.append(CameraConfig(**cam_data))
+        cameras = [CameraConfig(**cam_data) for cam_data in data.get('cameras', [])]
+        atem = ATEMConfig(**data.get('atem', {}))
         
-        # Load ATEM settings
-        atem_data = data.get('atem', {})
-        self.atem = ATEMConfig(
-            ip_address=atem_data.get('ip_address', ''),
-            enabled=atem_data.get('enabled', False),
-            input_mapping=atem_data.get('input_mapping', {})
-        )
-        
-        # Load other settings
+        self.cameras = cameras
+        self.atem = atem
         self.selected_camera = data.get('selected_camera', 0)
         self.companion_url = data.get('companion_url', 'http://localhost:8000')
         self.fullscreen = data.get('fullscreen', False)

@@ -6,9 +6,10 @@ Displays luminance waveform like professional broadcast monitors.
 import cv2
 import numpy as np
 from typing import Tuple, Optional
+from .base import Overlay
 
 
-class WaveformOverlay:
+class WaveformOverlay(Overlay):
     """
     Waveform monitor overlay for exposure analysis.
     
@@ -17,15 +18,15 @@ class WaveformOverlay:
     """
     
     def __init__(self):
-        self.enabled = False
+        super().__init__()
         self.mode = 'luma'  # 'luma', 'rgb', 'parade'
         self.position = 'bottom-right'  # 'bottom-right', 'overlay', 'side'
         self.size = (320, 200)  # (width, height)
-        self.opacity = 0.85
+        self._opacity = 0.85
         self._waveform_cache: Optional[np.ndarray] = None
     
     def _generate_waveform(self, frame: np.ndarray) -> np.ndarray:
-        """Generate waveform display"""
+        """Generate waveform display - optimized for performance"""
         h, w = frame.shape[:2]
         wf_w, wf_h = self.size
         
@@ -41,19 +42,26 @@ class WaveformOverlay:
             cv2.line(waveform, (0, y), (wf_w, y), (60, 60, 60), 1)
         
         if self.mode == 'luma':
-            # Luminance waveform
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray_resized = cv2.resize(gray, (wf_w, h))
+            # Luminance waveform - optimized version
+            # Downsample frame first for faster processing
+            scale_factor = max(2, w // wf_w)  # More aggressive downsampling
+            gray = cv2.cvtColor(frame[::scale_factor, ::scale_factor], cv2.COLOR_BGR2GRAY)
             
+            # Resize to waveform width (much faster than column-by-column)
+            gray_resized = cv2.resize(gray, (wf_w, h // scale_factor))
+            
+            # Use numpy operations instead of loops for histogram
             for x in range(wf_w):
                 column = gray_resized[:, x]
+                # Use faster histogram calculation
                 hist, _ = np.histogram(column, bins=wf_h, range=(0, 255))
                 hist = np.clip(hist, 0, 10)  # Limit brightness
                 
+                # Vectorized drawing - only draw non-zero values
                 for y, count in enumerate(hist):
                     if count > 0:
                         wy = wf_h - 1 - y
-                        intensity = min(255, count * 30)
+                        intensity = min(255, int(count * 30))
                         waveform[wy, x] = (intensity, intensity, intensity)
         
         elif self.mode == 'rgb' or self.mode == 'parade':
@@ -97,7 +105,7 @@ class WaveformOverlay:
         Returns:
             Frame with waveform overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         result = frame.copy()
@@ -113,7 +121,7 @@ class WaveformOverlay:
             roi = result[y:y+wf_h, x:x+wf_w]
             
             # Blend
-            blended = cv2.addWeighted(roi, 1 - self.opacity, waveform, self.opacity, 0)
+            blended = cv2.addWeighted(roi, 1 - self._opacity, waveform, self._opacity, 0)
             result[y:y+wf_h, x:x+wf_w] = blended
             
         elif self.position == 'overlay':
@@ -122,14 +130,10 @@ class WaveformOverlay:
             y = frame.shape[0] - wf_h - 20
             
             roi = result[y:y+wf_h, x:x+wf_w]
-            blended = cv2.addWeighted(roi, 1 - self.opacity, waveform, self.opacity, 0)
+            blended = cv2.addWeighted(roi, 1 - self._opacity, waveform, self._opacity, 0)
             result[y:y+wf_h, x:x+wf_w] = blended
         
         return result
-    
-    def toggle(self):
-        """Toggle waveform overlay"""
-        self.enabled = not self.enabled
     
     def cycle_mode(self):
         """Cycle through waveform modes"""

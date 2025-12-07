@@ -1,0 +1,23 @@
+[Unit]
+Description=PanaPiTouch Module Preloader
+After=network-online.target
+Before=panapitouch.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=admin
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=QT_QPA_PLATFORM=wayland
+Environment=DISPLAY=:0
+WorkingDirectory=/home/admin/PanaPiTouch
+ExecStart=/home/admin/PanaPiTouch/venv/bin/python /home/admin/PanaPiTouch/preload_modules.py
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+
+

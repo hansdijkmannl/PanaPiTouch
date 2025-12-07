@@ -11,10 +11,10 @@ IRE (Institute of Radio Engineers) scale:
 """
 import cv2
 import numpy as np
-from typing import Tuple
+from .base import Overlay
 
 
-class FalseColorOverlay:
+class FalseColorOverlay(Overlay):
     """
     False color overlay for exposure analysis using IRE scale.
     
@@ -33,8 +33,8 @@ class FalseColorOverlay:
     """
     
     def __init__(self):
-        self.enabled = False
-        self.opacity = 0.8
+        super().__init__()
+        self._opacity = 0.8
         self._lut = self._create_ire_false_color_lut()
     
     def _luma_to_ire(self, luma_value: int) -> float:
@@ -116,7 +116,7 @@ class FalseColorOverlay:
         Returns:
             Frame with false color overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         # Convert to grayscale for luminance
@@ -126,20 +126,12 @@ class FalseColorOverlay:
         false_color = cv2.LUT(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), self._lut)
         
         # Blend with original
-        if self.opacity < 1.0:
-            result = cv2.addWeighted(frame, 1 - self.opacity, false_color, self.opacity, 0)
+        if self._opacity < 1.0:
+            result = cv2.addWeighted(frame, 1 - self._opacity, false_color, self._opacity, 0)
         else:
             result = false_color
         
         return result
-    
-    def toggle(self):
-        """Toggle false color overlay"""
-        self.enabled = not self.enabled
-    
-    def set_opacity(self, opacity: float):
-        """Set overlay opacity (0.0 - 1.0)"""
-        self.opacity = max(0.0, min(1.0, opacity))
 
 
 def create_false_color_legend(height: int = 200, width: int = 40) -> np.ndarray:

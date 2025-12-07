@@ -2,15 +2,15 @@
 Bitfocus Companion Page
 
 Embedded web view for Bitfocus Companion configuration.
-With update detection and on-screen keyboard support.
+With update detection and Pi OS keyboard support.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QLineEdit, QLabel, QPushButton
-from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess, Qt
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
+from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
-from .keyboard_widget import KeyboardWidget
-from .styles import COLORS
+import subprocess
+import shutil
 
 
 class CompanionPage(QWidget):
@@ -22,7 +22,7 @@ class CompanionPage(QWidget):
     
     Features:
     - Update detection (emits signal when update available)
-    - On-screen keyboard support for web input fields
+    - Pi OS keyboard support for web input fields (triggers system keyboard on focus)
     """
     
     update_available = pyqtSignal(str)  # version string
@@ -37,6 +37,8 @@ class CompanionPage(QWidget):
         self._web_input_focused = False
         self._current_input_type = "text"
         self._current_input_id = None
+        self._keyboard_process = None
+        self._keyboard_command = self._find_keyboard_command()
         self._setup_ui()
         self._start_update_detection()
         self._start_input_focus_detection()
@@ -51,6 +53,9 @@ class CompanionPage(QWidget):
         self.web_view = QWebEngineView()
         self.web_view.setUrl(QUrl(self.companion_url))
         
+        # Set zoom factor to 75% (0.75) to scale down the display
+        self.web_view.setZoomFactor(0.75)
+        
         # Configure settings
         settings = self.web_view.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -61,73 +66,21 @@ class CompanionPage(QWidget):
         self.web_view.loadFinished.connect(self._on_load_finished)
         
         layout.addWidget(self.web_view)
-        
-        # Create keyboard overlay (initially hidden)
-        self._setup_keyboard_overlay()
     
-    def _setup_keyboard_overlay(self):
-        """Setup keyboard overlay for web input fields"""
-        self.keyboard_container = QWidget(self)
-        self.keyboard_container.setVisible(False)
-        self.keyboard_container.setStyleSheet(f"""
-            QWidget {{
-                background-color: {COLORS['surface']};
-                border-top: 1px solid {COLORS['border']};
-            }}
-        """)
+    def _find_keyboard_command(self):
+        """Find available Pi OS keyboard command"""
+        # Try common keyboard commands in order of preference
+        keyboard_commands = [
+            'matchbox-keyboard',  # Common on Raspberry Pi OS
+            'onboard',            # Alternative keyboard
+            'florence',           # Another alternative
+        ]
         
-        keyboard_layout = QVBoxLayout(self.keyboard_container)
-        keyboard_layout.setContentsMargins(20, 12, 20, 12)
-        keyboard_layout.setSpacing(12)
+        for cmd in keyboard_commands:
+            if shutil.which(cmd):
+                return cmd
         
-        # Preview section
-        preview_container = QWidget()
-        preview_container.setStyleSheet("background: transparent;")
-        preview_wrapper = QHBoxLayout(preview_container)
-        preview_wrapper.setContentsMargins(0, 0, 0, 0)
-        preview_wrapper.setSpacing(12)
-        preview_wrapper.addStretch()
-        
-        # Field name label
-        self.field_name_label = QLabel("Input:")
-        self.field_name_label.setStyleSheet(f"""
-            QLabel {{
-                color: {COLORS['text']};
-                font-size: 16px;
-                font-weight: 600;
-                padding: 0px;
-            }}
-        """)
-        preview_wrapper.addWidget(self.field_name_label)
-        
-        # Preview text field
-        self.preview_field = QLineEdit()
-        self.preview_field.setReadOnly(True)
-        self.preview_field.setFixedWidth(400)
-        self.preview_field.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {COLORS['surface_light']};
-                border: 2px solid #FF9500;
-                border-radius: 8px;
-                color: {COLORS['text']};
-                font-size: 20px;
-                font-weight: 400;
-                padding: 12px 16px;
-            }}
-        """)
-        preview_wrapper.addWidget(self.preview_field)
-        preview_wrapper.addStretch()
-        keyboard_layout.addWidget(preview_container)
-        
-        # Keyboard widget
-        self.keyboard_widget = KeyboardWidget()
-        self.keyboard_widget.key_pressed.connect(self._on_osk_key)
-        self.keyboard_widget.backspace_pressed.connect(self._on_osk_backspace)
-        self.keyboard_widget.enter_pressed.connect(self._hide_osk)
-        self.keyboard_widget.close_pressed.connect(self._hide_osk)
-        if hasattr(self.keyboard_widget, 'space_pressed'):
-            self.keyboard_widget.space_pressed.connect(self._on_osk_space)
-        keyboard_layout.addWidget(self.keyboard_widget)
+        return None
     
     def _start_input_focus_detection(self):
         """Start periodic check for focused input fields in web page"""
@@ -176,118 +129,76 @@ class CompanionPage(QWidget):
                 self._web_input_focused = True
                 self._current_input_type = data.get("type", "text")
                 self._current_input_id = data.get("id", "Input")
-                self._show_osk(data.get("value", ""), data.get("placeholder", ""))
-            else:
-                # Update preview with current value
-                self.preview_field.setText(data.get("value", ""))
+                self._show_pi_keyboard()
         else:
             if self._web_input_focused:
                 self._web_input_focused = False
-                self._hide_osk()
+                self._hide_pi_keyboard()
     
-    def _show_osk(self, value: str, placeholder: str):
-        """Show on-screen keyboard"""
-        # Set field name from input id/placeholder
-        field_name = self._current_input_id.replace('_', ' ').replace('-', ' ').title()
-        if not field_name or field_name == "Input":
-            field_name = placeholder.replace('...', '').strip() if placeholder else "Input"
-        self.field_name_label.setText(f"{field_name}:")
-        self.preview_field.setText(value)
+    def _show_pi_keyboard(self):
+        """Show Pi OS on-screen keyboard"""
+        if not self._keyboard_command:
+            return  # No keyboard command available
         
-        # Preserve cursor position in web input - don't select all text
-        js_code = """
-        (function() {
-            var el = document.activeElement;
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-                // Preserve cursor position, don't select all
-                var pos = el.selectionStart || el.value.length;
-                el.setSelectionRange(pos, pos);
-            }
-        })();
-        """
-        self.web_view.page().runJavaScript(js_code)
+        # Kill any existing keyboard process
+        self._hide_pi_keyboard()
         
-        self.keyboard_container.setVisible(True)
-        self._position_keyboard()
+        # Start the keyboard process
+        try:
+            if self._keyboard_command == 'matchbox-keyboard':
+                # matchbox-keyboard runs as a daemon
+                self._keyboard_process = subprocess.Popen(
+                    [self._keyboard_command],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            elif self._keyboard_command == 'onboard':
+                # onboard can be started normally
+                self._keyboard_process = subprocess.Popen(
+                    [self._keyboard_command],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            elif self._keyboard_command == 'florence':
+                # florence can be started normally
+                self._keyboard_process = subprocess.Popen(
+                    [self._keyboard_command],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        except Exception as e:
+            print(f"Failed to start keyboard: {e}")
     
-    def _hide_osk(self):
-        """Hide on-screen keyboard"""
-        self.keyboard_container.setVisible(False)
-        # Blur the web input
-        self.web_view.page().runJavaScript("document.activeElement.blur();")
-    
-    def _on_osk_key(self, char):
-        """Handle key press from OSK"""
-        # Check shift state
-        if hasattr(self.keyboard_widget, '_shift_active') and self.keyboard_widget._shift_active:
-            char = char.upper()
-            self.keyboard_widget._shift_active = False
-            for btn in self.keyboard_widget.findChildren(QPushButton):
-                if btn.text() == "⇧":
-                    btn.setChecked(False)
+    def _hide_pi_keyboard(self):
+        """Hide Pi OS on-screen keyboard"""
+        if self._keyboard_process:
+            try:
+                # Try graceful termination first
+                self._keyboard_process.terminate()
+                # Wait a bit for it to close
+                try:
+                    self._keyboard_process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it doesn't close
+                    self._keyboard_process.kill()
+                    self._keyboard_process.wait()
+            except Exception:
+                pass
+            finally:
+                self._keyboard_process = None
         
-        # Insert character into web input
-        js_code = f"""
-        (function() {{
-            var el = document.activeElement;
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {{
-                var start = el.selectionStart;
-                var end = el.selectionEnd;
-                var value = el.value;
-                el.value = value.substring(0, start) + '{char}' + value.substring(end);
-                el.selectionStart = el.selectionEnd = start + 1;
-                el.dispatchEvent(new Event('input', {{ bubbles: true }}));
-            }}
-        }})();
-        """
-        self.web_view.page().runJavaScript(js_code)
+        # Also try to kill any remaining keyboard processes
+        if self._keyboard_command == 'matchbox-keyboard':
+            try:
+                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
     
-    def _on_osk_backspace(self):
-        """Handle backspace from OSK"""
-        js_code = """
-        (function() {
-            var el = document.activeElement;
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
-                var start = el.selectionStart;
-                var end = el.selectionEnd;
-                var value = el.value;
-                if (start === end && start > 0) {
-                    el.value = value.substring(0, start - 1) + value.substring(end);
-                    el.selectionStart = el.selectionEnd = start - 1;
-                } else if (start !== end) {
-                    el.value = value.substring(0, start) + value.substring(end);
-                    el.selectionStart = el.selectionEnd = start;
-                }
-                el.dispatchEvent(new Event('input', { bubbles: true }));
-            }
-        })();
-        """
-        self.web_view.page().runJavaScript(js_code)
-    
-    def _on_osk_space(self):
-        """Handle space from OSK"""
-        self._on_osk_key(' ')
-    
-    def _position_keyboard(self):
-        """Position keyboard at bottom of page"""
-        if not self.keyboard_container.isVisible():
-            return
-        
-        width = self.width()
-        self.keyboard_container.setFixedWidth(width)
-        self.keyboard_container.adjustSize()
-        keyboard_height = self.keyboard_container.sizeHint().height()
-        if keyboard_height < 200:
-            keyboard_height = 350
-        
-        self.keyboard_container.setGeometry(0, self.height() - keyboard_height, width, keyboard_height)
-        self.keyboard_container.raise_()
-    
-    def resizeEvent(self, event):
-        """Handle resize to reposition keyboard"""
-        super().resizeEvent(event)
-        if self.keyboard_container.isVisible():
-            self._position_keyboard()
+    def closeEvent(self, event):
+        """Clean up keyboard process on close"""
+        self._hide_pi_keyboard()
+        super().closeEvent(event)
     
     def _start_update_detection(self):
         """Start periodic check for update notifications in the page"""

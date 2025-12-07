@@ -1,7 +1,8 @@
 [Unit]
 Description=PanaPiTouch - Panasonic PTZ Camera Monitor
-After=graphical.target
-Wants=graphical.target
+After=graphical.target network-online.target panapitouch-preload.service
+Wants=graphical.target network-online.target
+Requires=panapitouch-preload.service
 
 [Service]
 Type=simple

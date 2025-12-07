@@ -175,7 +175,7 @@ class CameraStream:
                 
                 # Optimize capture settings for performance
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
-                cap.set(cv2.CAP_PROP_FPS, 30)  # Request 30fps
+                cap.set(cv2.CAP_PROP_FPS, 25)  # Request 25fps (common camera frame rate)
                 # Try to use hardware acceleration if available
                 try:
                     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -261,6 +261,7 @@ class CameraStream:
                 
                 # Optimize capture settings
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
+                cap.set(cv2.CAP_PROP_FPS, 25)  # Request 25fps (common camera frame rate)
                 
                 if not cap.isOpened():
                     self._connected = False
@@ -360,7 +361,8 @@ class CameraStream:
         
         while self._running:
             try:
-                response = requests.get(snapshot_url, timeout=2, auth=auth, stream=True)
+                request_start = time.time()
+                response = requests.get(snapshot_url, timeout=1, auth=auth, stream=False)  # Reduced timeout and removed stream=True for faster response
                 
                 if response.status_code == 200:
                     self._connected = True
@@ -379,16 +381,23 @@ class CameraStream:
                             self._current_frame = frame
                         
                         self._notify_callbacks(frame)
+                        
+                        # Calculate actual frame time and adjust sleep to maintain ~25fps
+                        request_time = time.time() - request_start
+                        target_frame_time = 1.0 / 25.0  # 25fps = 40ms per frame
+                        sleep_time = max(0.01, target_frame_time - request_time)  # Ensure at least 10ms sleep
+                        time.sleep(sleep_time)
+                    else:
+                        time.sleep(0.04)  # Default 25fps if decode fails
                 else:
                     self._connected = False
                     self._error_message = f"HTTP {response.status_code}"
+                    time.sleep(0.2)  # Longer sleep on error
                     
             except Exception as e:
                 self._connected = False
                 self._error_message = str(e)
-            
-            # Limit snapshot rate
-            time.sleep(0.033)  # ~30fps
+                time.sleep(0.2)  # Longer sleep on exception
     
     def start(self, use_rtsp: bool = True, use_snapshot: bool = False, force_mjpeg: bool = False):
         """
@@ -404,6 +413,15 @@ class CameraStream:
         """
         if self._running:
             return
+        
+        # Ensure any previous thread is fully stopped before starting a new one
+        if self._thread is not None:
+            self._running = False  # Signal thread to stop
+            try:
+                self._thread.join(timeout=0.5)  # Wait briefly for cleanup
+            except:
+                pass
+            self._thread = None
         
         self._running = True
         

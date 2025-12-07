@@ -6,9 +6,10 @@ Provides rule of thirds and full grid for camera framing.
 import cv2
 import numpy as np
 from typing import Tuple
+from .base import Overlay
 
 
-class GridOverlay:
+class GridOverlay(Overlay):
     """
     Grid overlay for camera framing assistance.
     
@@ -18,7 +19,7 @@ class GridOverlay:
     """
     
     def __init__(self):
-        self.enabled = False
+        super().__init__()
         self.rule_of_thirds = True
         self.full_grid = False
         
@@ -38,7 +39,7 @@ class GridOverlay:
         Returns:
             Frame with grid overlay
         """
-        if not self.enabled:
+        if not self._enabled:
             return frame
         
         # Check if any grid type is enabled
@@ -83,7 +84,7 @@ class GridOverlay:
     
     def toggle(self):
         """Toggle grid overlay"""
-        self.enabled = not self.enabled
+        # Toggle is handled by base class
     
     def toggle_rule_of_thirds(self) -> bool:
         """Toggle rule of thirds"""
