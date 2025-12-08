@@ -7,9 +7,9 @@ import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
-    QGroupBox, QScrollArea, QListWidget, QListWidgetItem,
+    QGroupBox, QListWidget, QListWidgetItem,
     QMessageBox, QFrame, QApplication, QProgressBar,
-    QComboBox
+    QComboBox, QStackedWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
@@ -17,6 +17,7 @@ from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
 from ..config.settings import Settings, CameraConfig
 from ..camera.discovery import CameraDiscovery, DiscoveredCamera
 from ..camera.stream import CameraStream, StreamConfig
+from .widgets import TouchScrollArea
 
 
 class DiscoveryWorker(QThread):
@@ -217,10 +218,11 @@ class CameraListItem(QFrame):
     edit_clicked = pyqtSignal(int)
     selection_changed = pyqtSignal(int, bool)  # camera_id, selected
     
-    def __init__(self, camera: CameraConfig, atem_input: int, parent=None):
+    def __init__(self, camera: CameraConfig, atem_input: int, compact: bool = False, parent=None):
         super().__init__(parent)
         self.camera = camera
         self.atem_input = atem_input
+        self.compact = compact
         self.connection_status = "unknown"  # "online", "offline", "unknown", "testing"
         self.last_test_result = None
         self._setup_ui()
@@ -235,43 +237,44 @@ class CameraListItem(QFrame):
         layout.setContentsMargins(20, 12, 20, 12)  # Add right margin to avoid scroll bar overlapping edit button
         layout.setSpacing(16)  # Increased spacing between elements
         
-        # Checkbox for bulk selection
-        self.checkbox = QCheckBox()
-        self.checkbox.setFixedSize(24, 24)
-        self.checkbox.setStyleSheet("""
-            QCheckBox {
-                background-color: transparent;
-                spacing: 0px;
-            }
-            QCheckBox::indicator {
-                width: 24px;
-                height: 24px;
-                border: 2px solid #FFFFFF;
-                border-radius: 4px;
-                background-color: #FFFFFF;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #FF9500;
-                border-color: #FF9500;
-            }
-        """)
-        self.checkbox.stateChanged.connect(
-            lambda state: self.selection_changed.emit(self.camera.id, state == Qt.CheckState.Checked.value)
-        )
-        layout.addWidget(self.checkbox)
-        
-        # Status indicator (colored dot)
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setFixedSize(16, 16)
-        self.status_indicator.setStyleSheet("""
-            QLabel {
-                font-size: 16px;
-                color: #888898;
-                background-color: transparent;
-                border: none;
-            }
-        """)
-        layout.addWidget(self.status_indicator)
+        if not self.compact:
+            # Checkbox for bulk selection
+            self.checkbox = QCheckBox()
+            self.checkbox.setFixedSize(24, 24)
+            self.checkbox.setStyleSheet("""
+                QCheckBox {
+                    background-color: transparent;
+                    spacing: 0px;
+                }
+                QCheckBox::indicator {
+                    width: 24px;
+                    height: 24px;
+                    border: 2px solid #FFFFFF;
+                    border-radius: 4px;
+                    background-color: #FFFFFF;
+                }
+                QCheckBox::indicator:checked {
+                    background-color: #FF9500;
+                    border-color: #FF9500;
+                }
+            """)
+            self.checkbox.stateChanged.connect(
+                lambda state: self.selection_changed.emit(self.camera.id, state == Qt.CheckState.Checked.value)
+            )
+            layout.addWidget(self.checkbox)
+            
+            # Status indicator (colored dot)
+            self.status_indicator = QLabel("●")
+            self.status_indicator.setFixedSize(16, 16)
+            self.status_indicator.setStyleSheet("""
+                QLabel {
+                    font-size: 16px;
+                    color: #888898;
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+            layout.addWidget(self.status_indicator)
         
         # Thumbnail
         self.thumbnail_label = QLabel()
@@ -489,28 +492,442 @@ class CameraPage(QWidget):
         self._setup_ui()
         self._load_settings()
         
+        # Initialize badge count
+        QTimer.singleShot(100, self._update_configured_badge)
+        
         # Start thumbnail update timer (update every 2 minutes)
         self._thumbnail_timer.start(120000)
     
+    def resizeEvent(self, event):
+        """Handle window resize to reposition badge"""
+        super().resizeEvent(event)
+        if self.configured_badge:
+            QTimer.singleShot(10, self._update_badge_position)
+    
     def _setup_ui(self):
-        """Setup the camera page UI"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        """Setup the camera page UI with sidebar navigation"""
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
         
-        # Content area
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setFixedWidth(160)
+        sidebar.setStyleSheet("""
+            QFrame {
+                background-color: #0a0a0f;
+                border-right: 1px solid #2a2a38;
+            }
+        """)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 16, 8, 16)
+        sidebar_layout.setSpacing(8)
+        
+        self.sidebar_buttons = []
+        self.configured_badge = None  # Badge for Configured button
+        self.configured_button_wrapper = None  # Wrapper for Configured button
+        self.configured_button = None  # Configured button reference
+        sections = [
+            ("➕", "Add Camera"),
+            ("📋", "Configured"),
+        ]
+        for idx, (icon, name) in enumerate(sections):
+            # Create wrapper widget for Configured button to hold badge
+            if idx == 1:  # Configured button
+                wrapper = QFrame()
+                wrapper.setStyleSheet("background-color: transparent;")
+                wrapper_layout = QVBoxLayout(wrapper)
+                wrapper_layout.setContentsMargins(0, 0, 0, 0)
+                wrapper_layout.setSpacing(0)
+                
+                btn = QPushButton(f"{icon}\n{name}")
+                btn.setCheckable(True)
+                btn.setMinimumHeight(80)
+                btn.setStyleSheet(self._get_sidebar_button_style())
+                btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
+                wrapper_layout.addWidget(btn)
+                
+                # Create badge label positioned absolutely on the button
+                badge = QLabel("0", btn)
+                badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                badge.setStyleSheet("""
+                    QLabel {
+                        background-color: #ef4444;
+                        color: #ffffff;
+                        border-radius: 10px;
+                        font-size: 11px;
+                        font-weight: 700;
+                        padding: 2px 6px;
+                        min-width: 20px;
+                    }
+                """)
+                badge.setFixedSize(24, 20)
+                badge.hide()  # Hide if count is 0
+                badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Don't block button clicks
+                self.configured_badge = badge
+                self.configured_button_wrapper = wrapper
+                self.configured_button = btn  # Store button reference
+                
+                sidebar_layout.addWidget(wrapper)
+                self.sidebar_buttons.append(btn)
+                
+                # Update badge position after widget is shown
+                QTimer.singleShot(100, self._update_badge_position)
+            else:
+                btn = QPushButton(f"{icon}\n{name}")
+                btn.setCheckable(True)
+                btn.setMinimumHeight(80)
+                btn.setStyleSheet(self._get_sidebar_button_style())
+                btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
+                sidebar_layout.addWidget(btn)
+                self.sidebar_buttons.append(btn)
+        
+        sidebar_layout.addStretch()
+        main_layout.addWidget(sidebar)
+        
+        # Content stack
+        self.content_stack = QStackedWidget()
+        self.content_stack.setStyleSheet("background-color: #0a0a0f;")
+        self.content_stack.addWidget(self._create_add_content())
+        self.content_stack.addWidget(self._create_configured_content())
+        main_layout.addWidget(self.content_stack, 1)
+        
+        # Default selection
+        self._on_section_clicked(0)
+
+    def _get_sidebar_button_style(self):
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 12px;
+                color: #888898;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 12px 8px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #1a1a24;
+                color: #ffffff;
+            }
+            QPushButton:checked {
+                background-color: #FF9500;
+                color: #0a0a0f;
+                font-weight: 600;
+            }
+            QPushButton:pressed {
+                background-color: #CC7700;
+            }
+        """
+    
+    def _update_badge_position(self):
+        """Update badge position on Configured button"""
+        if self.configured_badge and self.configured_button:
+            # Position badge at top-right of button, 15px from right edge
+            btn_width = self.configured_button.width()
+            if btn_width > 0:
+                badge_x = btn_width - 43  # 28 (original) + 15 (move left)
+                badge_y = 8
+                self.configured_badge.move(badge_x, badge_y)
+                self.configured_badge.raise_()  # Ensure badge is on top
+    
+    def _update_configured_badge(self):
+        """Update the badge count on Configured button"""
+        if self.configured_badge:
+            count = len(self.settings.cameras)
+            self.configured_badge.setText(str(count))
+            if count > 0:
+                self.configured_badge.show()
+            else:
+                self.configured_badge.hide()
+            # Update position after text change
+            QTimer.singleShot(10, self._update_badge_position)
+
+    def _on_section_clicked(self, index: int):
+        self.content_stack.setCurrentIndex(index)
+        for i, btn in enumerate(getattr(self, 'sidebar_buttons', [])):
+            btn.setChecked(i == index)
+        
+        # Hide edit form when switching away from Configured page
+        if index != 1 and hasattr(self, 'edit_form_panel'):
+            self.edit_form_panel.hide()
+            self._editing_camera_id = None
+
+    def _create_add_content(self) -> QWidget:
+        """Add/discover cameras page"""
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(20, 20, 20, 20)
+        wrapper_layout.setSpacing(20)
+        
         content_layout = QHBoxLayout()
         content_layout.setSpacing(20)
         
-        # Left panel - Discovery + Manual add
         left_panel = self._create_left_panel()
         content_layout.addWidget(left_panel, stretch=1)
         
-        # Right panel - Camera list
-        right_panel = self._create_camera_list_panel()
+        right_panel = self._create_camera_list_panel(compact=False)
         content_layout.addWidget(right_panel, stretch=1)
         
-        main_layout.addLayout(content_layout)
+        wrapper_layout.addLayout(content_layout)
+        return wrapper
+
+    def _create_configured_content(self) -> QWidget:
+        """Configured cameras with inline edit column"""
+        wrapper = QWidget()
+        layout = QHBoxLayout(wrapper)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(20)
+        
+        # Left: Camera list
+        left_panel = self._create_camera_list_panel(compact=True)
+        layout.addWidget(left_panel, stretch=1)
+        
+        # Right: Edit form panel (initially hidden)
+        self.edit_form_panel = self._create_edit_form_panel()
+        layout.addWidget(self.edit_form_panel, stretch=1)
+        
+        return wrapper
+    
+    def _create_edit_form_panel(self) -> QWidget:
+        """Create edit form panel for inline editing"""
+        panel = QFrame()
+        panel.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        panel.hide()  # Hidden until edit is clicked
+        
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # Header
+        header = QLabel("Edit Camera")
+        header.setStyleSheet("font-size: 18px; font-weight: 600; color: #ffffff; border: none;")
+        layout.addWidget(header)
+        
+        # Form fields (reuse same style as add form)
+        # Name
+        name_layout = QVBoxLayout()
+        name_layout.setSpacing(6)
+        name_label = QLabel("Camera Name:")
+        name_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        name_layout.addWidget(name_label)
+        self.edit_name_input = QLineEdit()
+        self.edit_name_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a24;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 14px;
+                color: #FFFFFF;
+                min-height: 20px;
+            }
+            QLineEdit:focus {
+                border-color: #FF9500;
+            }
+        """)
+        name_layout.addWidget(self.edit_name_input)
+        layout.addLayout(name_layout)
+        
+        # IP Address
+        ip_layout = QVBoxLayout()
+        ip_layout.setSpacing(6)
+        ip_label = QLabel("IP Address:")
+        ip_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        ip_layout.addWidget(ip_label)
+        self.edit_ip_input = QLineEdit()
+        self.edit_ip_input.setStyleSheet(self.edit_name_input.styleSheet())
+        ip_layout.addWidget(self.edit_ip_input)
+        layout.addLayout(ip_layout)
+        
+        # Port
+        port_layout = QVBoxLayout()
+        port_layout.setSpacing(6)
+        port_label = QLabel("Port:")
+        port_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        port_layout.addWidget(port_label)
+        self.edit_port_input = QSpinBox()
+        self.edit_port_input.setRange(1, 65535)
+        self.edit_port_input.setValue(80)
+        self.edit_port_input.setStyleSheet("""
+            QSpinBox {
+                background-color: #1a1a24;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 14px;
+                color: #FFFFFF;
+                min-height: 20px;
+            }
+            QSpinBox:focus {
+                border-color: #FF9500;
+            }
+        """)
+        port_layout.addWidget(self.edit_port_input)
+        layout.addLayout(port_layout)
+        
+        # Username
+        user_layout = QVBoxLayout()
+        user_layout.setSpacing(6)
+        user_label = QLabel("Username:")
+        user_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        user_layout.addWidget(user_label)
+        self.edit_user_input = QLineEdit()
+        self.edit_user_input.setStyleSheet(self.edit_name_input.styleSheet())
+        self.edit_user_input.setText("admin")
+        user_layout.addWidget(self.edit_user_input)
+        layout.addLayout(user_layout)
+        
+        # Password
+        pass_layout = QVBoxLayout()
+        pass_layout.setSpacing(6)
+        pass_label = QLabel("Password:")
+        pass_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        pass_layout.addWidget(pass_label)
+        self.edit_pass_input = QLineEdit()
+        self.edit_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_pass_input.setStyleSheet(self.edit_name_input.styleSheet())
+        self.edit_pass_input.setText("12345")
+        pass_layout.addWidget(self.edit_pass_input)
+        layout.addLayout(pass_layout)
+        
+        # ATEM Input
+        atem_layout = QVBoxLayout()
+        atem_layout.setSpacing(6)
+        atem_label = QLabel("ATEM Input:")
+        atem_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
+        atem_layout.addWidget(atem_label)
+        self.edit_atem_combo = QComboBox()
+        self.edit_atem_combo.addItem("No ATEM mapping", 0)
+        for i in range(1, 21):
+            self.edit_atem_combo.addItem(f"Input {i}", i)
+        self.edit_atem_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #1a1a24;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                padding: 10px 14px;
+                font-size: 14px;
+                color: #FFFFFF;
+                min-height: 20px;
+            }
+            QComboBox:focus {
+                border-color: #FF9500;
+            }
+        """)
+        atem_layout.addWidget(self.edit_atem_combo)
+        layout.addLayout(atem_layout)
+        
+        layout.addStretch()
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFixedHeight(48)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 2px solid #3a3a48;
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+                border-color: #FF9500;
+            }
+            QPushButton:pressed {
+                background-color: #FF9500;
+                border-color: #FF9500;
+                color: #0a0a0f;
+            }
+        """)
+        cancel_btn.clicked.connect(self._cancel_inline_edit)
+        btn_layout.addWidget(cancel_btn)
+        
+        save_btn = QPushButton("Save Changes")
+        save_btn.setFixedHeight(48)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9500;
+                border: none;
+                border-radius: 8px;
+                color: #0a0a0f;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #FFAA33;
+            }
+            QPushButton:pressed {
+                background-color: #CC7700;
+            }
+        """)
+        save_btn.clicked.connect(self._save_inline_edit)
+        btn_layout.addWidget(save_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        return panel
+    
+    def _cancel_inline_edit(self):
+        """Cancel inline editing"""
+        if hasattr(self, 'edit_form_panel'):
+            self.edit_form_panel.hide()
+            self._editing_camera_id = None
+    
+    def _save_inline_edit(self):
+        """Save changes from inline edit form"""
+        if not hasattr(self, '_editing_camera_id') or self._editing_camera_id is None:
+            return
+        
+        camera = self.settings.get_camera(self._editing_camera_id)
+        if not camera:
+            return
+        
+        name = self.edit_name_input.text().strip()
+        ip = self.edit_ip_input.text().strip()
+        port = self.edit_port_input.value()
+        username = self.edit_user_input.text().strip()
+        password = self.edit_pass_input.text().strip()
+        
+        if not name or not ip:
+            QMessageBox.warning(self, "Error", "Name and IP address are required")
+            return
+        
+        # Update camera
+        camera.name = name
+        camera.ip_address = ip
+        camera.port = port
+        camera.username = username
+        camera.password = password
+        
+        self.settings.update_camera(camera)
+        
+        # Update ATEM mapping
+        atem_input = self.edit_atem_combo.currentData()
+        if atem_input and atem_input > 0:
+            self.settings.atem.input_mapping[str(camera.id)] = atem_input
+        elif str(camera.id) in self.settings.atem.input_mapping:
+            del self.settings.atem.input_mapping[str(camera.id)]
+        
+        self.settings.save()
+        self._refresh_camera_list()
+        self.edit_form_panel.hide()
+        self._editing_camera_id = None
+        self.settings_changed.emit()
+        
+        QMessageBox.information(self, "Success", f"Camera '{name}' updated successfully!")
     
     def _create_left_panel(self) -> QWidget:
         """Create left panel with unified discovery and manual add"""
@@ -625,27 +1042,15 @@ class CameraPage(QWidget):
         self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
         add_camera_layout.addWidget(self.discovery_status)
         
-        # Discovered cameras scroll area
-        discovered_scroll = QScrollArea()
+        # Discovered cameras scroll area with touch scrolling
+        discovered_scroll = TouchScrollArea()
         discovered_scroll.setWidgetResizable(True)
-        discovered_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        discovered_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         discovered_scroll.setFixedHeight(180)
         discovered_scroll.setStyleSheet("""
             QScrollArea {
                 background-color: #1a1a24;
                 border: 1px solid #2a2a38;
                 border-radius: 6px;
-            }
-            QScrollBar:vertical {
-                background: #1a1a24;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #2a2a38;
-                border-radius: 4px;
-                min-height: 30px;
             }
         """)
         
@@ -918,8 +1323,12 @@ class CameraPage(QWidget):
         
         return panel
     
-    def _create_camera_list_panel(self) -> QWidget:
-        """Create camera list panel with search and bulk operations"""
+    def _create_camera_list_panel(self, compact: bool = False) -> QWidget:
+        """Create camera list panel with search and bulk operations.
+        
+        Args:
+            compact: when True, show a simple edit column header (configured page).
+        """
         panel = QFrame()
         panel.setStyleSheet("""
             QFrame {
@@ -932,6 +1341,9 @@ class CameraPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
+        
+        # Store compact flag for use when creating items
+        self._list_compact = compact
         
         # Header with count and progress
         header_layout = QHBoxLayout()
@@ -991,9 +1403,24 @@ class CameraPage(QWidget):
         self.sort_combo.currentTextChanged.connect(self._refresh_camera_list)
         header_layout.addWidget(self.sort_combo)
         
+        # Hide sort in compact mode
+        if compact:
+            self.sort_combo.hide()
+        
         header_layout.addStretch()
         
         layout.addLayout(header_layout)
+
+        if compact:
+            column_header = QHBoxLayout()
+            label_left = QLabel("Configured Camera")
+            label_left.setStyleSheet("color: #888898; font-size: 12px; font-weight: 600;")
+            column_header.addWidget(label_left)
+            column_header.addStretch()
+            label_right = QLabel("Edit")
+            label_right.setStyleSheet("color: #888898; font-size: 12px; font-weight: 600;")
+            column_header.addWidget(label_right, 0, Qt.AlignmentFlag.AlignRight)
+            layout.addLayout(column_header)
         
         # Bulk operations bar - match camera row width
         bulk_container = QWidget()
@@ -1060,6 +1487,10 @@ class CameraPage(QWidget):
         self.bulk_delete_btn.clicked.connect(self._bulk_delete_cameras)
         bulk_layout.addWidget(self.bulk_delete_btn, stretch=1)
         
+        # Hide bulk operations in compact mode (no checkboxes)
+        if compact:
+            bulk_container.hide()
+        
         layout.addWidget(bulk_container)
         
         # Add spacing between bulk operations and camera list
@@ -1077,29 +1508,13 @@ class CameraPage(QWidget):
         camera_list_frame_layout.setContentsMargins(0, 0, 0, 0)
         camera_list_frame_layout.setSpacing(0)
         
-        # Scroll area for camera list
-        self.camera_scroll = QScrollArea()
+        # Scroll area for camera list with touch scrolling
+        self.camera_scroll = TouchScrollArea()
         self.camera_scroll.setWidgetResizable(True)
-        self.camera_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.camera_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.camera_scroll.setStyleSheet("""
             QScrollArea {
                 border: none;
                 background-color: transparent;
-            }
-            QScrollBar:vertical {
-                background: #1a1a24;
-                width: 8px;
-                border-radius: 4px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #2a2a38;
-                border-radius: 4px;
-                min-height: 30px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
             }
         """)
         
@@ -1156,7 +1571,7 @@ class CameraPage(QWidget):
         # Add cameras
         for camera in cameras:
             atem_input = self.settings.atem.input_mapping.get(str(camera.id), 0)
-            item = CameraListItem(camera, atem_input)
+            item = CameraListItem(camera, atem_input, compact=getattr(self, "_list_compact", False))
             item.edit_clicked.connect(self._edit_camera)
             item.selection_changed.connect(self._on_camera_selection_changed)
             self._camera_items[camera.id] = item
@@ -1169,6 +1584,9 @@ class CameraPage(QWidget):
         total = len(self.settings.cameras)
         self.camera_list_header.setText(f"Configured Cameras ({total}/30)")
         self.camera_count_progress.setValue(total)
+        
+        # Update badge on Configured button
+        self._update_configured_badge()
         
         # Show/hide empty state
         if total == 0:
@@ -1692,33 +2110,33 @@ class CameraPage(QWidget):
         QMessageBox.information(self, "Success", f"Camera '{name}' saved successfully!")
     
     def _edit_camera(self, camera_id: int):
-        """Edit existing camera"""
+        """Edit existing camera - show inline edit form"""
         camera = self.settings.get_camera(camera_id)
         if not camera:
             return
         
         self._editing_camera_id = camera_id
         
-        # Show the manual form if not already visible
-        if not self.manual_toggle_btn.isChecked():
-            self.manual_toggle_btn.setChecked(True)
+        # Switch to Configured page if not already there
+        if self.content_stack.currentIndex() != 1:
+            self._on_section_clicked(1)
         
-        self.camera_name_input.setText(camera.name)
-        self.camera_ip_input.setText(camera.ip_address)
-        self.camera_user_input.setText(camera.username)
-        self.camera_pass_input.setText(camera.password)
-        
-        # Load ATEM mapping
-        atem_input = self.settings.atem.input_mapping.get(str(camera_id), 0)
-        self._set_atem_input_by_value(atem_input)
-        
-        self.save_camera_btn.setText("Update Camera")
-        self.cancel_edit_btn.show()
-        self._validate_form()
-        self._form_has_changes = False
-        
-        # Make the Add Camera section visible (don't focus to avoid keyboard popup)
-        self.add_camera_group.setVisible(True)
+        # Populate edit form
+        if hasattr(self, 'edit_form_panel'):
+            self.edit_name_input.setText(camera.name)
+            self.edit_ip_input.setText(camera.ip_address)
+            self.edit_port_input.setValue(camera.port)
+            self.edit_user_input.setText(camera.username)
+            self.edit_pass_input.setText(camera.password)
+            
+            # Load ATEM mapping
+            atem_input = self.settings.atem.input_mapping.get(str(camera_id), 0)
+            index = self.edit_atem_combo.findData(atem_input)
+            if index >= 0:
+                self.edit_atem_combo.setCurrentIndex(index)
+            
+            # Show the edit form panel
+            self.edit_form_panel.show()
     
     def _cancel_edit(self):
         """Cancel camera edit"""

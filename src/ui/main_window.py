@@ -6,7 +6,7 @@ The main window with page navigation, camera preview, and controls.
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
-    QButtonGroup, QSpacerItem, QSlider, QScrollArea, QMenu, QDialog, QComboBox,
+    QButtonGroup, QSpacerItem, QSlider, QMenu, QDialog, QComboBox,
     QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
@@ -18,6 +18,7 @@ from ..camera.multiview import MultiviewManager, CameraInfo
 from ..atem.tally import ATEMTallyController, TallyState
 from .preview_widget import PreviewWidget
 from .settings_page import SettingsPage
+from .widgets import TouchScrollArea
 from .camera_page import CameraPage
 from .companion_page import CompanionPage
 from .joystick_widget import JoystickWidget
@@ -103,34 +104,14 @@ class MainWindow(QMainWindow):
         # Remove window decorations for fullscreen app look (no title bar, no borders)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         
-        # Calculate window size to match 10.5" physical size on 15.4" screen
-        # Screen: 15.4" diagonal, 16:9, 1920x1080 → Physical: 13.42" x 7.55"
-        # Target: 10.5" diagonal, 16:10 → Physical: 8.90" x 5.56"
-        # Scale factor (width): 8.90 / 13.42 = 0.663
-        # Window size: 1273x795px (matches 8.90" x 5.56" physical size)
-        
-        screen_width = 1920
-        screen_height = 1080
-        scale_factor = 0.663  # 8.90" / 13.42"
-        
-        window_width = int(screen_width * scale_factor)  # 1273px
-        window_height = int(window_width * 10 / 16)  # 795px (16:10 aspect)
-        
         # Set stylesheet
         self.setStyleSheet(STYLESHEET)
-        
-        # Set window size
-        self.setFixedSize(window_width, window_height)
         
         # Show window first to ensure screen geometry is available
         self.show()
         
-        # Center window on screen (creates black bars automatically)
-        # Use full screen geometry (not availableGeometry) to center on entire display
-        screen_geometry = self.screen().geometry()
-        x = (screen_geometry.width() - window_width) // 2
-        y = (screen_geometry.height() - window_height) // 2
-        self.move(x, y)
+        # Set window to fullscreen at native resolution
+        self.setWindowState(Qt.WindowState.WindowFullScreen)
     
     def _setup_ui(self):
         """Setup the main UI"""
@@ -378,11 +359,9 @@ class MainWindow(QMainWindow):
         panel_layout.setContentsMargins(0, 0, 0, 0)
         panel_layout.setSpacing(0)
         
-        # Scroll area for content
-        scroll = QScrollArea()
+        # Scroll area for content with touch scrolling
+        scroll = TouchScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setStyleSheet(f"""
             QScrollArea {{
                 background: transparent;
@@ -390,19 +369,6 @@ class MainWindow(QMainWindow):
             }}
             QScrollArea > QWidget > QWidget {{
                 background: transparent;
-            }}
-            QScrollBar:vertical {{
-                background: {COLORS['surface']};
-                width: 8px;
-                border-radius: 4px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {COLORS['border']};
-                border-radius: 4px;
-                min-height: 30px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
             }}
         """)
         
@@ -1396,31 +1362,15 @@ class MainWindow(QMainWindow):
     
     def _create_camera_bar(self) -> QWidget:
         """Create bottom camera selection bar"""
-        # Outer scroll area for the entire bar
-        bar_scroll = QScrollArea()
+        # Outer scroll area for the entire bar with touch scrolling
+        bar_scroll = TouchScrollArea()
         bar_scroll.setWidgetResizable(True)
-        bar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        bar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         bar_scroll.setFixedHeight(140)
         bar_scroll.setStyleSheet(f"""
             QScrollArea {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
-            }}
-            QScrollBar:horizontal {{
-                background: {COLORS['surface']};
-                height: 8px;
-                border-radius: 4px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:horizontal {{
-                background: {COLORS['border']};
-                border-radius: 4px;
-                min-width: 30px;
-            }}
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
-                width: 0px;
             }}
         """)
         

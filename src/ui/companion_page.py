@@ -39,6 +39,11 @@ class CompanionPage(QWidget):
         self._current_input_id = None
         self._keyboard_process = None
         self._keyboard_command = self._find_keyboard_command()
+        if self._keyboard_command:
+            print(f"Companion page: Found keyboard command: {self._keyboard_command}")
+        else:
+            print("Companion page: No keyboard command found - OSK will not work")
+        
         self._setup_ui()
         self._start_update_detection()
         self._start_input_focus_detection()
@@ -49,7 +54,7 @@ class CompanionPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Web view only - no toolbar
+        # Web view
         self.web_view = QWebEngineView()
         self.web_view.setUrl(QUrl(self.companion_url))
         
@@ -61,6 +66,9 @@ class CompanionPage(QWidget):
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+        # Enable touch scrolling and touch features
+        settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
         
         # Connect signals
         self.web_view.loadFinished.connect(self._on_load_finished)
@@ -74,6 +82,7 @@ class CompanionPage(QWidget):
             'matchbox-keyboard',  # Common on Raspberry Pi OS
             'onboard',            # Alternative keyboard
             'florence',           # Another alternative
+            'squeekboard',        # Squeekboard (used on some Pi OS versions)
         ]
         
         for cmd in keyboard_commands:
@@ -86,100 +95,120 @@ class CompanionPage(QWidget):
         """Start periodic check for focused input fields in web page"""
         self._input_focus_timer = QTimer(self)
         self._input_focus_timer.timeout.connect(self._check_web_input_focus)
-        self._input_focus_timer.start(300)  # Check every 300ms
+        self._input_focus_timer.start(150)  # Check every 150ms for very responsive detection
     
     def _check_web_input_focus(self):
         """Check if an input field is focused in the web page"""
         js_code = """
         (function() {
             var el = document.activeElement;
-            // Exclude SELECT (dropdown) elements - they don't need keyboard
-            if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && el.tagName !== 'SELECT') {
-                var inputType = el.type || 'text';
-                // Also exclude input types that don't need keyboard (like 'select-one' dropdowns)
-                if (inputType === 'select-one' || inputType === 'select-multiple') {
-                    return JSON.stringify({focused: false});
-                }
-                var inputId = el.id || el.name || 'input';
-                var inputValue = el.value || '';
-                var placeholder = el.placeholder || '';
-                return JSON.stringify({
-                    focused: true,
-                    type: inputType,
-                    id: inputId,
-                    value: inputValue,
-                    placeholder: placeholder
-                });
+            if (!el || !el.tagName) {
+                return JSON.stringify({focused: false, reason: 'no active element'});
             }
-            return JSON.stringify({focused: false});
+            var tagName = el.tagName.toUpperCase();
+            var isInput = tagName === 'INPUT' || tagName === 'TEXTAREA';
+            var isContentEditable = el.contentEditable === 'true' || el.contentEditable === true || el.isContentEditable === true;
+            
+            if (isInput) {
+                var inputType = (el.type || 'text').toLowerCase();
+                var excludeTypes = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image'];
+                if (excludeTypes.indexOf(inputType) !== -1 || tagName === 'SELECT') {
+                    return JSON.stringify({focused: false, reason: 'excluded type: ' + inputType});
+                }
+                return JSON.stringify({focused: true, type: inputType, tag: tagName});
+            }
+            
+            if (isContentEditable) {
+                return JSON.stringify({focused: true, type: 'contenteditable', tag: tagName});
+            }
+            
+            return JSON.stringify({focused: false, reason: 'not input: ' + tagName});
         })();
         """
-        self.web_view.page().runJavaScript(js_code, self._on_input_focus_result)
+        try:
+            self.web_view.page().runJavaScript(js_code, self._on_input_focus_result)
+        except Exception as e:
+            print(f"Companion: Error checking web input focus: {e}")
     
     def _on_input_focus_result(self, result):
         """Handle result of input focus check"""
         import json
         try:
-            data = json.loads(result) if result else {"focused": False}
-        except:
+            if not result:
+                result = '{"focused": false}'
+            data = json.loads(result) if isinstance(result, str) else result
+        except Exception as e:
+            print(f"Companion: Error parsing result: {e}, result: {result}")
             data = {"focused": False}
         
-        if data.get("focused"):
+        is_focused = data.get("focused", False)
+        
+        if is_focused:
             if not self._web_input_focused:
                 self._web_input_focused = True
                 self._current_input_type = data.get("type", "text")
-                self._current_input_id = data.get("id", "Input")
+                print(f"Companion: INPUT FOCUSED - type={self._current_input_type}, tag={data.get('tag')}")
                 self._show_pi_keyboard()
         else:
             if self._web_input_focused:
                 self._web_input_focused = False
+                print(f"Companion: INPUT BLURRED - reason={data.get('reason')}")
                 self._hide_pi_keyboard()
+    
     
     def _show_pi_keyboard(self):
         """Show Pi OS on-screen keyboard"""
         if not self._keyboard_command:
+            print("No keyboard command available")
             return  # No keyboard command available
         
         # Kill any existing keyboard process
         self._hide_pi_keyboard()
         
-        # Start the keyboard process
+        # Small delay to ensure previous keyboard is fully closed
+        QTimer.singleShot(100, self._actually_show_keyboard)
+    
+    def _actually_show_keyboard(self):
+        """Actually show the keyboard (called after delay)"""
+        if not self._keyboard_command:
+            return
+        
         try:
-            if self._keyboard_command == 'matchbox-keyboard':
-                # matchbox-keyboard runs as a daemon
+            if self._keyboard_command == 'squeekboard':
+                # Squeekboard uses sm.puri.OSK0 D-Bus interface
+                result = subprocess.run(
+                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                    timeout=2, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    print("Companion: Showed squeekboard via D-Bus")
+                else:
+                    print(f"Companion: squeekboard D-Bus error: {result.stderr}")
+            elif self._keyboard_command == 'matchbox-keyboard':
                 self._keyboard_process = subprocess.Popen(
                     [self._keyboard_command],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-            elif self._keyboard_command == 'onboard':
-                # onboard can be started normally
+                print(f"Companion: Started {self._keyboard_command}")
+            elif self._keyboard_command in ('onboard', 'florence'):
                 self._keyboard_process = subprocess.Popen(
                     [self._keyboard_command],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
-            elif self._keyboard_command == 'florence':
-                # florence can be started normally
-                self._keyboard_process = subprocess.Popen(
-                    [self._keyboard_command],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
+                print(f"Companion: Started {self._keyboard_command}")
         except Exception as e:
-            print(f"Failed to start keyboard: {e}")
+            print(f"Companion: Failed to show keyboard: {e}")
     
     def _hide_pi_keyboard(self):
         """Hide Pi OS on-screen keyboard"""
         if self._keyboard_process:
             try:
-                # Try graceful termination first
                 self._keyboard_process.terminate()
-                # Wait a bit for it to close
                 try:
                     self._keyboard_process.wait(timeout=1)
                 except subprocess.TimeoutExpired:
-                    # Force kill if it doesn't close
                     self._keyboard_process.kill()
                     self._keyboard_process.wait()
             except Exception:
@@ -187,13 +216,25 @@ class CompanionPage(QWidget):
             finally:
                 self._keyboard_process = None
         
-        # Also try to kill any remaining keyboard processes
-        if self._keyboard_command == 'matchbox-keyboard':
-            try:
+        try:
+            if self._keyboard_command == 'squeekboard':
+                # Squeekboard uses sm.puri.OSK0 D-Bus interface
+                result = subprocess.run(
+                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
+                    timeout=2, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    print("Companion: Hid squeekboard via D-Bus")
+                else:
+                    print(f"Companion: squeekboard hide error: {result.stderr}")
+            elif self._keyboard_command == 'matchbox-keyboard':
                 subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except Exception:
-                pass
+            elif self._keyboard_command in ('onboard', 'florence'):
+                subprocess.run(['pkill', '-f', self._keyboard_command], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print(f"Companion: Error hiding keyboard: {e}")
     
     def closeEvent(self, event):
         """Clean up keyboard process on close"""
@@ -393,9 +434,87 @@ exit 1
         )
     
     def _on_load_finished(self, success):
-        """Handle page load finish - check for updates"""
+        """Handle page load finish - check for updates and inject touch support"""
         if success:
             QTimer.singleShot(1000, self._check_for_updates)
+            # Inject touch scrolling support
+            self._inject_touch_support()
+    
+    def _inject_touch_support(self):
+        """Inject JavaScript for touch scrolling support"""
+        js_code = """
+        (function() {
+            if (window._panapitouchScrollSetup) return;
+            window._panapitouchScrollSetup = true;
+            
+            var startY = 0;
+            var startX = 0;
+            var startScrollTop = 0;
+            var startScrollLeft = 0;
+            var isDragging = false;
+            var scrollTarget = null;
+            
+            function getScrollableParent(el) {
+                while (el && el !== document.body) {
+                    var style = window.getComputedStyle(el);
+                    var overflowY = style.overflowY;
+                    var overflowX = style.overflowX;
+                    if ((overflowY === 'auto' || overflowY === 'scroll' || overflowX === 'auto' || overflowX === 'scroll') &&
+                        (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth)) {
+                        return el;
+                    }
+                    el = el.parentElement;
+                }
+                return document.documentElement;
+            }
+            
+            document.addEventListener('touchstart', function(e) {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                    return;
+                }
+                startY = e.touches[0].clientY;
+                startX = e.touches[0].clientX;
+                scrollTarget = getScrollableParent(e.target);
+                startScrollTop = scrollTarget.scrollTop;
+                startScrollLeft = scrollTarget.scrollLeft;
+                isDragging = false;
+            }, { passive: true });
+            
+            document.addEventListener('touchmove', function(e) {
+                if (!scrollTarget) return;
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                    return;
+                }
+                
+                var deltaY = startY - e.touches[0].clientY;
+                var deltaX = startX - e.touches[0].clientX;
+                
+                if (!isDragging && (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5)) {
+                    isDragging = true;
+                    if (window.getSelection) {
+                        window.getSelection().removeAllRanges();
+                    }
+                }
+                
+                if (isDragging) {
+                    scrollTarget.scrollTop = startScrollTop + deltaY;
+                    scrollTarget.scrollLeft = startScrollLeft + deltaX;
+                }
+            }, { passive: true });
+            
+            document.addEventListener('touchend', function(e) {
+                isDragging = false;
+                scrollTarget = null;
+            }, { passive: true });
+            
+            console.log('PanaPiTouch: Touch scrolling enabled');
+        })();
+        """
+        try:
+            self.web_view.page().runJavaScript(js_code)
+            print("Companion: Injected touch scrolling support")
+        except Exception as e:
+            print(f"Companion: Failed to inject touch support: {e}")
     
     def set_url(self, url: str):
         """Set companion URL"""

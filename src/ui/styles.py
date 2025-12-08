@@ -293,9 +293,30 @@ QComboBox::drop-down {{
 }}
 
 QComboBox QAbstractItemView {{
-    background-color: {COLORS['surface']};
+    background-color: {COLORS['surface']} !important;
     border: 2px solid {COLORS['border']};
     selection-background-color: {COLORS['primary']};
+    color: {COLORS['text']};
+    padding: 4px;
+    font-size: 16px;
+    outline: none;
+}}
+
+QComboBox QAbstractItemView::item {{
+    background-color: {COLORS['surface']} !important;
+    min-height: 56px;
+    padding: 16px 20px;
+    border-radius: 4px;
+    color: {COLORS['text']} !important;
+}}
+
+QComboBox QAbstractItemView::item:hover {{
+    background-color: {COLORS['surface_hover']} !important;
+}}
+
+QComboBox QAbstractItemView::item:selected {{
+    background-color: {COLORS['primary']} !important;
+    color: {COLORS['background']} !important;
 }}
 
 /* Scroll Area */

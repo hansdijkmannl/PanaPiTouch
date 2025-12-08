@@ -16,10 +16,13 @@ from src.core.logging_config import setup_logging
 setup_logging(log_level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set environment variables for Qt on Raspberry Pi
-if 'QT_QPA_PLATFORM' not in os.environ:
-    os.environ['QT_QPA_PLATFORM'] = 'xcb'  # or 'eglfs' for fullscreen
-os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '1'
+# Default to X11/XWayland
+os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
+
+# Disable all scaling - run at native resolution
+os.environ.setdefault('QT_AUTO_SCREEN_SCALE_FACTOR', '0')
+os.environ.setdefault('QT_ENABLE_HIGHDPI_SCALING', '0')
+os.environ.pop('QT_SCALE_FACTOR', None)  # clear any forced scale
 
 # IMPORTANT: QtWebEngineWidgets must be imported before QApplication
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401

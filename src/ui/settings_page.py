@@ -1,7 +1,8 @@
 """
 Settings Page
 
-Configuration for ATEM, network, and system settings.
+Configuration for ATEM, network, display, and system settings.
+Sidebar navigation with content panels.
 """
 import re
 import subprocess
@@ -14,16 +15,60 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit,
     QGroupBox, QFrame, QMessageBox, QComboBox,
-    QScrollArea, QGridLayout, QInputDialog
+    QGridLayout, QInputDialog, QStackedWidget, QSlider,
+    QSizePolicy
 )
-from PyQt6.QtCore import pyqtSignal, QTimer, Qt
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QEvent
 
 from ..config.settings import Settings
+from .widgets import TouchScrollArea
+
+
+class StyledComboBox(QComboBox):
+    """ComboBox with properly styled dropdown"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+    
+    def showPopup(self):
+        """Override to style dropdown when shown"""
+        super().showPopup()
+        QTimer.singleShot(10, self._style_dropdown)
+    
+    def _style_dropdown(self):
+        """Style the dropdown view"""
+        view = self.view()
+        if view:
+            view.setStyleSheet("""
+                QAbstractItemView {
+                    background-color: #1a1a24 !important;
+                    border: 2px solid #2a2a38;
+                    selection-background-color: #FF9500;
+                    color: #FFFFFF !important;
+                    padding: 4px;
+                    font-size: 16px;
+                    outline: none;
+                }
+                QAbstractItemView::item {
+                    background-color: #1a1a24 !important;
+                    min-height: 56px !important;
+                    padding: 16px 20px;
+                    border-radius: 4px;
+                    color: #FFFFFF !important;
+                }
+                QAbstractItemView::item:hover {
+                    background-color: #2a2a38 !important;
+                }
+                QAbstractItemView::item:selected {
+                    background-color: #FF9500 !important;
+                    color: #0a0a0f !important;
+                }
+            """)
 
 
 class SettingsPage(QWidget):
     """
-    Settings page for ATEM, network, and system configuration.
+    Settings page with sidebar navigation.
     """
     
     settings_changed = pyqtSignal()
@@ -31,71 +76,102 @@ class SettingsPage(QWidget):
     def __init__(self, settings: Settings, parent=None):
         super().__init__(parent)
         self.settings = settings
+        self._current_section = 0
         self._setup_ui()
         self._load_settings()
         self._start_system_monitor()
     
     def _setup_ui(self):
-        """Setup the settings page UI"""
-        # Main scroll area for all content
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-            QScrollBar:vertical {
-                background: #1a1a24;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #2a2a38;
-                border-radius: 4px;
-                min-height: 30px;
+        """Setup the settings page UI with sidebar"""
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # === LEFT SIDEBAR ===
+        sidebar = QFrame()
+        sidebar.setFixedWidth(160)
+        sidebar.setStyleSheet("""
+            QFrame {
+                background-color: #0a0a0f;
+                border-right: 1px solid #2a2a38;
             }
         """)
         
-        scroll_content = QWidget()
-        main_layout = QVBoxLayout(scroll_content)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(20)
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(8, 16, 8, 16)
+        sidebar_layout.setSpacing(8)
         
-        # Top row - ATEM, Network, and Backup panels (equal stretch)
-        top_row = QHBoxLayout()
-        top_row.setSpacing(20)
+        # Sidebar buttons
+        self.sidebar_buttons = []
+        sections = [
+            ("🌐", "Network"),
+            ("🎬", "ATEM"),
+            ("💾", "Backup"),
+            ("📊", "System"),
+        ]
         
-        atem_panel = self._create_atem_panel()
-        top_row.addWidget(atem_panel, 1)  # stretch factor 1
+        for i, (icon, name) in enumerate(sections):
+            btn = QPushButton(f"{icon}\n{name}")
+            btn.setCheckable(True)
+            btn.setMinimumHeight(80)
+            btn.setStyleSheet(self._get_sidebar_button_style())
+            btn.clicked.connect(lambda checked, idx=i: self._on_section_clicked(idx))
+            sidebar_layout.addWidget(btn)
+            self.sidebar_buttons.append(btn)
         
-        network_panel = self._create_network_panel()
-        top_row.addWidget(network_panel, 1)  # stretch factor 1
+        sidebar_layout.addStretch()
+        main_layout.addWidget(sidebar)
         
-        backup_panel = self._create_backup_panel()
-        top_row.addWidget(backup_panel, 1)  # stretch factor 1
+        # === RIGHT CONTENT AREA ===
+        self.content_stack = QStackedWidget()
+        self.content_stack.setStyleSheet("background-color: #0a0a0f;")
         
-        main_layout.addLayout(top_row)
+        # Create content panels
+        self.content_stack.addWidget(self._create_network_panel())
+        self.content_stack.addWidget(self._create_atem_panel())
+        self.content_stack.addWidget(self._create_backup_panel())
+        self.content_stack.addWidget(self._create_system_panel())
         
-        # Bottom row - System Info panel
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(20)
+        main_layout.addWidget(self.content_stack, 1)
         
-        system_panel = self._create_system_panel()
-        bottom_row.addWidget(system_panel)
+        # Select first section by default
+        self._on_section_clicked(0)
+    
+    def _get_sidebar_button_style(self):
+        """Get sidebar button styling"""
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 12px;
+                color: #888898;
+                font-size: 13px;
+                font-weight: 500;
+                padding: 12px 8px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #1a1a24;
+                color: #ffffff;
+            }
+            QPushButton:checked {
+                background-color: #FF9500;
+                color: #0a0a0f;
+                font-weight: 600;
+            }
+            QPushButton:pressed {
+                background-color: #CC7700;
+            }
+        """
+    
+    def _on_section_clicked(self, index):
+        """Handle sidebar section click"""
+        self._current_section = index
+        self.content_stack.setCurrentIndex(index)
         
-        bottom_row.addStretch()
-        main_layout.addLayout(bottom_row)
-        
-        main_layout.addStretch()
-        
-        scroll.setWidget(scroll_content)
-        
-        # Set scroll as main widget
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        page_layout.addWidget(scroll)
+        # Update button states
+        for i, btn in enumerate(self.sidebar_buttons):
+            btn.setChecked(i == index)
     
     def _get_input_style(self):
         """Get consistent input field styling"""
@@ -104,10 +180,10 @@ class SettingsPage(QWidget):
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
-                padding: 10px 14px;
-                font-size: 14px;
+                padding: 12px 14px;
+                font-size: 15px;
                 color: #FFFFFF;
-                min-height: 20px;
+                min-height: 24px;
             }
             QLineEdit:focus, QComboBox:focus {
                 border-color: #FF9500;
@@ -117,13 +193,30 @@ class SettingsPage(QWidget):
             }
             QComboBox::drop-down {
                 border: none;
-                width: 30px;
+                width: 40px;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a24;
+                background-color: #1a1a24 !important;
                 border: 2px solid #2a2a38;
                 selection-background-color: #FF9500;
-                color: #FFFFFF;
+                color: #FFFFFF !important;
+                padding: 4px;
+                font-size: 16px;
+                outline: none;
+            }
+            QComboBox QAbstractItemView::item {
+                background-color: #1a1a24 !important;
+                min-height: 56px !important;
+                padding: 16px 20px;
+                border-radius: 4px;
+                color: #FFFFFF !important;
+            }
+            QComboBox QAbstractItemView::item:hover {
+                background-color: #2a2a38 !important;
+            }
+            QComboBox QAbstractItemView::item:selected {
+                background-color: #FF9500 !important;
+                color: #0a0a0f !important;
             }
         """
     
@@ -136,17 +229,16 @@ class SettingsPage(QWidget):
                     border: none;
                     border-radius: 8px;
                     color: #0a0a0f;
-                    font-size: 14px;
+                    font-size: 15px;
                     font-weight: 600;
-                    padding: 0px;
-                    margin: 0px;
-                    min-height: 44px;
+                    padding: 14px 24px;
+                    min-height: 48px;
                 }
                 QPushButton:hover {
-                    background-color: #CC7700;
+                    background-color: #FFAA33;
                 }
                 QPushButton:pressed {
-                    background-color: #AA6600;
+                    background-color: #CC7700;
                 }
             """
         else:
@@ -156,75 +248,118 @@ class SettingsPage(QWidget):
                     border: 2px solid #3a3a48;
                     border-radius: 8px;
                     color: #ffffff;
-                    font-size: 14px;
+                    font-size: 15px;
                     font-weight: 500;
-                    padding: 0px;
-                    margin: 0px;
-                    min-height: 44px;
+                    padding: 14px 24px;
+                    min-height: 48px;
                 }
                 QPushButton:hover {
                     border-color: #FF9500;
                     background-color: #3a3a48;
                 }
                 QPushButton:pressed {
-                    background-color: #4a4a58;
+                    background-color: #FF9500;
+                    border-color: #FF9500;
+                    color: #0a0a0f;
                 }
             """
     
-    def _create_atem_panel(self) -> QWidget:
-        """Create ATEM configuration panel"""
-        panel = QFrame()
-        panel.setStyleSheet("""
+    def _get_slider_style(self):
+        """Get slider styling"""
+        return """
+            QSlider::groove:horizontal {
+                border: none;
+                height: 8px;
+                background: #2a2a38;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: #FF9500;
+                border: none;
+                width: 28px;
+                height: 28px;
+                margin: -10px 0;
+                border-radius: 14px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #FFAA33;
+            }
+            QSlider::handle:horizontal:pressed {
+                background: #CC7700;
+            }
+            QSlider::sub-page:horizontal {
+                background: #FF9500;
+                border-radius: 4px;
+            }
+        """
+    
+    def _create_content_wrapper(self, title, icon):
+        """Create a scrollable content wrapper with header"""
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(0)
+        
+        # Header
+        header = QFrame()
+        header.setFixedHeight(70)
+        header.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
-                border: 1px solid #2a2a38;
-                border-radius: 12px;
+                border-bottom: 1px solid #2a2a38;
             }
         """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(24, 0, 24, 0)
         
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-        
-        # Header with icon
-        header_layout = QHBoxLayout()
-        header_icon = QLabel("🎬")
-        header_icon.setStyleSheet("font-size: 24px; border: none;")
-        header_layout.addWidget(header_icon)
-        header = QLabel("ATEM Switcher")
-        header.setStyleSheet("font-size: 20px; font-weight: 600; border: none; color: #ffffff;")
-        header_layout.addWidget(header)
+        title_label = QLabel(f"{icon}  {title}")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 600; color: #ffffff;")
+        header_layout.addWidget(title_label)
         header_layout.addStretch()
-        layout.addLayout(header_layout)
         
-        # Connection info
-        info_label = QLabel("Connect to a Blackmagic ATEM switcher for tally indication.")
-        info_label.setStyleSheet("color: #888898; border: none; font-size: 13px;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
+        wrapper_layout.addWidget(header)
         
-        # IP Address
-        ip_container = QVBoxLayout()
-        ip_container.setSpacing(6)
-        ip_label = QLabel("ATEM IP Address:")
-        ip_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        ip_container.addWidget(ip_label)
-        self.atem_ip_input = QLineEdit()
-        self.atem_ip_input.setPlaceholderText("192.168.1.240")
-        self.atem_ip_input.setStyleSheet(self._get_input_style())
-        ip_container.addWidget(self.atem_ip_input)
-        layout.addLayout(ip_container)
+        # Scrollable content
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { border: none; background-color: transparent; }")
         
-        # ATEM Model display (shown after successful connection)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(20)
+        
+        scroll.setWidget(content)
+        wrapper_layout.addWidget(scroll)
+        
+        return wrapper, content_layout
+    
+    def _create_atem_panel(self) -> QWidget:
+        """Create ATEM configuration panel"""
+        wrapper, layout = self._create_content_wrapper("ATEM Switcher", "🎬")
+        
+        # Info card
+        info_frame = self._create_info_card(
+            "Connect to a Blackmagic ATEM switcher for tally indication.\n"
+            "Red border = Program (Live), Green border = Preview."
+        )
+        layout.addWidget(info_frame)
+        
+        # IP Address input
+        ip_frame = self._create_input_group("ATEM IP Address", "192.168.1.240")
+        self.atem_ip_input = ip_frame.findChild(QLineEdit)
+        layout.addWidget(ip_frame)
+        
+        # Model label (shown after connection)
         self.atem_model_label = QLabel("")
         self.atem_model_label.setStyleSheet("""
             QLabel {
-                padding: 10px 16px;
+                padding: 14px 20px;
                 border-radius: 8px;
                 background-color: rgba(0, 180, 216, 0.15);
                 color: #FF9500;
                 border: 1px solid rgba(0, 180, 216, 0.3);
-                font-size: 13px;
+                font-size: 14px;
             }
         """)
         self.atem_model_label.hide()
@@ -232,32 +367,24 @@ class SettingsPage(QWidget):
         
         # Status
         self.atem_status_label = QLabel("● Not Connected")
-        self.atem_status_label.setStyleSheet("""
-            QLabel {
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: rgba(239, 68, 68, 0.15);
-                color: #ef4444;
-                border: 1px solid rgba(239, 68, 68, 0.3);
-                font-size: 13px;
-            }
-        """)
+        self.atem_status_label.setStyleSheet(self._get_status_style("error"))
         layout.addWidget(self.atem_status_label)
         
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
         
-        test_atem_btn = QPushButton("Test Connection")
-        test_atem_btn.setStyleSheet(self._get_button_style(primary=False))
-        test_atem_btn.clicked.connect(self._test_atem)
-        btn_layout.addWidget(test_atem_btn)
+        test_btn = QPushButton("Test Connection")
+        test_btn.setStyleSheet(self._get_button_style(False))
+        test_btn.clicked.connect(self._test_atem)
+        btn_layout.addWidget(test_btn)
         
-        save_atem_btn = QPushButton("Save")
-        save_atem_btn.setStyleSheet(self._get_button_style(primary=True))
-        save_atem_btn.clicked.connect(self._save_atem)
-        btn_layout.addWidget(save_atem_btn)
+        save_btn = QPushButton("Save")
+        save_btn.setStyleSheet(self._get_button_style(True))
+        save_btn.clicked.connect(self._save_atem)
+        btn_layout.addWidget(save_btn)
         
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
         
         # Tally mapping info
@@ -266,200 +393,573 @@ class SettingsPage(QWidget):
             QFrame {
                 background-color: #1a1a24;
                 border: 1px solid #2a2a38;
-                border-radius: 8px;
+                border-radius: 12px;
             }
         """)
         mapping_layout = QVBoxLayout(mapping_frame)
-        mapping_layout.setContentsMargins(16, 12, 16, 12)
+        mapping_layout.setContentsMargins(20, 16, 20, 16)
         
         mapping_header = QLabel("💡 Tally Mapping")
-        mapping_header.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; border: none;")
+        mapping_header.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff;")
         mapping_layout.addWidget(mapping_header)
         
         mapping_info = QLabel(
             "Map cameras to ATEM inputs in the Camera page.\n"
             "🔴 RED = Program (Live)  •  🟢 GREEN = Preview"
         )
-        mapping_info.setStyleSheet("color: #888898; font-size: 12px; border: none;")
+        mapping_info.setStyleSheet("color: #888898; font-size: 13px;")
         mapping_layout.addWidget(mapping_info)
         
         layout.addWidget(mapping_frame)
         layout.addStretch()
         
-        return panel
+        return wrapper
     
     def _create_network_panel(self) -> QWidget:
         """Create network configuration panel"""
-        panel = QFrame()
-        panel.setStyleSheet("""
+        wrapper, layout = self._create_content_wrapper("Network Configuration", "🌐")
+        
+        # Info card
+        info_frame = self._create_info_card("Configure network settings for the Raspberry Pi.")
+        layout.addWidget(info_frame)
+        
+        # Interface selection
+        interface_frame = QFrame()
+        interface_frame.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
         """)
+        interface_layout = QVBoxLayout(interface_frame)
+        interface_layout.setContentsMargins(20, 16, 20, 16)
+        interface_layout.setSpacing(10)
         
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        interface_label = QLabel("Network Interface")
+        interface_label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ffffff;")
+        interface_layout.addWidget(interface_label)
         
-        # Header with icon
-        header_layout = QHBoxLayout()
-        header_icon = QLabel("🌐")
-        header_icon.setStyleSheet("font-size: 24px; border: none;")
-        header_layout.addWidget(header_icon)
-        header = QLabel("Network Configuration")
-        header.setStyleSheet("font-size: 20px; font-weight: 600; border: none; color: #ffffff;")
-        header_layout.addWidget(header)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-        
-        # Connection info
-        info_label = QLabel("Configure network settings for the Raspberry Pi.")
-        info_label.setStyleSheet("color: #888898; border: none; font-size: 13px;")
-        layout.addWidget(info_label)
-        
-        # Interface selection
-        interface_container = QVBoxLayout()
-        interface_container.setSpacing(6)
-        interface_label = QLabel("Network Interface:")
-        interface_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        interface_container.addWidget(interface_label)
-        self.interface_combo = QComboBox()
-        self.interface_combo.addItems(["WiFi (wlan0)", "Ethernet (eth0)"])
+        self.interface_combo = StyledComboBox()
+        self.interface_combo.addItems(["Ethernet (eth0)", "WiFi (wlan0)"])
+        self.interface_combo.setCurrentIndex(0)
         self.interface_combo.setStyleSheet(self._get_input_style())
         self.interface_combo.currentIndexChanged.connect(self._on_interface_changed)
-        interface_container.addWidget(self.interface_combo)
-        layout.addLayout(interface_container)
+        interface_layout.addWidget(self.interface_combo)
         
-        # IP Address
-        ip_container = QVBoxLayout()
-        ip_container.setSpacing(6)
-        ip_label = QLabel("IP Address:")
-        ip_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        ip_container.addWidget(ip_label)
-        self.ip_input = QLineEdit()
-        self.ip_input.setPlaceholderText("192.168.1.100")
-        self.ip_input.setStyleSheet(self._get_input_style())
-        ip_container.addWidget(self.ip_input)
-        layout.addLayout(ip_container)
+        layout.addWidget(interface_frame)
         
-        # Subnet and Gateway in a row
-        subnet_gateway_row = QHBoxLayout()
-        subnet_gateway_row.setSpacing(12)
+        # IP Settings
+        ip_frame = self._create_input_group("IP Address", "192.168.1.100")
+        self.ip_input = ip_frame.findChild(QLineEdit)
+        layout.addWidget(ip_frame)
         
-        # Subnet Mask
-        subnet_container = QVBoxLayout()
-        subnet_container.setSpacing(6)
-        subnet_label = QLabel("Subnet Mask:")
-        subnet_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        subnet_container.addWidget(subnet_label)
-        self.subnet_input = QLineEdit()
-        self.subnet_input.setPlaceholderText("255.255.255.0")
-        self.subnet_input.setStyleSheet(self._get_input_style())
-        subnet_container.addWidget(self.subnet_input)
-        subnet_gateway_row.addLayout(subnet_container)
+        # Subnet and Gateway row
+        row = QHBoxLayout()
+        row.setSpacing(16)
         
-        # Gateway
-        gateway_container = QVBoxLayout()
-        gateway_container.setSpacing(6)
-        gateway_label = QLabel("Gateway:")
-        gateway_label.setStyleSheet("border: none; color: #FFFFFF; font-size: 13px; font-weight: 500;")
-        gateway_container.addWidget(gateway_label)
-        self.gateway_input = QLineEdit()
-        self.gateway_input.setPlaceholderText("192.168.1.1")
-        self.gateway_input.setStyleSheet(self._get_input_style())
-        gateway_container.addWidget(self.gateway_input)
-        subnet_gateway_row.addLayout(gateway_container)
+        subnet_frame = self._create_input_group("Subnet Mask", "255.255.255.0")
+        self.subnet_input = subnet_frame.findChild(QLineEdit)
+        row.addWidget(subnet_frame)
         
-        layout.addLayout(subnet_gateway_row)
+        gateway_frame = self._create_input_group("Gateway", "192.168.1.1")
+        self.gateway_input = gateway_frame.findChild(QLineEdit)
+        row.addWidget(gateway_frame)
+        
+        layout.addLayout(row)
         
         # Status
         self.network_status_label = QLabel("● Ready")
-        self.network_status_label.setStyleSheet("""
-            QLabel {
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: rgba(34, 197, 94, 0.15);
-                color: #22c55e;
-                border: 1px solid rgba(34, 197, 94, 0.3);
-                font-size: 13px;
-            }
-        """)
+        self.network_status_label.setStyleSheet(self._get_status_style("success"))
         layout.addWidget(self.network_status_label)
         
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
         
-        load_current_btn = QPushButton("Load Current")
-        load_current_btn.setStyleSheet(self._get_button_style(primary=False))
-        load_current_btn.clicked.connect(self._load_current_network)
-        btn_layout.addWidget(load_current_btn)
+        load_btn = QPushButton("Load Current")
+        load_btn.setStyleSheet(self._get_button_style(False))
+        load_btn.clicked.connect(self._load_current_network)
+        btn_layout.addWidget(load_btn)
         
-        apply_network_btn = QPushButton("Apply")
-        apply_network_btn.setStyleSheet(self._get_button_style(primary=True))
-        apply_network_btn.clicked.connect(self._apply_network_settings)
-        btn_layout.addWidget(apply_network_btn)
+        apply_btn = QPushButton("Apply")
+        apply_btn.setStyleSheet(self._get_button_style(True))
+        apply_btn.clicked.connect(self._apply_network_settings)
+        btn_layout.addWidget(apply_btn)
         
+        btn_layout.addStretch()
         layout.addLayout(btn_layout)
-        layout.addStretch()
         
-        return panel
+        layout.addStretch()
+        return wrapper
     
-    def _create_system_panel(self) -> QWidget:
-        """Create system information panel"""
-        panel = QFrame()
-        panel.setFixedWidth(820)  # Wider to show more info
-        panel.setStyleSheet("""
+    def _create_display_panel(self) -> QWidget:
+        """Create display settings panel"""
+        wrapper, layout = self._create_content_wrapper("Display Settings", "🖥️")
+        
+        # Info card
+        info_frame = self._create_info_card(
+            "Adjust display settings for the Wisecoco AMOLED display.\n"
+            "Changes are applied in real-time via xrandr."
+        )
+        layout.addWidget(info_frame)
+        
+        # Brightness
+        brightness_frame = self._create_slider_group(
+            "Brightness", 10, 100, 100, "%",
+            "Controls overall display brightness"
+        )
+        self.brightness_slider = brightness_frame.findChild(QSlider)
+        self.brightness_value = brightness_frame.findChild(QLabel, "value_label")
+        self.brightness_slider.valueChanged.connect(self._on_brightness_changed)
+        layout.addWidget(brightness_frame)
+        
+        # Gamma/Contrast
+        gamma_frame = self._create_slider_group(
+            "Gamma (Contrast)", 50, 150, 100, "%",
+            "Adjust gamma curve - lower = more contrast"
+        )
+        self.gamma_slider = gamma_frame.findChild(QSlider)
+        self.gamma_value = gamma_frame.findChild(QLabel, "value_label")
+        self.gamma_slider.valueChanged.connect(self._on_gamma_changed)
+        layout.addWidget(gamma_frame)
+        
+        # Color Temperature
+        temp_frame = self._create_slider_group(
+            "Color Temperature", 3000, 9000, 6500, "K",
+            "Warm (3000K) to Cool (9000K) - affects RGB balance"
+        )
+        self.temp_slider = temp_frame.findChild(QSlider)
+        self.temp_value = temp_frame.findChild(QLabel, "value_label")
+        self.temp_slider.valueChanged.connect(self._on_temp_changed)
+        layout.addWidget(temp_frame)
+        
+        # RGB Balance section
+        rgb_frame = QFrame()
+        rgb_frame.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
         """)
+        rgb_layout = QVBoxLayout(rgb_frame)
+        rgb_layout.setContentsMargins(20, 16, 20, 16)
+        rgb_layout.setSpacing(16)
         
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        rgb_header = QLabel("RGB Balance")
+        rgb_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        rgb_layout.addWidget(rgb_header)
         
-        # Header with icon
-        header_layout = QHBoxLayout()
-        header_icon = QLabel("🖥️")
-        header_icon.setStyleSheet("font-size: 24px; border: none;")
-        header_layout.addWidget(header_icon)
-        header = QLabel("System Information")
-        header.setStyleSheet("font-size: 20px; font-weight: 600; border: none; color: #ffffff;")
-        header_layout.addWidget(header)
-        header_layout.addStretch()
+        rgb_info = QLabel("Fine-tune individual color channels")
+        rgb_info.setStyleSheet("color: #888898; font-size: 13px;")
+        rgb_layout.addWidget(rgb_info)
         
-        # Refresh button
-        refresh_btn = QPushButton("⟳ Refresh")
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: none;
-                border-radius: 6px;
-                color: #ffffff;
-                font-size: 12px;
-                padding: 8px 12px;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
+        # Red
+        red_row = self._create_rgb_slider("Red", "#ef4444")
+        self.red_slider = red_row.findChild(QSlider)
+        self.red_value = red_row.findChild(QLabel, "value_label")
+        self.red_slider.valueChanged.connect(self._on_rgb_changed)
+        rgb_layout.addWidget(red_row)
+        
+        # Green
+        green_row = self._create_rgb_slider("Green", "#22c55e")
+        self.green_slider = green_row.findChild(QSlider)
+        self.green_value = green_row.findChild(QLabel, "value_label")
+        self.green_slider.valueChanged.connect(self._on_rgb_changed)
+        rgb_layout.addWidget(green_row)
+        
+        # Blue
+        blue_row = self._create_rgb_slider("Blue", "#3b82f6")
+        self.blue_slider = blue_row.findChild(QSlider)
+        self.blue_value = blue_row.findChild(QLabel, "value_label")
+        self.blue_slider.valueChanged.connect(self._on_rgb_changed)
+        rgb_layout.addWidget(blue_row)
+        
+        layout.addWidget(rgb_frame)
+        
+        # Buttons
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+        
+        reset_btn = QPushButton("Reset to Default")
+        reset_btn.setStyleSheet(self._get_button_style(False))
+        reset_btn.clicked.connect(self._reset_display_settings)
+        btn_layout.addWidget(reset_btn)
+        
+        save_display_btn = QPushButton("Save Settings")
+        save_display_btn.setStyleSheet(self._get_button_style(True))
+        save_display_btn.clicked.connect(self._save_display_settings)
+        btn_layout.addWidget(save_display_btn)
+        
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+        
+        layout.addStretch()
+        
+        # Load saved display settings
+        self._load_display_settings()
+        
+        return wrapper
+    
+    def _create_rgb_slider(self, name, color):
+        """Create an RGB channel slider row"""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(12)
+        
+        label = QLabel(name)
+        label.setFixedWidth(60)
+        label.setStyleSheet(f"font-size: 14px; font-weight: 500; color: {color};")
+        row_layout.addWidget(label)
+        
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(50)
+        slider.setMaximum(150)
+        slider.setValue(100)
+        slider.setStyleSheet(self._get_slider_style().replace("#FF9500", color).replace("#FFAA33", color).replace("#CC7700", color))
+        row_layout.addWidget(slider, 1)
+        
+        value = QLabel("100%")
+        value.setObjectName("value_label")
+        value.setFixedWidth(60)
+        value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        value.setStyleSheet("font-size: 14px; color: #ffffff; font-weight: 500;")
+        row_layout.addWidget(value)
+        
+        return row
+    
+    def _create_slider_group(self, title, min_val, max_val, default, unit, description=""):
+        """Create a slider with label and value display"""
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
             }
         """)
-        refresh_btn.clicked.connect(self._update_system_info)
-        header_layout.addWidget(refresh_btn)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(12)
         
-        layout.addLayout(header_layout)
+        # Header row
+        header_row = QHBoxLayout()
+        
+        title_label = QLabel(title)
+        title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        header_row.addWidget(title_label)
+        
+        header_row.addStretch()
+        
+        value_label = QLabel(f"{default}{unit}")
+        value_label.setObjectName("value_label")
+        value_label.setStyleSheet("font-size: 16px; color: #FF9500; font-weight: 600;")
+        header_row.addWidget(value_label)
+        
+        layout.addLayout(header_row)
+        
+        if description:
+            desc_label = QLabel(description)
+            desc_label.setStyleSheet("color: #888898; font-size: 13px;")
+            layout.addWidget(desc_label)
+        
+        # Slider
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setMinimum(min_val)
+        slider.setMaximum(max_val)
+        slider.setValue(default)
+        slider.setStyleSheet(self._get_slider_style())
+        layout.addWidget(slider)
+        
+        return frame
+    
+    def _on_brightness_changed(self, value):
+        """Handle brightness slider change"""
+        self.brightness_value.setText(f"{value}%")
+        self._schedule_display_update()
+    
+    def _on_gamma_changed(self, value):
+        """Handle gamma slider change"""
+        self.gamma_value.setText(f"{value}%")
+        self._schedule_display_update()
+    
+    def _schedule_display_update(self):
+        """Schedule display update with debounce"""
+        if not hasattr(self, '_display_timer'):
+            self._display_timer = QTimer(self)
+            self._display_timer.setSingleShot(True)
+            self._display_timer.timeout.connect(self._emit_display_settings)
+        self._display_timer.start(100)  # 100ms debounce
+    
+    def _on_temp_changed(self, value):
+        """Handle color temperature change"""
+        self.temp_value.setText(f"{value}K")
+        # Adjust RGB based on temperature
+        r, g, b = self._kelvin_to_rgb(value)
+        self.red_slider.blockSignals(True)
+        self.green_slider.blockSignals(True)
+        self.blue_slider.blockSignals(True)
+        self.red_slider.setValue(int(r * 100))
+        self.green_slider.setValue(int(g * 100))
+        self.blue_slider.setValue(int(b * 100))
+        self.red_value.setText(f"{int(r * 100)}%")
+        self.green_value.setText(f"{int(g * 100)}%")
+        self.blue_value.setText(f"{int(b * 100)}%")
+        self.red_slider.blockSignals(False)
+        self.green_slider.blockSignals(False)
+        self.blue_slider.blockSignals(False)
+        self._schedule_display_update()
+    
+    def _on_rgb_changed(self, value):
+        """Handle RGB slider change"""
+        sender = self.sender()
+        if sender == self.red_slider:
+            self.red_value.setText(f"{value}%")
+        elif sender == self.green_slider:
+            self.green_value.setText(f"{value}%")
+        elif sender == self.blue_slider:
+            self.blue_value.setText(f"{value}%")
+        self._schedule_display_update()
+    
+    def _kelvin_to_rgb(self, kelvin):
+        """Convert color temperature to RGB multipliers"""
+        # Attempt algorithm based on Tanner Helland's formula
+        temp = kelvin / 100.0
+        
+        # Red
+        if temp <= 66:
+            r = 1.0
+        else:
+            r = temp - 60
+            r = 329.698727446 * (r ** -0.1332047592)
+            r = max(0, min(255, r)) / 255.0
+        
+        # Green
+        if temp <= 66:
+            g = temp
+            g = 99.4708025861 * (g ** 0.5) - 161.1195681661
+            g = max(0, min(255, g)) / 255.0
+        else:
+            g = temp - 60
+            g = 288.1221695283 * (g ** -0.0755148492)
+            g = max(0, min(255, g)) / 255.0
+        
+        # Blue
+        if temp >= 66:
+            b = 1.0
+        elif temp <= 19:
+            b = 0.0
+        else:
+            b = temp - 10
+            b = 138.5177312231 * (b ** 0.5) - 305.0447927307
+            b = max(0, min(255, b)) / 255.0
+        
+        # Normalize to around 1.0
+        max_val = max(r, g, b)
+        if max_val > 0:
+            r /= max_val
+            g /= max_val
+            b /= max_val
+        
+        return r, g, b
+    
+    def _emit_display_settings(self):
+        """Emit in-app display adjustment settings"""
+        try:
+            payload = {
+                "brightness": self.brightness_slider.value() / 100.0,
+                "gamma": self.gamma_slider.value() / 100.0,
+                "temperature": self.temp_slider.value(),
+                "red": self.red_slider.value() / 100.0,
+                "green": self.green_slider.value() / 100.0,
+                "blue": self.blue_slider.value() / 100.0,
+            }
+            self.display_settings_changed.emit(payload)
+        except Exception as e:
+            print(f"Display settings emit error: {e}")
+    
+    def _reset_display_settings(self):
+        """Reset display settings to default"""
+        self.brightness_slider.setValue(100)
+        self.gamma_slider.setValue(100)
+        self.temp_slider.setValue(6500)
+        self.red_slider.setValue(100)
+        self.green_slider.setValue(100)
+        self.blue_slider.setValue(100)
+        self._emit_display_settings()
+    
+    def _save_display_settings(self):
+        """Save display settings"""
+        try:
+            display_settings = {
+                'brightness': self.brightness_slider.value(),
+                'gamma': self.gamma_slider.value(),
+                'temperature': self.temp_slider.value(),
+                'red': self.red_slider.value(),
+                'green': self.green_slider.value(),
+                'blue': self.blue_slider.value(),
+            }
+            
+            settings_dir = Path.home() / ".panapitouch"
+            settings_dir.mkdir(parents=True, exist_ok=True)
+            
+            with open(settings_dir / "display_settings.json", 'w') as f:
+                json.dump(display_settings, f, indent=2)
+            
+            QMessageBox.information(self, "Saved", "Display settings saved successfully")
+            self._emit_display_settings()
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to save settings: {e}")
+    
+    def _load_display_settings(self):
+        """Load saved display settings"""
+        try:
+            settings_file = Path.home() / ".panapitouch" / "display_settings.json"
+            if settings_file.exists():
+                with open(settings_file, 'r') as f:
+                    settings = json.load(f)
+                
+                self.brightness_slider.setValue(settings.get('brightness', 100))
+                self.gamma_slider.setValue(settings.get('gamma', 100))
+                self.temp_slider.setValue(settings.get('temperature', 6500))
+                self.red_slider.setValue(settings.get('red', 100))
+                self.green_slider.setValue(settings.get('green', 100))
+                self.blue_slider.setValue(settings.get('blue', 100))
+                
+                # Apply loaded settings to preview
+                self._emit_display_settings()
+        except Exception as e:
+            print(f"Failed to load display settings: {e}")
+    
+    def _create_backup_panel(self) -> QWidget:
+        """Create backup and restore panel"""
+        wrapper, layout = self._create_content_wrapper("Backup & Restore", "💾")
+        
+        # Info card
+        info_frame = self._create_info_card(
+            "Save and restore your camera configurations and settings."
+        )
+        layout.addWidget(info_frame)
+        
+        # Create backup section
+        create_frame = QFrame()
+        create_frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        create_layout = QVBoxLayout(create_frame)
+        create_layout.setContentsMargins(20, 16, 20, 16)
+        create_layout.setSpacing(12)
+        
+        create_header = QLabel("Create New Backup")
+        create_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        create_layout.addWidget(create_header)
+        
+        self.backup_name_input = QLineEdit()
+        self.backup_name_input.setPlaceholderText("Enter backup name")
+        self.backup_name_input.setStyleSheet(self._get_input_style())
+        create_layout.addWidget(self.backup_name_input)
+        
+        create_btn = QPushButton("Create Backup")
+        create_btn.setStyleSheet(self._get_button_style(True))
+        create_btn.clicked.connect(self._create_backup)
+        create_layout.addWidget(create_btn)
+        
+        layout.addWidget(create_frame)
+        
+        # Restore section
+        restore_frame = QFrame()
+        restore_frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        restore_layout = QVBoxLayout(restore_frame)
+        restore_layout.setContentsMargins(20, 16, 20, 16)
+        restore_layout.setSpacing(12)
+        
+        restore_header = QLabel("Restore from Backup")
+        restore_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        restore_layout.addWidget(restore_header)
+        
+        self.backup_combo = StyledComboBox()
+        self.backup_combo.setStyleSheet(self._get_input_style())
+        restore_layout.addWidget(self.backup_combo)
+        
+        # Action buttons
+        action_row = QHBoxLayout()
+        action_row.setSpacing(12)
+        
+        restore_btn = QPushButton("Restore")
+        restore_btn.setStyleSheet(self._get_button_style(True))
+        restore_btn.clicked.connect(self._restore_backup)
+        action_row.addWidget(restore_btn)
+        
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 2px solid #ef4444;
+                border-radius: 8px;
+                color: #ef4444;
+                font-size: 15px;
+                font-weight: 500;
+                padding: 14px 24px;
+                min-height: 48px;
+            }
+            QPushButton:hover {
+                background-color: rgba(239, 68, 68, 0.2);
+            }
+            QPushButton:pressed {
+                background-color: rgba(239, 68, 68, 0.3);
+            }
+        """)
+        delete_btn.clicked.connect(self._delete_backup)
+        action_row.addWidget(delete_btn)
+        
+        action_row.addStretch()
+        restore_layout.addLayout(action_row)
+        
+        layout.addWidget(restore_frame)
+        
+        # Status
+        self.backup_status_label = QLabel("● Ready")
+        self.backup_status_label.setStyleSheet(self._get_status_style("success"))
+        layout.addWidget(self.backup_status_label)
+        
+        layout.addStretch()
+        
+        # Initialize backup list
+        self._refresh_backup_list()
+        
+        return wrapper
+    
+    def _create_system_panel(self) -> QWidget:
+        """Create system information panel"""
+        wrapper, layout = self._create_content_wrapper("System Information", "📊")
         
         # System info grid
-        info_grid = QGridLayout()
-        info_grid.setSpacing(16)
-        info_grid.setColumnStretch(1, 1)
-        info_grid.setColumnStretch(3, 1)
+        info_frame = QFrame()
+        info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        info_layout = QGridLayout(info_frame)
+        info_layout.setContentsMargins(20, 20, 20, 20)
+        info_layout.setSpacing(16)
+        info_layout.setColumnStretch(1, 1)
+        info_layout.setColumnStretch(3, 1)
         
-        # Create info cards
         self.system_info_labels = {}
         
         info_items = [
@@ -474,213 +974,141 @@ class SettingsPage(QWidget):
         ]
         
         for key, label_text, row, col in info_items:
-            # Label
             label = QLabel(label_text)
-            label.setStyleSheet("color: #888898; font-size: 12px; border: none;")
-            info_grid.addWidget(label, row, col)
+            label.setStyleSheet("color: #888898; font-size: 13px;")
+            info_layout.addWidget(label, row, col)
             
-            # Value
             value_label = QLabel("Loading...")
-            value_label.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 500; border: none;")
-            info_grid.addWidget(value_label, row, col + 1)
+            value_label.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 500;")
+            info_layout.addWidget(value_label, row, col + 1)
             self.system_info_labels[key] = value_label
         
-        layout.addLayout(info_grid)
+        layout.addWidget(info_frame)
         
-        # Temperature gauge (visual)
+        # Temperature gauge
         temp_frame = QFrame()
         temp_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
-            }
-        """)
-        temp_layout = QHBoxLayout(temp_frame)
-        temp_layout.setContentsMargins(16, 12, 16, 12)
-        
-        temp_label = QLabel("CPU Temperature:")
-        temp_label.setStyleSheet("color: #888898; font-size: 13px; border: none;")
-        temp_layout.addWidget(temp_label)
-        
-        self.temp_bar = QFrame()
-        self.temp_bar.setFixedHeight(20)
-        self.temp_bar.setStyleSheet("""
-            QFrame {
-                background-color: #22c55e;
-                border-radius: 4px;
-                border: none;
-            }
-        """)
-        self.temp_bar.setFixedWidth(100)
-        temp_layout.addWidget(self.temp_bar)
-        
-        self.temp_value_label = QLabel("--°C")
-        self.temp_value_label.setStyleSheet("color: #ffffff; font-size: 14px; font-weight: 600; border: none; min-width: 60px;")
-        temp_layout.addWidget(self.temp_value_label)
-        
-        temp_layout.addStretch()
-        
-        # Throttling indicator
-        self.throttle_label = QLabel("✓ No Throttling")
-        self.throttle_label.setStyleSheet("color: #22c55e; font-size: 12px; border: none;")
-        temp_layout.addWidget(self.throttle_label)
-        
-        layout.addWidget(temp_frame)
-        
-        return panel
-    
-    def _create_backup_panel(self) -> QWidget:
-        """Create backup and restore panel"""
-        panel = QFrame()
-        panel.setStyleSheet("""
             QFrame {
                 background-color: #12121a;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
         """)
+        temp_layout = QHBoxLayout(temp_frame)
+        temp_layout.setContentsMargins(20, 16, 20, 16)
         
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
+        temp_label = QLabel("CPU Temperature:")
+        temp_label.setStyleSheet("color: #888898; font-size: 14px;")
+        temp_layout.addWidget(temp_label)
         
-        # Header with icon
-        header_layout = QHBoxLayout()
-        header_icon = QLabel("💾")
-        header_icon.setStyleSheet("font-size: 24px; border: none;")
-        header_layout.addWidget(header_icon)
-        header = QLabel("Backup & Restore")
-        header.setStyleSheet("font-size: 20px; font-weight: 600; border: none; color: #ffffff;")
-        header_layout.addWidget(header)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-        
-        # Info
-        info_label = QLabel("Save and restore your camera configurations and settings.")
-        info_label.setStyleSheet("color: #888898; border: none; font-size: 13px;")
-        info_label.setWordWrap(True)
-        layout.addWidget(info_label)
-        
-        # Create backup section
-        create_frame = QFrame()
-        create_frame.setStyleSheet("""
+        self.temp_bar = QFrame()
+        self.temp_bar.setFixedHeight(24)
+        self.temp_bar.setFixedWidth(100)
+        self.temp_bar.setStyleSheet("""
             QFrame {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
+                background-color: #22c55e;
+                border-radius: 6px;
             }
         """)
-        create_layout = QVBoxLayout(create_frame)
-        create_layout.setContentsMargins(16, 12, 16, 12)
-        create_layout.setSpacing(10)
+        temp_layout.addWidget(self.temp_bar)
         
-        create_header = QLabel("Create New Backup")
-        create_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
-        create_layout.addWidget(create_header)
+        self.temp_value_label = QLabel("--°C")
+        self.temp_value_label.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 600; min-width: 70px;")
+        temp_layout.addWidget(self.temp_value_label)
         
-        self.backup_name_input = QLineEdit()
-        self.backup_name_input.setObjectName("backup_name_input")
-        self.backup_name_input.setPlaceholderText("Enter backup name")
-        self.backup_name_input.setStyleSheet(self._get_input_style())
-        create_layout.addWidget(self.backup_name_input)
+        temp_layout.addStretch()
         
-        create_btn = QPushButton("Create Backup")
-        create_btn.setStyleSheet(self._get_button_style(primary=True))
-        create_btn.clicked.connect(self._create_backup)
-        create_layout.addWidget(create_btn)
-        layout.addWidget(create_frame)
+        self.throttle_label = QLabel("✓ No Throttling")
+        self.throttle_label.setStyleSheet("color: #22c55e; font-size: 13px;")
+        temp_layout.addWidget(self.throttle_label)
         
-        # Restore section
-        restore_frame = QFrame()
-        restore_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
-            }
-        """)
-        restore_layout = QVBoxLayout(restore_frame)
-        restore_layout.setContentsMargins(16, 12, 16, 12)
-        restore_layout.setSpacing(10)
+        layout.addWidget(temp_frame)
         
-        restore_header = QLabel("Restore from Backup")
-        restore_header.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff; border: none;")
-        restore_layout.addWidget(restore_header)
-        
-        # Backup dropdown
-        self.backup_combo = QComboBox()
-        self.backup_combo.setStyleSheet(self._get_input_style())
-        restore_layout.addWidget(self.backup_combo)
-        
-        # Action buttons row - equal width to match module width
-        action_row = QHBoxLayout()
-        action_row.setSpacing(10)
-        
-        restore_btn = QPushButton("Restore")
-        restore_btn.setStyleSheet(self._get_button_style(primary=True))
-        restore_btn.clicked.connect(self._restore_backup)
-        action_row.addWidget(restore_btn, 1)  # Equal stretch
-        
-        delete_btn = QPushButton("Delete")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: 2px solid #ef4444;
-                border-radius: 8px;
-                color: #ef4444;
-                font-size: 14px;
-                font-weight: 500;
-                padding: 0px;
-                margin: 0px;
-                min-height: 44px;
-            }
-            QPushButton:hover {
-                background-color: rgba(239, 68, 68, 0.2);
-            }
-            QPushButton:pressed {
-                background-color: rgba(239, 68, 68, 0.3);
-            }
-        """)
-        delete_btn.clicked.connect(self._delete_backup)
-        action_row.addWidget(delete_btn, 1)  # Equal stretch
-        
-        action_row.addStretch()
-        restore_layout.addLayout(action_row)
-        
-        layout.addWidget(restore_frame)
-        
-        # Status
-        self.backup_status_label = QLabel("● Ready")
-        self.backup_status_label.setStyleSheet("""
-            QLabel {
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: rgba(34, 197, 94, 0.15);
-                color: #22c55e;
-                border: 1px solid rgba(34, 197, 94, 0.3);
-                font-size: 13px;
-            }
-        """)
-        layout.addWidget(self.backup_status_label)
+        # Refresh button
+        refresh_btn = QPushButton("⟳ Refresh")
+        refresh_btn.setStyleSheet(self._get_button_style(False))
+        refresh_btn.clicked.connect(self._update_system_info)
+        layout.addWidget(refresh_btn)
         
         layout.addStretch()
-        
-        # Initialize backup list
-        self._refresh_backup_list()
-        
-        return panel
+        return wrapper
     
+    def _create_info_card(self, text):
+        """Create an info card widget"""
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: rgba(255, 149, 0, 0.1);
+                border: 1px solid rgba(255, 149, 0, 0.3);
+                border-radius: 12px;
+            }
+        """)
+        layout = QHBoxLayout(frame)
+        layout.setContentsMargins(16, 14, 16, 14)
+        
+        icon = QLabel("ℹ️")
+        icon.setStyleSheet("font-size: 18px;")
+        layout.addWidget(icon)
+        
+        label = QLabel(text)
+        label.setStyleSheet("color: #FF9500; font-size: 13px;")
+        label.setWordWrap(True)
+        layout.addWidget(label, 1)
+        
+        return frame
+    
+    def _create_input_group(self, title, placeholder):
+        """Create an input group with label"""
+        frame = QFrame()
+        frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(20, 16, 20, 16)
+        layout.setSpacing(10)
+        
+        label = QLabel(title)
+        label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ffffff;")
+        layout.addWidget(label)
+        
+        input_field = QLineEdit()
+        input_field.setPlaceholderText(placeholder)
+        input_field.setStyleSheet(self._get_input_style())
+        layout.addWidget(input_field)
+        
+        return frame
+    
+    def _get_status_style(self, status_type="info"):
+        """Get status label styling"""
+        colors = {
+            "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
+            "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
+            "info": ("#FF9500", "rgba(255, 149, 0, 0.15)", "rgba(255, 149, 0, 0.3)"),
+        }
+        text_color, bg_color, border_color = colors.get(status_type, colors["info"])
+        return f"""
+            QLabel {{
+                padding: 14px 20px;
+                border-radius: 8px;
+                background-color: {bg_color};
+                color: {text_color};
+                border: 1px solid {border_color};
+                font-size: 14px;
+            }}
+        """
+    
+    # === Backup methods ===
     def _get_backup_dir(self) -> Path:
-        """Get backup directory, create if doesn't exist"""
         backup_dir = Path.home() / ".panapitouch" / "backups"
         backup_dir.mkdir(parents=True, exist_ok=True)
         return backup_dir
     
     def _refresh_backup_list(self):
-        """Refresh the backup dropdown list"""
         self.backup_combo.clear()
-        
         backup_dir = self._get_backup_dir()
         backups = list(backup_dir.glob("*.json"))
         
@@ -688,30 +1116,20 @@ class SettingsPage(QWidget):
             self.backup_combo.addItem("No backups found", None)
             return
         
-        # Sort by modification time, newest first
         backups.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         
         for backup_file in backups:
-            # Get friendly name from filename
-            name = backup_file.stem  # filename without .json
-            
-            # Get modification time
+            name = backup_file.stem
             mtime = datetime.fromtimestamp(backup_file.stat().st_mtime)
             date_str = mtime.strftime("%b %d, %Y %H:%M")
-            
-            # Display as "Name (Date)"
-            display_name = f"{name}  •  {date_str}"
-            self.backup_combo.addItem(display_name, str(backup_file))
+            self.backup_combo.addItem(f"{name}  •  {date_str}", str(backup_file))
     
     def _create_backup(self):
-        """Create a new backup with custom name"""
         name = self.backup_name_input.text().strip()
-        
         if not name:
             QMessageBox.warning(self, "Error", "Please enter a backup name")
             return
         
-        # Sanitize filename
         safe_name = re.sub(r'[^\w\s-]', '', name).strip()
         safe_name = re.sub(r'[-\s]+', '_', safe_name)
         
@@ -722,19 +1140,14 @@ class SettingsPage(QWidget):
         backup_dir = self._get_backup_dir()
         backup_file = backup_dir / f"{safe_name}.json"
         
-        # Check if exists
         if backup_file.exists():
-            reply = QMessageBox.question(
-                self,
-                "Backup Exists",
-                f"A backup named '{name}' already exists.\n\nDo you want to overwrite it?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
+            reply = QMessageBox.question(self, "Backup Exists",
+                f"A backup named '{name}' already exists.\nOverwrite?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply != QMessageBox.StandardButton.Yes:
                 return
         
         try:
-            # Create backup data
             backup_data = {
                 "version": "1.0",
                 "created": datetime.now().isoformat(),
@@ -742,22 +1155,18 @@ class SettingsPage(QWidget):
                 "settings": self.settings.to_dict()
             }
             
-            # Write backup file
             with open(backup_file, 'w') as f:
                 json.dump(backup_data, f, indent=2)
             
             self._set_backup_status(f"Backup '{name}' created", "success")
             self.backup_name_input.clear()
             self._refresh_backup_list()
-            
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to create backup:\n{str(e)}")
             self._set_backup_status("Backup failed", "error")
     
     def _restore_backup(self):
-        """Restore selected backup"""
         backup_path = self.backup_combo.currentData()
-        
         if not backup_path:
             QMessageBox.warning(self, "Error", "Please select a backup to restore")
             return
@@ -768,52 +1177,33 @@ class SettingsPage(QWidget):
             self._refresh_backup_list()
             return
         
-        # Confirm restore
-        reply = QMessageBox.question(
-            self,
-            "Restore Backup",
-            f"This will replace your current settings with the backup.\n\n"
-            "Your current settings will be lost.\n\n"
-            "Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        reply = QMessageBox.question(self, "Restore Backup",
+            "This will replace your current settings.\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply != QMessageBox.StandardButton.Yes:
             return
         
         try:
-            # Read backup
             with open(backup_file, 'r') as f:
                 backup_data = json.load(f)
             
-            # Restore settings
             if "settings" in backup_data:
                 self.settings.load_from_dict(backup_data["settings"])
                 self.settings.save()
-                
-                # Reload UI
                 self._load_settings()
-                
-                self._set_backup_status(f"Restored from backup", "success")
+                self._set_backup_status("Restored from backup", "success")
                 self.settings_changed.emit()
-                
-                QMessageBox.information(
-                    self, 
-                    "Restore Complete", 
-                    "Settings have been restored successfully.\n\n"
-                    "Some changes may require restarting the app."
-                )
+                QMessageBox.information(self, "Restore Complete", 
+                    "Settings restored. Some changes may require restart.")
             else:
                 QMessageBox.warning(self, "Error", "Invalid backup file format")
-                
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to restore backup:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed to restore:\n{str(e)}")
             self._set_backup_status("Restore failed", "error")
     
     def _delete_backup(self):
-        """Delete selected backup"""
         backup_path = self.backup_combo.currentData()
-        
         if not backup_path:
             QMessageBox.warning(self, "Error", "Please select a backup to delete")
             return
@@ -821,13 +1211,9 @@ class SettingsPage(QWidget):
         backup_file = Path(backup_path)
         backup_name = backup_file.stem
         
-        reply = QMessageBox.question(
-            self,
-            "Delete Backup",
-            f"Are you sure you want to delete '{backup_name}'?\n\n"
-            "This cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        reply = QMessageBox.question(self, "Delete Backup",
+            f"Delete '{backup_name}'?\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -837,39 +1223,20 @@ class SettingsPage(QWidget):
             self._set_backup_status(f"Deleted '{backup_name}'", "success")
             self._refresh_backup_list()
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to delete backup:\n{str(e)}")
-            self._set_backup_status("Delete failed", "error")
+            QMessageBox.critical(self, "Error", f"Failed to delete:\n{str(e)}")
     
     def _set_backup_status(self, text, status_type="info"):
-        """Set backup status label with appropriate styling"""
-        colors = {
-            "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
-            "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
-        }
-        text_color, bg_color, border_color = colors.get(status_type, colors["info"])
-        
         self.backup_status_label.setText(f"● {text}")
-        self.backup_status_label.setStyleSheet(f"""
-            QLabel {{
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: {bg_color};
-                color: {text_color};
-                border: 1px solid {border_color};
-                font-size: 13px;
-            }}
-        """)
+        self.backup_status_label.setStyleSheet(self._get_status_style(status_type))
     
+    # === System monitor methods ===
     def _start_system_monitor(self):
-        """Start periodic system info updates"""
         self._update_system_info()
         self._system_timer = QTimer(self)
         self._system_timer.timeout.connect(self._update_system_info)
-        self._system_timer.start(5000)  # Update every 5 seconds
+        self._system_timer.start(5000)
     
     def _update_system_info(self):
-        """Update system information display"""
         try:
             # Model
             try:
@@ -894,24 +1261,16 @@ class SettingsPage(QWidget):
                     self.system_info_labels["cpu_temp"].setText(f"{temp:.1f}°C")
                     self.temp_value_label.setText(f"{temp:.1f}°C")
                     
-                    # Update temperature bar color and width
                     if temp < 50:
-                        color = "#22c55e"  # Green
+                        color = "#22c55e"
                     elif temp < 70:
-                        color = "#eab308"  # Yellow
+                        color = "#eab308"
                     else:
-                        color = "#ef4444"  # Red
+                        color = "#ef4444"
                     
-                    # Width based on 0-85°C range
                     width = min(200, max(20, int((temp / 85) * 200)))
                     self.temp_bar.setFixedWidth(width)
-                    self.temp_bar.setStyleSheet(f"""
-                        QFrame {{
-                            background-color: {color};
-                            border-radius: 4px;
-                            border: none;
-                        }}
-                    """)
+                    self.temp_bar.setStyleSheet(f"QFrame {{ background-color: {color}; border-radius: 6px; }}")
             except:
                 self.system_info_labels["cpu_temp"].setText("N/A")
                 self.temp_value_label.setText("N/A")
@@ -919,8 +1278,7 @@ class SettingsPage(QWidget):
             # CPU Usage
             try:
                 result = subprocess.run(['grep', 'cpu ', '/proc/stat'], capture_output=True, text=True)
-                values = result.stdout.split()[1:8]
-                values = [int(v) for v in values]
+                values = [int(v) for v in result.stdout.split()[1:8]]
                 idle = values[3]
                 total = sum(values)
                 
@@ -954,9 +1312,7 @@ class SettingsPage(QWidget):
                 lines = result.stdout.strip().split('\n')
                 if len(lines) > 1:
                     parts = lines[1].split()
-                    used = parts[2]
-                    total = parts[1]
-                    self.system_info_labels["storage"].setText(f"{used} / {total}")
+                    self.system_info_labels["storage"].setText(f"{parts[2]} / {parts[1]}")
             except:
                 self.system_info_labels["storage"].setText("N/A")
             
@@ -982,41 +1338,32 @@ class SettingsPage(QWidget):
             except:
                 self.system_info_labels["ip_address"].setText("N/A")
             
-            # Throttling check
+            # Throttling
             try:
                 result = subprocess.run(['vcgencmd', 'get_throttled'], capture_output=True, text=True)
-                throttled = result.stdout.strip()
-                if 'throttled=0x0' in throttled:
+                if 'throttled=0x0' in result.stdout:
                     self.throttle_label.setText("✓ No Throttling")
-                    self.throttle_label.setStyleSheet("color: #22c55e; font-size: 12px; border: none;")
+                    self.throttle_label.setStyleSheet("color: #22c55e; font-size: 13px;")
                 else:
                     self.throttle_label.setText("⚠️ Throttling Detected")
-                    self.throttle_label.setStyleSheet("color: #ef4444; font-size: 12px; border: none;")
+                    self.throttle_label.setStyleSheet("color: #ef4444; font-size: 13px;")
             except:
                 self.throttle_label.setText("")
-                
         except Exception as e:
             print(f"Error updating system info: {e}")
     
-    def _load_settings(self):
-        """Load current settings into UI"""
-        self.atem_ip_input.setText(self.settings.atem.ip_address)
-        # Load current network settings on startup
-        self._load_current_network()
-    
+    # === Network methods ===
     def _on_interface_changed(self, index):
-        """Handle interface selection change"""
         self._load_current_network()
     
     def _load_current_network(self):
-        """Load current network settings from system"""
         try:
-            interface_type = "wlan" if self.interface_combo.currentIndex() == 0 else "eth"
+            interface_type = "eth" if self.interface_combo.currentIndex() == 0 else "wlan"
             
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
             interfaces = []
             for line in result.stdout.split('\n'):
-                if f'{interface_type}' in line:
+                if interface_type in line:
                     match = re.search(rf'\d+:\s+({interface_type}\d+)', line)
                     if match:
                         interfaces.append(match.group(1))
@@ -1027,94 +1374,39 @@ class SettingsPage(QWidget):
             
             interface = interfaces[0]
             
-            # Get IP address
             result = subprocess.run(['ip', 'addr', 'show', interface], capture_output=True, text=True)
             ip_match = re.search(r'inet\s+(\d+\.\d+\.\d+\.\d+)/', result.stdout)
             if ip_match:
                 self.ip_input.setText(ip_match.group(1))
             
-            # Get subnet
             subnet_match = re.search(r'inet\s+\d+\.\d+\.\d+\.\d+/(\d+)', result.stdout)
             if subnet_match:
                 cidr = int(subnet_match.group(1))
-                subnet = self._cidr_to_subnet(cidr)
-                self.subnet_input.setText(subnet)
+                self.subnet_input.setText(self._cidr_to_subnet(cidr))
             
-            # Get gateway
             result = subprocess.run(['ip', 'route', 'show', 'default'], capture_output=True, text=True)
             gateway_match = re.search(r'via\s+(\d+\.\d+\.\d+\.\d+)', result.stdout)
             if gateway_match:
                 self.gateway_input.setText(gateway_match.group(1))
             
             self._set_network_status(f"Loaded: {interface}", "success")
-            
         except Exception as e:
             self._set_network_status("Error loading settings", "error")
     
     def _set_network_status(self, text, status_type="info"):
-        """Set network status label with appropriate styling"""
-        colors = {
-            "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
-            "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
-        }
-        text_color, bg_color, border_color = colors.get(status_type, colors["info"])
-        
         self.network_status_label.setText(f"● {text}")
-        self.network_status_label.setStyleSheet(f"""
-            QLabel {{
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: {bg_color};
-                color: {text_color};
-                border: 1px solid {border_color};
-                font-size: 13px;
-            }}
-        """)
-    
-    def _set_atem_status(self, text, status_type="info", model=None):
-        """Set ATEM status label with appropriate styling"""
-        colors = {
-            "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
-            "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#FF9500", "rgba(0, 180, 216, 0.15)", "rgba(0, 180, 216, 0.3)"),
-        }
-        text_color, bg_color, border_color = colors.get(status_type, colors["info"])
-        
-        self.atem_status_label.setText(f"● {text}")
-        self.atem_status_label.setStyleSheet(f"""
-            QLabel {{
-                padding: 10px 16px;
-                border-radius: 8px;
-                background-color: {bg_color};
-                color: {text_color};
-                border: 1px solid {border_color};
-                font-size: 13px;
-            }}
-        """)
-        
-        # Show/hide model label
-        if model:
-            self.atem_model_label.setText(f"🎬 {model}")
-            self.atem_model_label.show()
-        else:
-            self.atem_model_label.hide()
+        self.network_status_label.setStyleSheet(self._get_status_style(status_type))
     
     def _cidr_to_subnet(self, cidr):
-        """Convert CIDR notation to subnet mask"""
         mask = (0xffffffff >> (32 - cidr)) << (32 - cidr)
         return f"{mask >> 24}.{(mask >> 16) & 0xff}.{(mask >> 8) & 0xff}.{mask & 0xff}"
     
     def _subnet_to_cidr(self, subnet):
-        """Convert subnet mask to CIDR notation"""
         parts = subnet.split('.')
-        binary_str = ''
-        for part in parts:
-            binary_str += format(int(part), '08b')
+        binary_str = ''.join(format(int(part), '08b') for part in parts)
         return str(binary_str.count('1'))
     
     def _apply_network_settings(self):
-        """Apply network configuration changes"""
         ip = self.ip_input.text().strip()
         subnet = self.subnet_input.text().strip()
         gateway = self.gateway_input.text().strip()
@@ -1124,30 +1416,24 @@ class SettingsPage(QWidget):
             return
         
         ip_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
-        if not re.match(ip_pattern, ip) or not re.match(ip_pattern, subnet) or not re.match(ip_pattern, gateway):
+        if not all(re.match(ip_pattern, x) for x in [ip, subnet, gateway]):
             QMessageBox.warning(self, "Error", "Please enter valid IP addresses")
             return
         
-        interface_name = "WiFi" if self.interface_combo.currentIndex() == 0 else "Ethernet"
-        reply = QMessageBox.question(
-            self,
-            "Apply Network Settings",
-            f"Apply these settings to {interface_name}?\n\n"
-            f"IP: {ip}\nSubnet: {subnet}\nGateway: {gateway}\n\n"
-            "This may temporarily disconnect the network.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
+        interface_name = "Ethernet" if self.interface_combo.currentIndex() == 0 else "WiFi"
+        reply = QMessageBox.question(self, "Apply Network Settings",
+            f"Apply settings to {interface_name}?\n\nIP: {ip}\nSubnet: {subnet}\nGateway: {gateway}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         
         if reply != QMessageBox.StandardButton.Yes:
             return
         
         try:
-            interface_type = "wlan" if self.interface_combo.currentIndex() == 0 else "eth"
-            
+            interface_type = "eth" if self.interface_combo.currentIndex() == 0 else "wlan"
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
             interfaces = []
             for line in result.stdout.split('\n'):
-                if f'{interface_type}' in line:
+                if interface_type in line:
                     match = re.search(rf'\d+:\s+({interface_type}\d+)', line)
                     if match:
                         interfaces.append(match.group(1))
@@ -1157,15 +1443,11 @@ class SettingsPage(QWidget):
                 return
             
             interface = interfaces[0]
-            
-            # Try multiple network configuration methods
-            success = False
-            method_used = None
             cidr = self._subnet_to_cidr(subnet)
+            success = False
             
-            # Method 1: NetworkManager (nmcli)
+            # Try NetworkManager
             try:
-                # First, find the connection name for this interface
                 result = subprocess.run(['nmcli', '-t', '-f', 'NAME,DEVICE', 'connection', 'show', '--active'],
                                        capture_output=True, text=True, check=True)
                 connection_name = None
@@ -1177,113 +1459,42 @@ class SettingsPage(QWidget):
                             break
                 
                 if connection_name:
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name, 
-                                   f'ipv4.addresses', f'{ip}/{cidr}'], check=True, 
-                                   capture_output=True)
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                                   f'ipv4.addresses', f'{ip}/{cidr}'], check=True, capture_output=True)
                     subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
                                    'ipv4.gateway', gateway], check=True, capture_output=True)
                     subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
                                    'ipv4.method', 'manual'], check=True, capture_output=True)
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'down', connection_name], 
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'down', connection_name],
                                    check=False, capture_output=True)
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'up', connection_name], 
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'up', connection_name],
                                    check=True, capture_output=True)
                     success = True
-                    method_used = "NetworkManager"
-            except (subprocess.CalledProcessError, FileNotFoundError) as e:
-                print(f"NetworkManager method failed: {e}")
-            
-            # Method 2: dhcpcd (common on Raspberry Pi)
-            if not success:
-                try:
-                    dhcpcd_conf = Path(f"/etc/dhcpcd.conf")
-                    if dhcpcd_conf.exists():
-                        # Backup original config
-                        backup_path = Path(f"/etc/dhcpcd.conf.backup.{int(datetime.now().timestamp())}")
-                        shutil.copy(dhcpcd_conf, backup_path)
-                        
-                        # Read current config
-                        with open(dhcpcd_conf, 'r') as f:
-                            lines = f.readlines()
-                        
-                        # Remove old static IP config for this interface
-                        new_lines = []
-                        skip_until_blank = False
-                        for i, line in enumerate(lines):
-                            if f'interface {interface}' in line:
-                                skip_until_blank = True
-                            elif skip_until_blank and line.strip() == '':
-                                skip_until_blank = False
-                            
-                            if not skip_until_blank:
-                                new_lines.append(line)
-                        
-                        # Add new static IP config
-                        new_lines.append(f'\n# Static IP configuration for {interface}\n')
-                        new_lines.append(f'interface {interface}\n')
-                        new_lines.append(f'static ip_address={ip}/{cidr}\n')
-                        new_lines.append(f'static routers={gateway}\n')
-                        new_lines.append(f'static domain_name_servers={gateway} 8.8.8.8\n')
-                        
-                        # Write new config
-                        with open(dhcpcd_conf, 'w') as f:
-                            f.writelines(new_lines)
-                        
-                        # Restart dhcpcd
-                        subprocess.run(['sudo', 'systemctl', 'restart', 'dhcpcd'], 
-                                       check=True, capture_output=True)
-                        success = True
-                        method_used = "dhcpcd"
-                except Exception as e:
-                    print(f"dhcpcd method failed: {e}")
-            
-            # Method 3: systemd-networkd
-            if not success:
-                try:
-                    netdev_file = Path(f"/etc/systemd/network/10-{interface}.network")
-                    netdev_file.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    cidr = self._subnet_to_cidr(subnet)
-                    config = f"""[Match]
-Name={interface}
-
-[Network]
-Address={ip}/{cidr}
-Gateway={gateway}
-DNS={gateway} 8.8.8.8
-"""
-                    with open(netdev_file, 'w') as f:
-                        f.write(config)
-                    
-                    subprocess.run(['sudo', 'systemctl', 'restart', 'systemd-networkd'], 
-                                   check=True, capture_output=True)
-                    success = True
-                    method_used = "systemd-networkd"
-                except Exception as e:
-                    print(f"systemd-networkd method failed: {e}")
+            except:
+                pass
             
             if success:
-                QMessageBox.information(self, "Success", 
-                    f"Network settings applied to {interface} using {method_used}.\n\n"
-                    "The connection may be temporarily interrupted.")
+                QMessageBox.information(self, "Success", f"Network settings applied to {interface}")
                 self._set_network_status(f"Applied to {interface}", "success")
             else:
-                QMessageBox.warning(self, "Network Configuration Failed",
-                    "Could not configure network automatically.\n\n"
-                    "Please configure manually via:\n"
-                    "- NetworkManager: sudo nmcli\n"
-                    "- dhcpcd: Edit /etc/dhcpcd.conf\n"
-                    "- systemd-networkd: Edit /etc/systemd/network/\n\n"
-                    "Or install NetworkManager:\n"
-                    "  sudo apt install network-manager")
+                QMessageBox.warning(self, "Error", "Could not apply network settings automatically")
                 self._set_network_status("Configuration failed", "error")
-                    
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to apply settings:\n{str(e)}")
+            QMessageBox.critical(self, "Error", f"Failed: {str(e)}")
             self._set_network_status("Failed to apply", "error")
     
+    # === ATEM methods ===
+    def _set_atem_status(self, text, status_type="info", model=None):
+        self.atem_status_label.setText(f"● {text}")
+        self.atem_status_label.setStyleSheet(self._get_status_style(status_type))
+        
+        if model:
+            self.atem_model_label.setText(f"🎬 {model}")
+            self.atem_model_label.show()
+        else:
+            self.atem_model_label.hide()
+    
     def _test_atem(self):
-        """Test ATEM connection and detect model"""
         from ..atem.tally import ATEMTallyController
         
         ip = self.atem_ip_input.text().strip()
@@ -1297,35 +1508,30 @@ DNS={gateway} 8.8.8.8
         success, message = controller.test_connection(ip)
         
         if success:
-            # Try to get ATEM model info
             model = None
             try:
                 if hasattr(controller, 'atem') and controller.atem:
-                    model = getattr(controller.atem, 'atemModel', None)
-                    if not model:
-                        # Try alternate attribute names
-                        model = getattr(controller.atem, 'productName', None)
+                    model = getattr(controller.atem, 'atemModel', None) or getattr(controller.atem, 'productName', None)
             except:
                 pass
             
-            if not model:
-                # Parse from message if available
-                if 'ATEM' in message:
-                    model = message
+            if not model and 'ATEM' in message:
+                model = message
             
             self._set_atem_status("Connected", "success", model)
             QMessageBox.information(self, "Success", f"Connection successful!\n{message}")
         else:
             self._set_atem_status("Connection Failed", "error")
-            QMessageBox.warning(self, "Connection Failed", f"Could not connect to ATEM:\n{message}")
+            QMessageBox.warning(self, "Connection Failed", f"Could not connect:\n{message}")
     
     def _save_atem(self):
-        """Save ATEM settings"""
         ip = self.atem_ip_input.text().strip()
-        
         self.settings.atem.ip_address = ip
         self.settings.atem.enabled = bool(ip)
         self.settings.save()
-        
         QMessageBox.information(self, "Saved", "ATEM settings saved successfully")
         self.settings_changed.emit()
+    
+    def _load_settings(self):
+        self.atem_ip_input.setText(self.settings.atem.ip_address)
+        self._load_current_network()

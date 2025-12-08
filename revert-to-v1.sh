@@ -19,3 +19,10 @@ echo "Successfully reverted to v1 checkpoint!"
 echo ""
 echo "To go back to the latest version, run:"
 echo "  git reset --hard HEAD"
+
+
+
+
+
+
+
