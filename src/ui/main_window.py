@@ -7,9 +7,10 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
     QButtonGroup, QSpacerItem, QSlider, QMenu, QDialog, QComboBox,
-    QApplication
+    QApplication, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox,
+    QDoubleSpinBox
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize, QEvent
 from PyQt6.QtGui import QFont
 
 from ..config.settings import Settings
@@ -27,6 +28,9 @@ from .joystick_widget import JoystickWidget
 from .toast import ToastWidget
 from .styles import STYLESHEET, COLORS
 from ..core.logging_config import get_logger
+
+import shutil
+import subprocess
 
 logger = get_logger(__name__)
 
@@ -69,19 +73,17 @@ class MainWindow(QMainWindow):
         # ATEM controller
         self.atem_controller = ATEMTallyController()
         
-        # OSK disabled - using Pi OS built-in keyboard instead
-        self.keyboard_manager = None
-        
-        # Pi OS keyboard management
-        self._keyboard_command = self._find_keyboard_command()
-        
         # Toast notification widget
         self.toast = ToastWidget(self)
+        
+        # System OSK - disabled custom keyboard, using Pi OS OSK
         
         self._setup_window()
         self._setup_ui()
         self._setup_connections()
-        self._setup_keyboard_dismissal()
+        
+        # System OSK will automatically appear when text fields get focus
+        # No custom implementation needed
         
         # Initialize ATEM connection if configured
         if self.settings.atem.enabled and self.settings.atem.ip_address:
@@ -102,7 +104,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PanaPiTouch - PTZ Camera Monitor")
         
         # Remove window decorations for fullscreen app look (no title bar, no borders)
+        # But allow keyboard to appear on top by not using WindowStaysOnTopHint
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        
+        # Enable touch events on main window
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         
         # Set stylesheet
         self.setStyleSheet(STYLESHEET)
@@ -145,10 +151,6 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.page_stack, stretch=1)
         
-        # OSK disabled - using Pi OS built-in keyboard instead
-        # Setup keyboard manager and overlay (as floating overlay, not in layout)
-        # self.keyboard_manager = KeyboardManager(self)
-        # self.keyboard_manager.setup_keyboard_overlay(central_widget)
     
     def _create_nav_bar(self) -> QWidget:
         """Create the top navigation bar"""
@@ -1681,14 +1683,7 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_nav_clicked(self, page_idx: int):
         """Handle navigation button click"""
-        # Hide keyboard when switching pages
-        if self.keyboard_manager:
-            self.keyboard_manager._hide_keyboard()
-        
         self.page_stack.setCurrentIndex(page_idx)
-        # Refresh keyboard manager to find new line edits
-        if self.keyboard_manager:
-            QTimer.singleShot(100, lambda: self.keyboard_manager._find_line_edits(self))
     
     @pyqtSlot(str)
     def _on_companion_update_available(self, version: str):
@@ -2017,7 +2012,7 @@ class MainWindow(QMainWindow):
                 return None
             
             h, w = main_frame.shape[:2]
-
+            
             if self._split_mode == 'side':
                 # Side by side - each camera gets half width
                 half_w = w // 2
@@ -2678,118 +2673,165 @@ class MainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
     
-    def _find_keyboard_command(self):
-        """Find available Pi OS keyboard command"""
-        import shutil
-        # Try common keyboard commands in order of preference
+    # --------------------------
+    # System OSK Support (Pi OS on-screen keyboard)
+    # --------------------------
+    # The system OSK (squeekboard) automatically appears when text fields get focus
+    # on Wayland. No custom implementation needed - Qt handles it via input method framework.
+    # No eventFilter needed - Qt's input method framework handles it automatically.
+    def _find_keyboard_command_OLD(self):
+        """Locate an available on-screen keyboard command."""
         keyboard_commands = [
+            'squeekboard',        # Preferred on Wayland Pi images
             'matchbox-keyboard',  # Common on Raspberry Pi OS
             'onboard',            # Alternative keyboard
             'florence',           # Another alternative
         ]
         
-        for cmd in keyboard_commands:
+        if shutil.which('busctl') and self._squeekboard_available():
+            return 'squeekboard'
+        
+        for cmd in keyboard_commands[1:]:
             if shutil.which(cmd):
                 return cmd
         
+        if shutil.which('busctl'):
+            return 'squeekboard'
+        
         return None
     
-    def _dismiss_keyboard(self):
-        """Dismiss Pi OS on-screen keyboard"""
+    def _squeekboard_available_OLD(self) -> bool:
+        """Check if squeekboard is present on D-Bus."""
+        try:
+            result = subprocess.run(
+                ['busctl', '--user', '--no-pager', '--no-legend', 'list'],
+                capture_output=True, text=True, timeout=0.5
+            )
+            return result.returncode == 0 and 'sm.puri.OSK0' in result.stdout
+        except Exception:
+            return False
+    
+    def _show_keyboard_OLD(self):
+        """Show Pi OS on-screen keyboard - simplified and robust."""
         if not self._keyboard_command:
+            logger.warning("Keyboard: No keyboard command available")
             return
         
-        import subprocess
+        logger.info(f"Keyboard: Attempting to show {self._keyboard_command}")
+        
         try:
-            # Try to kill keyboard processes
-            if self._keyboard_command == 'matchbox-keyboard':
-                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            elif self._keyboard_command == 'onboard':
-                subprocess.run(['pkill', '-f', 'onboard'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            elif self._keyboard_command == 'florence':
-                subprocess.run(['pkill', '-f', 'florence'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Also try D-Bus method for Squeekboard (newer Pi OS)
-            try:
-                subprocess.run(['dbus-send', '--type=method_call', '--dest=org.gnome.Shell',
-                              '/org/gnome/Shell', 'org.gnome.Shell.ShowOSK', 'boolean:false'],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1)
-            except:
-                pass
-        except Exception:
-            pass
+            if self._keyboard_command == 'squeekboard':
+                # Try to lower our window slightly to allow keyboard to appear on top
+                # This is a workaround for Wayland compositor window stacking
+                try:
+                    # Temporarily lower window z-order (if possible)
+                    self.lower()
+                    QTimer.singleShot(100, lambda: self.raise_())
+                except Exception:
+                    pass
+                
+                # Call SetVisible via D-Bus
+                result = subprocess.run(
+                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                    timeout=1, capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    logger.info("Keyboard: ✅ SetVisible succeeded")
+                    # Verify it's actually visible and try to raise keyboard window
+                    QTimer.singleShot(200, self._verify_and_raise_keyboard)
+                else:
+                    logger.warning(f"Keyboard: SetVisible failed: {result.stderr}")
+                    # Fallback: try system session
+                    result2 = subprocess.run(
+                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                        timeout=1, capture_output=True, text=True
+                    )
+                    if result2.returncode == 0:
+                        logger.info("Keyboard: ✅ SetVisible (system) succeeded")
+                        QTimer.singleShot(200, self._verify_and_raise_keyboard)
+            else:
+                # For other keyboards, just launch them
+                try:
+                    subprocess.run(['pkill', '-f', self._keyboard_command], 
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+                except Exception:
+                    pass
+                try:
+                    self._keyboard_process = subprocess.Popen(
+                        [self._keyboard_command],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True
+                    )
+                    logger.info(f"Keyboard: ✅ {self._keyboard_command} launched")
+                except Exception as e:
+                    logger.error(f"Keyboard: ❌ Failed to launch {self._keyboard_command}: {e}")
+        except Exception as e:
+            logger.error(f"Keyboard: Error in _show_keyboard: {e}", exc_info=True)
     
-    def _setup_keyboard_dismissal(self):
-        """Setup keyboard dismissal on focus out and clicks outside input fields"""
-        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QComboBox
-        
-        # Install event filter on all input widgets
-        def install_filters(widget):
-            """Recursively install event filters on input widgets"""
-            for child in widget.findChildren(QLineEdit):
-                child.installEventFilter(self)
-            for child in widget.findChildren(QTextEdit):
-                child.installEventFilter(self)
-            for child in widget.findChildren(QPlainTextEdit):
-                child.installEventFilter(self)
-            # Note: QComboBox has internal QLineEdit, so we handle it separately
-        
-        # Install filters on all pages
-        install_filters(self.preview_page)
-        install_filters(self.camera_page)
-        install_filters(self.settings_page)
-        install_filters(self.companion_page)
+    def _verify_and_raise_keyboard(self):
+        """Verify keyboard is visible and try to raise it above our window"""
+        try:
+            result = subprocess.run(
+                ['busctl', '--user', 'get-property', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'Visible'],
+                timeout=1, capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                visible = 'true' in result.stdout.lower()
+                logger.info(f"Keyboard: Visible property = {visible}")
+                if visible:
+                    # Keyboard reports visible - try to ensure it's on top
+                    # On Wayland, we can't directly control z-order, but we can:
+                    # 1. Lower our window temporarily
+                    # 2. Call SetVisible again to trigger compositor to show keyboard
+                    try:
+                        self.lower()
+                        QTimer.singleShot(50, lambda: self.raise_())
+                        # Also call SetVisible again to ensure compositor shows it
+                        subprocess.run(
+                            ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                            timeout=0.5, capture_output=True, text=True
+                        )
+                        logger.info("Keyboard: Attempted to raise keyboard above app window")
+                    except Exception as e:
+                        logger.warning(f"Keyboard: Could not adjust window z-order: {e}")
+                else:
+                    # Not visible - retry
+                    logger.info("Keyboard: Not visible, retrying SetVisible...")
+                    subprocess.run(
+                        ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                        timeout=1, capture_output=True, text=True
+                    )
+        except Exception as e:
+            logger.warning(f"Keyboard: Could not verify visibility: {e}")
     
-    def eventFilter(self, obj, event):
-        """Filter events to dismiss keyboard when input fields lose focus"""
-        from PyQt6.QtCore import QEvent
-        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit
-        
-        # Dismiss keyboard when input field loses focus
-        if isinstance(obj, (QLineEdit, QTextEdit, QPlainTextEdit)):
-            if event.type() == QEvent.Type.FocusOut:
-                # Small delay to allow focus to move to another input field
-                QTimer.singleShot(100, self._check_and_dismiss_keyboard)
-        
-        return super().eventFilter(obj, event)
+    def closeEvent(self, event):
+        """Clean up on close"""
+        super().closeEvent(event)
     
-    def _check_and_dismiss_keyboard(self):
-        """Check if any input field has focus, dismiss keyboard if not"""
-        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit
-        
-        # Check if any input field currently has focus
-        focused_widget = QApplication.focusWidget()
-        if not isinstance(focused_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
-            self._dismiss_keyboard()
     
-    def mousePressEvent(self, event):
-        """Handle mouse press to dismiss keyboard when clicking outside input fields"""
-        from PyQt6.QtWidgets import QLineEdit, QTextEdit, QPlainTextEdit, QComboBox
-        
-        # Get the widget at the global click position
-        global_pos = self.mapToGlobal(event.pos())
-        clicked_widget = QApplication.widgetAt(global_pos)
-        
-        # Walk up the parent chain to find if we clicked on an input field
-        widget = clicked_widget
-        is_input_field = False
-        while widget:
-            if isinstance(widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
-                # Clicked on an input field, don't dismiss
-                is_input_field = True
-                break
-            if isinstance(widget, QComboBox):
-                # Clicked on a combo box, don't dismiss (it might open dropdown)
-                is_input_field = True
-                break
-            widget = widget.parent()
-        
-        # If we didn't click on an input field, dismiss the keyboard
-        if not is_input_field:
-            self._dismiss_keyboard()
-        
-        super().mousePressEvent(event)
+    def _hide_keyboard_OLD(self):
+        """Hide Pi OS on-screen keyboard - simplified."""
+        try:
+            if self._keyboard_command == 'squeekboard':
+                # Just hide via D-Bus - don't kill the process
+                subprocess.run(
+                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
+                    timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            elif self._keyboard_process:
+                # For other keyboards, terminate the process
+                try:
+                    self._keyboard_process.terminate()
+                    self._keyboard_process.wait(timeout=0.5)
+                except (subprocess.TimeoutExpired, ProcessLookupError):
+                    try:
+                        self._keyboard_process.kill()
+                        self._keyboard_process.wait()
+                    except Exception:
+                        pass
+                finally:
+                    self._keyboard_process = None
+        except Exception as e:
+            logger.warning(f"Keyboard: Error hiding: {e}")
 

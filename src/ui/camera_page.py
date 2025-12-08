@@ -4,12 +4,13 @@ Camera Page
 Configuration for Panasonic PTZ cameras.
 """
 import re
+import socket
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
     QGroupBox, QListWidget, QListWidgetItem,
     QMessageBox, QFrame, QApplication, QProgressBar,
-    QComboBox, QStackedWidget
+    QComboBox, QStackedWidget, QDialog
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
@@ -59,10 +60,12 @@ class DiscoveredCameraCard(QFrame):
     
     add_clicked = pyqtSignal(object)  # DiscoveredCamera
     identify_clicked = pyqtSignal(str)  # IP address
+    fix_network_clicked = pyqtSignal(object)  # DiscoveredCamera
     
-    def __init__(self, camera: DiscoveredCamera, parent=None):
+    def __init__(self, camera: DiscoveredCamera, parent=None, network_info=None):
         super().__init__(parent)
         self.camera = camera
+        self.network_info = network_info  # dict with 'ip', 'subnet', 'gateway' from eth0
         self._thumbnail_label = None
         self._setup_ui()
     
@@ -127,11 +130,23 @@ class DiscoveredCameraCard(QFrame):
         
         info_layout.addLayout(header_layout)
         
-        # IP address
+        # IP address with network status
+        ip_row = QHBoxLayout()
+        ip_row.setSpacing(6)
         ip_label = QLabel(f"{self.camera.ip_address}")
         ip_label.setStyleSheet("font-size: 11px; color: #888898;")
         ip_label.setWordWrap(False)
-        info_layout.addWidget(ip_label)
+        ip_row.addWidget(ip_label)
+        
+        # Network status indicator (wrong subnet warning)
+        self._network_status_label = None
+        if self.network_info and self._is_wrong_subnet():
+            network_warning = QLabel("⚠ Wrong Subnet")
+            network_warning.setStyleSheet("font-size: 9px; color: #ef4444; font-weight: 600;")
+            ip_row.addWidget(network_warning)
+            self._network_status_label = network_warning
+        ip_row.addStretch()
+        info_layout.addLayout(ip_row)
         
         # Model and MAC on same row
         details = []
@@ -176,6 +191,32 @@ class DiscoveredCameraCard(QFrame):
         identify_btn.clicked.connect(lambda: self.identify_clicked.emit(self.camera.ip_address))
         btn_layout.addWidget(identify_btn)
         
+        # Fix Network button (if wrong subnet)
+        if self.network_info and self._is_wrong_subnet():
+            fix_network_btn = QPushButton("🔧")
+            fix_network_btn.setFixedSize(32, 28)
+            fix_network_btn.setToolTip("Fix network settings")
+            fix_network_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #ef4444;
+                    border: none;
+                    border-radius: 6px;
+                    color: #ffffff;
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #dc2626;
+                }
+                QPushButton:pressed {
+                    background-color: #b91c1c;
+                }
+            """)
+            fix_network_btn.clicked.connect(lambda: self.fix_network_clicked.emit(self.camera))
+            btn_layout.addWidget(fix_network_btn)
+        
         # Add button
         add_btn = QPushButton("➕")
         add_btn.setFixedSize(32, 28)
@@ -202,6 +243,40 @@ class DiscoveredCameraCard(QFrame):
         btn_layout.addWidget(add_btn)
         
         layout.addLayout(btn_layout)
+    
+    def _is_wrong_subnet(self) -> bool:
+        """Check if camera IP is in wrong subnet compared to eth0"""
+        if not self.network_info or not self.camera.ip_address:
+            return False
+        
+        try:
+            camera_ip = self.camera.ip_address
+            eth0_ip = self.network_info.get('ip', '')
+            eth0_subnet = self.network_info.get('subnet', '255.255.255.0')
+            
+            if not eth0_ip or not camera_ip:
+                return False
+            
+            # Check if camera IP is in same subnet as eth0
+            return not self._same_subnet(camera_ip, eth0_ip, eth0_subnet)
+        except:
+            return False
+    
+    def _same_subnet(self, ip1: str, ip2: str, subnet: str) -> bool:
+        """Check if two IPs are in the same subnet"""
+        try:
+            def ip_to_int(ip):
+                parts = ip.split('.')
+                return (int(parts[0]) << 24) + (int(parts[1]) << 16) + (int(parts[2]) << 8) + int(parts[3])
+            
+            def subnet_to_mask(subnet):
+                parts = subnet.split('.')
+                return (int(parts[0]) << 24) + (int(parts[1]) << 16) + (int(parts[2]) << 8) + int(parts[3])
+            
+            mask = subnet_to_mask(subnet)
+            return (ip_to_int(ip1) & mask) == (ip_to_int(ip2) & mask)
+        except:
+            return False
     
     def set_thumbnail(self, pixmap: 'QPixmap'):
         """Set the thumbnail image"""
@@ -659,18 +734,12 @@ class CameraPage(QWidget):
         wrapper = QWidget()
         wrapper_layout = QVBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(20, 20, 20, 20)
-        wrapper_layout.setSpacing(20)
+        wrapper_layout.setSpacing(0)
         
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(20)
-        
+        # Full-width left panel (no right column)
         left_panel = self._create_left_panel()
-        content_layout.addWidget(left_panel, stretch=1)
+        wrapper_layout.addWidget(left_panel, stretch=1)
         
-        right_panel = self._create_camera_list_panel(compact=False)
-        content_layout.addWidget(right_panel, stretch=1)
-        
-        wrapper_layout.addLayout(content_layout)
         return wrapper
 
     def _create_configured_content(self) -> QWidget:
@@ -930,7 +999,7 @@ class CameraPage(QWidget):
         QMessageBox.information(self, "Success", f"Camera '{name}' updated successfully!")
     
     def _create_left_panel(self) -> QWidget:
-        """Create left panel with unified discovery and manual add"""
+        """Create left panel with unified discovery and manual add (full width)"""
         panel = QFrame()
         panel.setStyleSheet("""
             QFrame {
@@ -943,6 +1012,7 @@ class CameraPage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
         # Unified Add Camera section
         self.add_camera_group = QGroupBox("➕ Add Camera")
@@ -1200,20 +1270,118 @@ class CameraPage(QWidget):
         
         manual_layout.addLayout(auth_row)
         
-        # ATEM Input dropdown
-        atem_container = QVBoxLayout()
-        atem_container.setSpacing(4)
-        atem_label = QLabel("ATEM Input:")
-        atem_container.addWidget(atem_label)
-        self.camera_atem_combo = QComboBox()
-        self.camera_atem_combo.setFixedHeight(44)
-        self._populate_atem_inputs()
-        self.camera_atem_combo.currentIndexChanged.connect(self._on_form_changed)
-        atem_container.addWidget(self.camera_atem_combo)
-        manual_layout.addLayout(atem_container)
+        # Network Configuration Section
+        network_group = QGroupBox("🌐 Network Configuration")
+        network_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px;
+                font-weight: 600;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+            }
+        """)
+        network_layout = QVBoxLayout(network_group)
+        network_layout.setSpacing(12)
         
-        # Add spacing below ATEM dropdown for dropdown list to expand
-        manual_layout.addSpacing(60)
+        # IP Address (already have camera_ip_input, but add it here for network section)
+        # We'll keep IP in basic section, but add subnet/gateway/DHCP here
+        
+        # Subnet Mask
+        subnet_layout = QVBoxLayout()
+        subnet_layout.setSpacing(4)
+        subnet_label = QLabel("Subnet Mask:")
+        subnet_layout.addWidget(subnet_label)
+        self.camera_subnet_input = QComboBox()
+        self.camera_subnet_input.setEditable(True)
+        self.camera_subnet_input.setFixedHeight(40)
+        self.camera_subnet_input.addItems([
+            "255.255.255.0",
+            "255.255.0.0",
+            "255.0.0.0",
+            "255.255.255.128",
+            "255.255.255.192",
+            "255.255.255.224",
+            "255.255.255.240",
+            "255.255.255.248",
+            "255.255.255.252"
+        ])
+        self.camera_subnet_input.setCurrentText("255.255.255.0")
+        self.camera_subnet_input.currentTextChanged.connect(self._on_form_changed)
+        subnet_layout.addWidget(self.camera_subnet_input)
+        network_layout.addLayout(subnet_layout)
+        
+        # Gateway
+        gateway_layout = QVBoxLayout()
+        gateway_layout.setSpacing(4)
+        gateway_label = QLabel("Gateway (optional):")
+        gateway_layout.addWidget(gateway_label)
+        self.camera_gateway_input = QLineEdit()
+        self.camera_gateway_input.setFixedHeight(40)
+        self.camera_gateway_input.setPlaceholderText("e.g. 192.168.1.1")
+        self.camera_gateway_input.textChanged.connect(self._on_form_changed)
+        gateway_layout.addWidget(self.camera_gateway_input)
+        network_layout.addLayout(gateway_layout)
+        
+        # DHCP Toggle
+        dhcp_layout = QHBoxLayout()
+        dhcp_layout.setSpacing(12)
+        dhcp_label = QLabel("DHCP:")
+        dhcp_layout.addWidget(dhcp_label)
+        self.camera_dhcp_checkbox = QCheckBox("Enable DHCP (auto-assign IP)")
+        self.camera_dhcp_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #ffffff;
+                font-size: 13px;
+            }
+            QCheckBox::indicator {
+                width: 20px;
+                height: 20px;
+                border: 2px solid #2a2a38;
+                border-radius: 4px;
+                background-color: #1a1a24;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #FF9500;
+                border-color: #FF9500;
+            }
+        """)
+        self.camera_dhcp_checkbox.toggled.connect(self._on_dhcp_toggled)
+        self.camera_dhcp_checkbox.toggled.connect(self._on_form_changed)
+        dhcp_layout.addWidget(self.camera_dhcp_checkbox)
+        dhcp_layout.addStretch()
+        network_layout.addLayout(dhcp_layout)
+        
+        # Auto-fill from network button
+        autofill_btn = QPushButton("🔧 Auto-fill from eth0")
+        autofill_btn.setFixedHeight(36)
+        autofill_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 1px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #3a3a48;
+                border-color: #FF9500;
+            }
+        """)
+        autofill_btn.clicked.connect(self._autofill_network_settings)
+        network_layout.addWidget(autofill_btn)
+        
+        manual_layout.addWidget(network_group)
+        
+        # Add spacing
+        manual_layout.addSpacing(20)
         
         # Form validation message
         self.form_error_label = QLabel("")
@@ -1714,49 +1882,25 @@ class CameraPage(QWidget):
             self.password_toggle.setText("👁")
     
     def _populate_atem_inputs(self):
-        """Populate ATEM input dropdown based on detected ATEM type"""
-        self.camera_atem_combo.clear()
-        self.camera_atem_combo.addItem("None", 0)
-        
-        # Try to get ATEM info from main window's tally controller
-        try:
-            main_window = self.window()
-            if hasattr(main_window, '_tally_controller') and main_window._tally_controller:
-                tally = main_window._tally_controller
-                if tally.is_connected:
-                    # Get input names from connected ATEM
-                    for i in range(1, 21):
-                        name = tally.get_input_name(i)
-                        if name and name != f"Input {i}":
-                            self.camera_atem_combo.addItem(f"{i}: {name}", i)
-                        else:
-                            self.camera_atem_combo.addItem(f"Input {i}", i)
-                    return
-        except:
-            pass
-        
-        # Fallback: Generic inputs 1-20
-        for i in range(1, 21):
-            self.camera_atem_combo.addItem(f"Input {i}", i)
+        """Populate ATEM input dropdown - deprecated, ATEM removed from Add Camera form"""
+        # This method is kept for compatibility but does nothing
+        # ATEM mapping is only available in Configured cameras edit form
+        pass
     
     def _get_selected_atem_input(self) -> int:
-        """Get the currently selected ATEM input value"""
-        return self.camera_atem_combo.currentData() or 0
+        """Get the currently selected ATEM input value - deprecated"""
+        # ATEM removed from Add Camera form, always return 0
+        return 0
     
     def _set_atem_input_by_value(self, value: int):
-        """Set the ATEM combo box to a specific input value"""
-        for i in range(self.camera_atem_combo.count()):
-            if self.camera_atem_combo.itemData(i) == value:
-                self.camera_atem_combo.setCurrentIndex(i)
-                return
-        # If not found, set to None
-        self.camera_atem_combo.setCurrentIndex(0)
+        """Set the ATEM combo box - deprecated"""
+        # ATEM removed from Add Camera form, do nothing
+        pass
     
     def _use_defaults(self):
         """Reset form to Panasonic defaults"""
         self.camera_user_input.setText("admin")
         self.camera_pass_input.setText("12345")
-        self.camera_atem_combo.setCurrentIndex(0)
         self._on_form_changed()
     
     def _discover_cameras(self):
@@ -1783,8 +1927,12 @@ class CameraPage(QWidget):
         self.discovery_progress.show()
         self.discovery_progress.setValue(0)
         
-        # Create and start worker thread
-        self._discovery_worker = DiscoveryWorker()
+        # Get eth0 IP for discovery
+        network_info = self._get_eth0_network_info()
+        eth0_ip = network_info.get('ip') if network_info else None
+        
+        # Create and start worker thread (always use eth0)
+        self._discovery_worker = DiscoveryWorker(adapter_ip=eth0_ip)
         self._discovery_worker.camera_found.connect(self._on_camera_discovered)
         self._discovery_worker.progress.connect(self._on_discovery_progress)
         self._discovery_worker.progress_value.connect(self.discovery_progress.setValue)
@@ -1805,9 +1953,12 @@ class CameraPage(QWidget):
         self._discovered_cameras.append(camera)
         
         # Create and add card
-        card = DiscoveredCameraCard(camera)
+        # Get network info from eth0
+        network_info = self._get_eth0_network_info()
+        card = DiscoveredCameraCard(camera, network_info=network_info)
         card.add_clicked.connect(self._on_discovered_card_add_clicked)
         card.identify_clicked.connect(self._on_identify_camera)
+        card.fix_network_clicked.connect(self._on_fix_network_clicked)
         self._discovered_cards[camera.ip_address] = card
         
         # Add card to layout (before empty state if it exists)
@@ -1956,12 +2107,38 @@ class CameraPage(QWidget):
         """Handle add button click on discovered camera card"""
         self._add_discovered_camera(camera)
     
+    def _on_fix_network_clicked(self, camera: DiscoveredCamera):
+        """Handle fix network button click on discovered camera card"""
+        try:
+            from .network_fix_dialog import NetworkFixDialog
+        except ImportError:
+            QMessageBox.warning(self, "Error", "Network fix dialog not available")
+            return
+        
+        network_info = self._get_eth0_network_info()
+        if not network_info:
+            QMessageBox.warning(self, "Error", "Could not detect eth0 network settings")
+            return
+        
+        dialog = NetworkFixDialog(camera, network_info, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Network was changed, refresh discovery
+            QTimer.singleShot(2000, self._discover_cameras)  # Wait 2 seconds for camera to reboot
+    
     def _add_discovered_camera(self, camera: DiscoveredCamera):
         """Add discovered camera to form with visual feedback"""
         self.camera_name_input.setText(camera.name or camera.model or "Camera")
         self.camera_ip_input.setText(camera.ip_address)
         self.camera_user_input.setText("admin")
         self.camera_pass_input.setText("12345")  # Panasonic default
+        
+        # Auto-fill network settings from eth0 if available
+        network_info = self._get_eth0_network_info()
+        if network_info:
+            if network_info.get('subnet'):
+                self.camera_subnet_input.setCurrentText(network_info['subnet'])
+            if network_info.get('gateway'):
+                self.camera_gateway_input.setText(network_info['gateway'])
         
         # Highlight fields that were auto-filled
         self._highlight_auto_filled_fields()
@@ -2064,12 +2241,7 @@ class CameraPage(QWidget):
             )
             self.settings.update_camera(camera)
             
-            # Update ATEM mapping
-            atem_input = self._get_selected_atem_input()
-            if atem_input > 0:
-                self.settings.atem.input_mapping[str(camera.id)] = atem_input
-            elif str(camera.id) in self.settings.atem.input_mapping:
-                del self.settings.atem.input_mapping[str(camera.id)]
+            # No ATEM mapping in Add Camera form
             
             self._editing_camera_id = None
             self.cancel_edit_btn.hide()
@@ -2096,10 +2268,7 @@ class CameraPage(QWidget):
             )
             self.settings.add_camera(camera)
             
-            # Update ATEM mapping
-            atem_input = self._get_selected_atem_input()
-            if atem_input > 0:
-                self.settings.atem.input_mapping[str(camera.id)] = atem_input
+            # No ATEM mapping in Add Camera form
         
         self.settings.save()
         self._refresh_camera_list()
@@ -2128,7 +2297,7 @@ class CameraPage(QWidget):
             self.edit_port_input.setValue(camera.port)
             self.edit_user_input.setText(camera.username)
             self.edit_pass_input.setText(camera.password)
-            
+        
             # Load ATEM mapping
             atem_input = self.settings.atem.input_mapping.get(str(camera_id), 0)
             index = self.edit_atem_combo.findData(atem_input)
@@ -2252,7 +2421,9 @@ class CameraPage(QWidget):
         self.camera_ip_input.clear()
         self.camera_user_input.setText("admin")
         self.camera_pass_input.setText("12345")
-        self.camera_atem_combo.setCurrentIndex(0)
+        self.camera_subnet_input.setCurrentText("255.255.255.0")
+        self.camera_gateway_input.clear()
+        self.camera_dhcp_checkbox.setChecked(False)
         self.form_error_label.hide()
         self.test_status_label.hide()
         self.name_validator.hide()
@@ -2260,3 +2431,118 @@ class CameraPage(QWidget):
         self.save_camera_btn.setEnabled(True)
         self.test_camera_btn.setEnabled(True)
         self._form_has_changes = False
+    
+    def _on_dhcp_toggled(self, checked: bool):
+        """Handle DHCP checkbox toggle"""
+        # Disable IP/subnet/gateway fields when DHCP is enabled
+        self.camera_ip_input.setEnabled(not checked)
+        self.camera_subnet_input.setEnabled(not checked)
+        self.camera_gateway_input.setEnabled(not checked)
+        
+        if checked:
+            # Clear fields when enabling DHCP
+            self.camera_ip_input.clear()
+            self.camera_subnet_input.setCurrentText("255.255.255.0")
+            self.camera_gateway_input.clear()
+    
+    def _get_eth0_network_info(self):
+        """Get network information from eth0 interface"""
+        try:
+            import netifaces
+            if 'eth0' in netifaces.interfaces():
+                addrs = netifaces.ifaddresses('eth0')
+                if netifaces.AF_INET in addrs:
+                    for addr in addrs[netifaces.AF_INET]:
+                        ip = addr.get('addr', '')
+                        netmask = addr.get('netmask', '255.255.255.0')
+                        # Try to get gateway
+                        gateway = ''
+                        try:
+                            gateways = netifaces.gateways()
+                            if netifaces.AF_INET in gateways:
+                                for gw_info in gateways[netifaces.AF_INET]:
+                                    if gw_info[1] == 'eth0':
+                                        gateway = gw_info[0]
+                                        break
+                        except:
+                            pass
+                        
+                        if ip and not ip.startswith('127.'):
+                            return {
+                                'ip': ip,
+                                'subnet': netmask,
+                                'gateway': gateway or self._calculate_default_gateway(ip, netmask)
+                            }
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"Error getting eth0 network info: {e}")
+        
+        # Fallback: try socket method
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+            return {
+                'ip': local_ip,
+                'subnet': '255.255.255.0',
+                'gateway': self._calculate_default_gateway(local_ip, '255.255.255.0')
+            }
+        except Exception as e:
+            print(f"Error getting network info via socket: {e}")
+            return None
+    
+    def _calculate_default_gateway(self, ip: str, subnet: str) -> str:
+        """Calculate default gateway (usually .1 of the network)"""
+        try:
+            ip_parts = ip.split('.')
+            if subnet == '255.255.255.0':
+                return f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.1"
+            elif subnet == '255.255.0.0':
+                return f"{ip_parts[0]}.{ip_parts[1]}.0.1"
+            elif subnet == '255.0.0.0':
+                return f"{ip_parts[0]}.0.0.1"
+        except:
+            pass
+        return ""
+    
+    def _autofill_network_settings(self):
+        """Auto-fill network settings from eth0"""
+        network_info = self._get_eth0_network_info()
+        if network_info:
+            self.camera_subnet_input.setCurrentText(network_info['subnet'])
+            if network_info['gateway']:
+                self.camera_gateway_input.setText(network_info['gateway'])
+            
+            # Suggest an IP in the same subnet
+            if not self.camera_dhcp_checkbox.isChecked():
+                suggested_ip = self._suggest_ip_address(network_info['ip'], network_info['subnet'])
+                if suggested_ip:
+                    self.camera_ip_input.setText(suggested_ip)
+            
+            QMessageBox.information(self, "Network Settings", 
+                                   f"Auto-filled from eth0:\n"
+                                   f"Subnet: {network_info['subnet']}\n"
+                                   f"Gateway: {network_info['gateway']}")
+        else:
+            QMessageBox.warning(self, "Error", "Could not detect eth0 network settings")
+    
+    def _suggest_ip_address(self, current_ip: str, subnet: str) -> str:
+        """Suggest an IP address in the same subnet"""
+        try:
+            ip_parts = current_ip.split('.')
+            if subnet == '255.255.255.0':
+                # Suggest .100-.200 range
+                base = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}"
+                # Check existing cameras to avoid conflicts
+                used_ips = {c.ip_address for c in self.settings.cameras}
+                for i in range(100, 201):
+                    suggested = f"{base}.{i}"
+                    if suggested not in used_ips and suggested != current_ip:
+                        return suggested
+                # Fallback to .50
+                return f"{base}.50"
+        except:
+            pass
+        return ""

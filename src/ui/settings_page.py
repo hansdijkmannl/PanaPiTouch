@@ -1459,15 +1459,15 @@ class SettingsPage(QWidget):
                             break
                 
                 if connection_name:
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name, 
                                    f'ipv4.addresses', f'{ip}/{cidr}'], check=True, capture_output=True)
                     subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
                                    'ipv4.gateway', gateway], check=True, capture_output=True)
                     subprocess.run(['sudo', 'nmcli', 'connection', 'modify', connection_name,
                                    'ipv4.method', 'manual'], check=True, capture_output=True)
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'down', connection_name],
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'down', connection_name], 
                                    check=False, capture_output=True)
-                    subprocess.run(['sudo', 'nmcli', 'connection', 'up', connection_name],
+                    subprocess.run(['sudo', 'nmcli', 'connection', 'up', connection_name], 
                                    check=True, capture_output=True)
                     success = True
             except:

@@ -5,12 +5,27 @@ Embedded web view for Bitfocus Companion configuration.
 With update detection and Pi OS keyboard support.
 """
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
-from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess
+from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess, Qt, QEvent
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
 
 import subprocess
 import shutil
+
+
+class TouchWebEngineView(QWebEngineView):
+    """WebEngineView with proper touch event handling"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
+    
+    def event(self, event):
+        """Handle touch events properly"""
+        if event.type() == QEvent.Type.TouchBegin or event.type() == QEvent.Type.TouchUpdate or event.type() == QEvent.Type.TouchEnd:
+            # Let the web engine handle touch events
+            return super().event(event)
+        return super().event(event)
 
 
 class CompanionPage(QWidget):
@@ -54,8 +69,8 @@ class CompanionPage(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         
-        # Web view
-        self.web_view = QWebEngineView()
+        # Web view with touch support
+        self.web_view = TouchWebEngineView()
         self.web_view.setUrl(QUrl(self.companion_url))
         
         # Set zoom factor to 75% (0.75) to scale down the display
@@ -69,6 +84,8 @@ class CompanionPage(QWidget):
         # Enable touch scrolling and touch features
         settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
+        # Enable smooth scrolling
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
         
         # Connect signals
         self.web_view.loadFinished.connect(self._on_load_finished)
@@ -79,15 +96,31 @@ class CompanionPage(QWidget):
         """Find available Pi OS keyboard command"""
         # Try common keyboard commands in order of preference
         keyboard_commands = [
+            'squeekboard',        # Preferred on Wayland Pi images
             'matchbox-keyboard',  # Common on Raspberry Pi OS
             'onboard',            # Alternative keyboard
             'florence',           # Another alternative
-            'squeekboard',        # Squeekboard (used on some Pi OS versions)
         ]
+        
+        # If squeekboard is running via D-Bus, prefer it even if binary isn't on PATH
+        if shutil.which('busctl'):
+            try:
+                result = subprocess.run(
+                    ['busctl', '--user', '--no-pager', '--no-legend', 'list'],
+                    capture_output=True, text=True, timeout=0.5
+                )
+                if result.returncode == 0 and 'sm.puri.OSK0' in result.stdout:
+                    return 'squeekboard'
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, Exception):
+                pass
         
         for cmd in keyboard_commands:
             if shutil.which(cmd):
                 return cmd
+        
+        # Fall back to squeekboard if busctl exists (we'll try to start it)
+        if shutil.which('busctl'):
+            return 'squeekboard'
         
         return None
     
@@ -95,34 +128,38 @@ class CompanionPage(QWidget):
         """Start periodic check for focused input fields in web page"""
         self._input_focus_timer = QTimer(self)
         self._input_focus_timer.timeout.connect(self._check_web_input_focus)
-        self._input_focus_timer.start(150)  # Check every 150ms for very responsive detection
+        self._input_focus_timer.start(100)  # Check every 100ms for very responsive detection
     
     def _check_web_input_focus(self):
         """Check if an input field is focused in the web page"""
         js_code = """
         (function() {
+            try {
             var el = document.activeElement;
-            if (!el || !el.tagName) {
-                return JSON.stringify({focused: false, reason: 'no active element'});
-            }
-            var tagName = el.tagName.toUpperCase();
-            var isInput = tagName === 'INPUT' || tagName === 'TEXTAREA';
-            var isContentEditable = el.contentEditable === 'true' || el.contentEditable === true || el.isContentEditable === true;
-            
-            if (isInput) {
-                var inputType = (el.type || 'text').toLowerCase();
-                var excludeTypes = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image'];
-                if (excludeTypes.indexOf(inputType) !== -1 || tagName === 'SELECT') {
-                    return JSON.stringify({focused: false, reason: 'excluded type: ' + inputType});
+                if (!el || !el.tagName) {
+                    return JSON.stringify({focused: false, reason: 'no active element'});
                 }
-                return JSON.stringify({focused: true, type: inputType, tag: tagName});
+                var tagName = el.tagName.toUpperCase();
+                var isInput = tagName === 'INPUT' || tagName === 'TEXTAREA';
+                var isContentEditable = el.contentEditable === 'true' || el.contentEditable === true || el.isContentEditable === true;
+                
+                if (isInput) {
+                    var inputType = (el.type || 'text').toLowerCase();
+                    var excludeTypes = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image', 'range'];
+                    if (excludeTypes.indexOf(inputType) !== -1 || tagName === 'SELECT') {
+                        return JSON.stringify({focused: false, reason: 'excluded type: ' + inputType});
+                }
+                    return JSON.stringify({focused: true, type: inputType, tag: tagName, id: el.id || '', name: el.name || ''});
+                }
+                
+                if (isContentEditable) {
+                    return JSON.stringify({focused: true, type: 'contenteditable', tag: tagName});
+                }
+                
+                return JSON.stringify({focused: false, reason: 'not input: ' + tagName});
+            } catch (e) {
+                return JSON.stringify({focused: false, reason: 'error: ' + e.message});
             }
-            
-            if (isContentEditable) {
-                return JSON.stringify({focused: true, type: 'contenteditable', tag: tagName});
-            }
-            
-            return JSON.stringify({focused: false, reason: 'not input: ' + tagName});
         })();
         """
         try:
@@ -136,9 +173,15 @@ class CompanionPage(QWidget):
         try:
             if not result:
                 result = '{"focused": false}'
-            data = json.loads(result) if isinstance(result, str) else result
+            # Handle both string and dict results
+            if isinstance(result, str):
+                data = json.loads(result)
+            elif isinstance(result, dict):
+                data = result
+            else:
+                data = {"focused": False}
         except Exception as e:
-            print(f"Companion: Error parsing result: {e}, result: {result}")
+            print(f"Companion: Error parsing result: {e}, result={result}, type={type(result)}")
             data = {"focused": False}
         
         is_focused = data.get("focused", False)
@@ -147,13 +190,15 @@ class CompanionPage(QWidget):
             if not self._web_input_focused:
                 self._web_input_focused = True
                 self._current_input_type = data.get("type", "text")
-                print(f"Companion: INPUT FOCUSED - type={self._current_input_type}, tag={data.get('tag')}")
+                print(f"Companion: ✅ INPUT FOCUSED - type={self._current_input_type}, tag={data.get('tag')}, id={data.get('id')}")
+                # Show keyboard immediately
                 self._show_pi_keyboard()
         else:
             if self._web_input_focused:
                 self._web_input_focused = False
-                print(f"Companion: INPUT BLURRED - reason={data.get('reason')}")
-                self._hide_pi_keyboard()
+                print(f"Companion: ❌ INPUT BLURRED - reason={data.get('reason', 'unknown')}")
+                # Hide keyboard with delay
+                QTimer.singleShot(500, self._hide_pi_keyboard)
     
     
     def _show_pi_keyboard(self):
@@ -171,35 +216,75 @@ class CompanionPage(QWidget):
     def _actually_show_keyboard(self):
         """Actually show the keyboard (called after delay)"""
         if not self._keyboard_command:
+            print("Companion: ⚠️ No keyboard command available")
             return
+        
+        print(f"Companion: 🔑 Attempting to show keyboard: {self._keyboard_command}")
         
         try:
             if self._keyboard_command == 'squeekboard':
                 # Squeekboard uses sm.puri.OSK0 D-Bus interface
+                # Try user session first
                 result = subprocess.run(
                     ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
                     timeout=2, capture_output=True, text=True
                 )
                 if result.returncode == 0:
-                    print("Companion: Showed squeekboard via D-Bus")
+                    print("Companion: ✅ Showed squeekboard via D-Bus (user)")
+                    return
                 else:
-                    print(f"Companion: squeekboard D-Bus error: {result.stderr}")
+                    print(f"Companion: User D-Bus failed: {result.stderr}")
+                    # Try system session
+                    result = subprocess.run(
+                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
+                        timeout=2, capture_output=True, text=True
+                    )
+                    if result.returncode == 0:
+                        print("Companion: ✅ Showed squeekboard via D-Bus (system)")
+                    else:
+                        print(f"Companion: ❌ squeekboard D-Bus error: {result.stderr}")
+                        # Fallback: try pkill and restart
+                        subprocess.run(['pkill', '-f', 'squeekboard'], 
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        QTimer.singleShot(500, lambda: subprocess.Popen(['squeekboard'], 
+                                                                       stdout=subprocess.DEVNULL, 
+                                                                       stderr=subprocess.DEVNULL))
             elif self._keyboard_command == 'matchbox-keyboard':
-                self._keyboard_process = subprocess.Popen(
-                    [self._keyboard_command],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"Companion: Started {self._keyboard_command}")
+                # Kill any existing instance
+                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                QTimer.singleShot(200, self._start_matchbox_keyboard)
             elif self._keyboard_command in ('onboard', 'florence'):
-                self._keyboard_process = subprocess.Popen(
-                    [self._keyboard_command],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"Companion: Started {self._keyboard_command}")
+                # Kill any existing instance
+                subprocess.run(['pkill', '-f', self._keyboard_command], 
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                QTimer.singleShot(200, self._start_keyboard_process)
         except Exception as e:
-            print(f"Companion: Failed to show keyboard: {e}")
+            print(f"Companion: ❌ Failed to show keyboard: {e}")
+    
+    def _start_matchbox_keyboard(self):
+        """Start matchbox-keyboard"""
+        try:
+            self._keyboard_process = subprocess.Popen(
+                [self._keyboard_command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print(f"Companion: ✅ Started {self._keyboard_command}")
+        except Exception as e:
+            print(f"Companion: ❌ Failed to start {self._keyboard_command}: {e}")
+    
+    def _start_keyboard_process(self):
+        """Start keyboard process"""
+        try:
+            self._keyboard_process = subprocess.Popen(
+                [self._keyboard_command],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print(f"Companion: ✅ Started {self._keyboard_command}")
+        except Exception as e:
+            print(f"Companion: ❌ Failed to start {self._keyboard_command}: {e}")
     
     def _hide_pi_keyboard(self):
         """Hide Pi OS on-screen keyboard"""
@@ -219,14 +304,17 @@ class CompanionPage(QWidget):
         try:
             if self._keyboard_command == 'squeekboard':
                 # Squeekboard uses sm.puri.OSK0 D-Bus interface
+                # Try user session first
                 result = subprocess.run(
                     ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
                     timeout=2, capture_output=True, text=True
                 )
-                if result.returncode == 0:
-                    print("Companion: Hid squeekboard via D-Bus")
-                else:
-                    print(f"Companion: squeekboard hide error: {result.stderr}")
+                if result.returncode != 0:
+                    # Try system session
+                    subprocess.run(
+                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
+                        timeout=2, capture_output=True, text=True
+                    )
             elif self._keyboard_command == 'matchbox-keyboard':
                 subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -437,84 +525,232 @@ exit 1
         """Handle page load finish - check for updates and inject touch support"""
         if success:
             QTimer.singleShot(1000, self._check_for_updates)
-            # Inject touch scrolling support
+            # Inject touch scrolling support - inject immediately and retry
             self._inject_touch_support()
+            # Setup input focus listeners
+            QTimer.singleShot(500, self._setup_input_focus_listeners)
+            # Also inject after delays to catch dynamic content
+            def inject_both():
+                self._inject_touch_support()
+                self._setup_input_focus_listeners()
+            QTimer.singleShot(2000, inject_both)
+            QTimer.singleShot(5000, inject_both)
     
     def _inject_touch_support(self):
         """Inject JavaScript for touch scrolling support"""
         js_code = """
         (function() {
-            if (window._panapitouchScrollSetup) return;
-            window._panapitouchScrollSetup = true;
-            
-            var startY = 0;
-            var startX = 0;
-            var startScrollTop = 0;
-            var startScrollLeft = 0;
-            var isDragging = false;
-            var scrollTarget = null;
-            
-            function getScrollableParent(el) {
-                while (el && el !== document.body) {
-                    var style = window.getComputedStyle(el);
-                    var overflowY = style.overflowY;
-                    var overflowX = style.overflowX;
-                    if ((overflowY === 'auto' || overflowY === 'scroll' || overflowX === 'auto' || overflowX === 'scroll') &&
-                        (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth)) {
-                        return el;
+            function setupScrolling(win) {
+                if (!win || !win.document) return;
+                var doc = win.document;
+                
+                // Remove old listeners
+                if (win._panapitouchScrollSetup) {
+                    if (win._panapitouchTouchStart) {
+                        doc.removeEventListener('touchstart', win._panapitouchTouchStart, true);
+                        doc.removeEventListener('touchmove', win._panapitouchTouchMove, true);
+                        doc.removeEventListener('touchend', win._panapitouchTouchEnd, true);
+                        doc.removeEventListener('pointerdown', win._panapitouchPointerStart, true);
+                        doc.removeEventListener('pointermove', win._panapitouchPointerMove, true);
+                        doc.removeEventListener('pointerup', win._panapitouchPointerEnd, true);
                     }
-                    el = el.parentElement;
                 }
-                return document.documentElement;
+                win._panapitouchScrollSetup = true;
+                
+                var startY = 0;
+                var startX = 0;
+                var startScrollTop = 0;
+                var startScrollLeft = 0;
+                var isDragging = false;
+                var scrollTarget = null;
+                
+                function getScrollableParent(el) {
+                    var maxDepth = 20;
+                    var depth = 0;
+                    while (el && el !== doc.body && el !== doc.documentElement && depth < maxDepth) {
+                        var style = win.getComputedStyle(el);
+                        var overflowY = style.overflowY;
+                        var overflowX = style.overflowX;
+                        if ((overflowY === 'auto' || overflowY === 'scroll' || overflowX === 'auto' || overflowX === 'scroll') &&
+                            (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth)) {
+                            return el;
+                        }
+                        el = el.parentElement;
+                        depth++;
+                    }
+                    return doc.documentElement || doc.body;
+                }
+                
+                function isInputElement(el) {
+                    if (!el) return false;
+                    var tag = el.tagName ? el.tagName.toUpperCase() : '';
+                    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+                    if (el.isContentEditable || el.contentEditable === 'true') return true;
+                    return false;
+                }
+                
+                win._panapitouchTouchStart = function(e) {
+                    if (isInputElement(e.target)) return;
+                    if (e.touches && e.touches.length > 0) {
+                        startY = e.touches[0].clientY;
+                        startX = e.touches[0].clientX;
+                        scrollTarget = getScrollableParent(e.target);
+                        startScrollTop = scrollTarget.scrollTop;
+                        startScrollLeft = scrollTarget.scrollLeft;
+                        isDragging = false;
+                    }
+                };
+                
+                win._panapitouchTouchMove = function(e) {
+                    if (!scrollTarget || !e.touches || e.touches.length === 0) return;
+                    if (isInputElement(e.target)) return;
+                    
+                    var currentY = e.touches[0].clientY;
+                    var currentX = e.touches[0].clientX;
+                    var deltaY = startY - currentY;
+                    var deltaX = startX - currentX;
+                    
+                    if (!isDragging && (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5)) {
+                        isDragging = true;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (win.getSelection) {
+                            win.getSelection().removeAllRanges();
+                        }
+                    }
+                    
+                    if (isDragging && scrollTarget) {
+                        scrollTarget.scrollTop = startScrollTop + deltaY;
+                        scrollTarget.scrollLeft = startScrollLeft + deltaX;
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                };
+                
+                win._panapitouchTouchEnd = function(e) {
+                    isDragging = false;
+                    scrollTarget = null;
+                };
+                
+                // Pointer events fallback (when touch events are translated to pointer events)
+                win._panapitouchPointerStart = function(e) {
+                    if (e.pointerType !== 'touch') return;
+                    if (isInputElement(e.target)) return;
+                    startY = e.clientY;
+                    startX = e.clientX;
+                    scrollTarget = getScrollableParent(e.target);
+                    startScrollTop = scrollTarget.scrollTop;
+                    startScrollLeft = scrollTarget.scrollLeft;
+                    isDragging = false;
+                };
+                
+                win._panapitouchPointerMove = function(e) {
+                    if (e.pointerType !== 'touch') return;
+                    if (!scrollTarget) return;
+                    if (isInputElement(e.target)) return;
+                    var deltaY = startY - e.clientY;
+                    var deltaX = startX - e.clientX;
+                    if (!isDragging && (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5)) {
+                        isDragging = true;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (win.getSelection) {
+                            win.getSelection().removeAllRanges();
+                        }
+                    }
+                    if (isDragging && scrollTarget) {
+                        scrollTarget.scrollTop = startScrollTop + deltaY;
+                        scrollTarget.scrollLeft = startScrollLeft + deltaX;
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                };
+                
+                win._panapitouchPointerEnd = function(e) {
+                    if (e.pointerType !== 'touch') return;
+                    isDragging = false;
+                    scrollTarget = null;
+                };
+                
+                doc.addEventListener('touchstart', win._panapitouchTouchStart, { passive: false, capture: true });
+                doc.addEventListener('touchmove', win._panapitouchTouchMove, { passive: false, capture: true });
+                doc.addEventListener('touchend', win._panapitouchTouchEnd, { passive: true, capture: true });
+                
+                doc.addEventListener('pointerdown', win._panapitouchPointerStart, { passive: false, capture: true });
+                doc.addEventListener('pointermove', win._panapitouchPointerMove, { passive: false, capture: true });
+                doc.addEventListener('pointerup', win._panapitouchPointerEnd, { passive: true, capture: true });
+                
+                // Add CSS for smooth scrolling
+                if (!doc.getElementById('panapitouch-scroll-style')) {
+                    var style = doc.createElement('style');
+                    style.id = 'panapitouch-scroll-style';
+                    style.textContent = '* { -webkit-overflow-scrolling: touch !important; touch-action: none !important; } body { overflow: auto !important; }';
+                    doc.head.appendChild(style);
+                }
             }
             
-            document.addEventListener('touchstart', function(e) {
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
-                    return;
-                }
-                startY = e.touches[0].clientY;
-                startX = e.touches[0].clientX;
-                scrollTarget = getScrollableParent(e.target);
-                startScrollTop = scrollTarget.scrollTop;
-                startScrollLeft = scrollTarget.scrollLeft;
-                isDragging = false;
-            }, { passive: true });
+            // Setup on main window
+            setupScrolling(window);
             
-            document.addEventListener('touchmove', function(e) {
-                if (!scrollTarget) return;
-                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
-                    return;
-                }
-                
-                var deltaY = startY - e.touches[0].clientY;
-                var deltaX = startX - e.touches[0].clientX;
-                
-                if (!isDragging && (Math.abs(deltaY) > 5 || Math.abs(deltaX) > 5)) {
-                    isDragging = true;
-                    if (window.getSelection) {
-                        window.getSelection().removeAllRanges();
+            // Try to setup on same-origin iframes (Companion uses same origin)
+            var iframes = document.querySelectorAll('iframe');
+            for (var i = 0; i < iframes.length; i++) {
+                var frame = iframes[i];
+                try {
+                    if (frame.contentWindow) {
+                        setupScrolling(frame.contentWindow);
                     }
+                } catch (err) {
+                    console.warn('PanaPiTouch: iframe touch setup skipped (cross-origin)', err);
                 }
-                
-                if (isDragging) {
-                    scrollTarget.scrollTop = startScrollTop + deltaY;
-                    scrollTarget.scrollLeft = startScrollLeft + deltaX;
-                }
-            }, { passive: true });
-            
-            document.addEventListener('touchend', function(e) {
-                isDragging = false;
-                scrollTarget = null;
-            }, { passive: true });
+            }
             
             console.log('PanaPiTouch: Touch scrolling enabled');
         })();
         """
         try:
+            # Inject immediately
             self.web_view.page().runJavaScript(js_code)
+            # Retry after delays
+            QTimer.singleShot(500, lambda: self.web_view.page().runJavaScript(js_code))
+            QTimer.singleShot(2000, lambda: self.web_view.page().runJavaScript(js_code))
+            QTimer.singleShot(5000, lambda: self.web_view.page().runJavaScript(js_code))
             print("Companion: Injected touch scrolling support")
         except Exception as e:
             print(f"Companion: Failed to inject touch support: {e}")
+    
+    def _setup_input_focus_listeners(self):
+        """Setup direct event listeners for input focus/blur"""
+        js_code = """
+        (function() {
+            if (window._panapitouchInputListenersSetup) return;
+            window._panapitouchInputListenersSetup = true;
+            
+            function checkInput(el) {
+                if (!el || !el.tagName) return false;
+                var tag = el.tagName.toUpperCase();
+                if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
+                if (tag === 'INPUT') {
+                    var type = (el.type || 'text').toLowerCase();
+                    var exclude = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image', 'range'];
+                    if (exclude.indexOf(type) !== -1) return false;
+                }
+                return true;
+            }
+            
+            document.addEventListener('focusin', function(e) {
+                if (checkInput(e.target)) {
+                    console.log('PanaPiTouch: Input focused:', e.target.tagName, e.target.type);
+                }
+            }, true);
+            
+            console.log('PanaPiTouch: Input focus listeners setup');
+        })();
+        """
+        try:
+            self.web_view.page().runJavaScript(js_code)
+        except Exception as e:
+            print(f"Companion: Failed to setup input listeners: {e}")
     
     def set_url(self, url: str):
         """Set companion URL"""
