@@ -19,7 +19,6 @@ from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
 from ..config.settings import Settings, CameraConfig
 from ..camera.discovery import CameraDiscovery, DiscoveredCamera
 from ..camera.stream import CameraStream, StreamConfig
-from ..network.manager import NetworkManager, NetworkDiagnostics
 from .widgets import TouchScrollArea
 
 
@@ -222,7 +221,7 @@ class DiscoveredCameraCard(QFrame):
         # Add button
         add_btn = QPushButton("➕")
         add_btn.setFixedSize(32, 28)
-        add_btn.setToolTip("Add to form")
+        add_btn.setToolTip("Add to configured cameras")
         add_btn.setStyleSheet("""
             QPushButton {
                 background-color: #FF9500;
@@ -605,13 +604,12 @@ class CameraPage(QWidget):
         self.configured_button_wrapper = None  # Wrapper for Configured button
         self.configured_button = None  # Configured button reference
         sections = [
-            ("➕", "Add Camera"),
             ("📋", "Configured"),
-            ("🔧", "Network Management"),
+            ("🌐", "Discover"),
         ]
         for idx, (icon, name) in enumerate(sections):
             # Create wrapper widget for Configured button to hold badge
-            if idx == 1:  # Configured button
+            if idx == 0:  # Configured button
                 wrapper = QFrame()
                 wrapper.setStyleSheet("background-color: transparent;")
                 wrapper_layout = QVBoxLayout(wrapper)
@@ -666,9 +664,8 @@ class CameraPage(QWidget):
         # Content stack
         self.content_stack = QStackedWidget()
         self.content_stack.setStyleSheet("background-color: #0a0a0f;")
-        self.content_stack.addWidget(self._create_add_content())
         self.content_stack.addWidget(self._create_configured_content())
-        self.content_stack.addWidget(self._create_network_management_content())
+        self.content_stack.addWidget(self._create_easyip_tools_content())
         main_layout.addWidget(self.content_stack, 1)
         
         # Default selection
@@ -729,22 +726,9 @@ class CameraPage(QWidget):
             btn.setChecked(i == index)
         
         # Hide edit form when switching away from Configured page
-        if index != 1 and hasattr(self, 'edit_form_panel'):
+        if index != 0 and hasattr(self, 'edit_form_panel'):
             self.edit_form_panel.hide()
             self._editing_camera_id = None
-
-    def _create_add_content(self) -> QWidget:
-        """Add/discover cameras page"""
-        wrapper = QWidget()
-        wrapper_layout = QVBoxLayout(wrapper)
-        wrapper_layout.setContentsMargins(20, 20, 20, 20)
-        wrapper_layout.setSpacing(0)
-        
-        # Full-width left panel (no right column)
-        left_panel = self._create_left_panel()
-        wrapper_layout.addWidget(left_panel, stretch=1)
-        
-        return wrapper
 
     def _create_configured_content(self) -> QWidget:
         """Configured cameras with inline edit column"""
@@ -763,39 +747,420 @@ class CameraPage(QWidget):
         
         return wrapper
     
-    def _create_network_management_content(self) -> QWidget:
-        """Network Management page"""
+    def _create_easyip_tools_content(self) -> QWidget:
+        """Discover page - Main screen with camera list, Identify, and Network Settings"""
         wrapper = QWidget()
         wrapper_layout = QVBoxLayout(wrapper)
         wrapper_layout.setContentsMargins(20, 20, 20, 20)
         wrapper_layout.setSpacing(20)
         
-        # Scroll area for network management content
-        scroll_area = TouchScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        # Header
+        header = QLabel("Discover")
+        header.setStyleSheet("font-size: 24px; font-weight: 600; color: #ffffff;")
+        wrapper_layout.addWidget(header)
+        
+        # Search and refresh controls
+        controls_layout = QHBoxLayout()
+        controls_layout.setSpacing(12)
+        controls_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
+        
+        # Search input
+        self.easyip_search_input = QLineEdit()
+        self.easyip_search_input.setPlaceholderText("Search cameras...")
+        self.easyip_search_input.setFixedHeight(44)
+        self.easyip_search_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a24;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 14px;
+                color: #FFFFFF;
+                margin: 0px;
+            }
+            QLineEdit:focus {
+                border-color: #FF9500;
+            }
+        """)
+        self.easyip_search_input.textChanged.connect(self._filter_easyip_cameras)
+        controls_layout.addWidget(self.easyip_search_input, alignment=Qt.AlignmentFlag.AlignTop)
+        
+        # Refresh button
+        self.easyip_refresh_btn = QPushButton("🔍 Search")
+        self.easyip_refresh_btn.setFixedHeight(44)
+        self.easyip_refresh_btn.setFixedWidth(150)  # Fixed width, 50px wider than default
+        self.easyip_refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9500;
+                border: 2px solid #FF9500;
+                border-radius: 8px;
+                color: #0a0a0f;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 8px 12px;
+                margin: 0px;
+                min-width: 150px;
+                max-width: 150px;
+                min-height: 44px;
+                max-height: 44px;
+            }
+            QPushButton:hover {
+                background-color: #CC7700;
+                border: 2px solid #CC7700;
+                min-width: 150px;
+                max-width: 150px;
+                min-height: 44px;
+                max-height: 44px;
+            }
+            QPushButton:pressed {
+                background-color: #CC7700;
+                border: 2px solid #CC7700;
+                min-width: 150px;
+                max-width: 150px;
+                min-height: 44px;
+                max-height: 44px;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a38;
+                border: 2px solid #2a2a38;
+                color: #888898;
+                min-width: 150px;
+                max-width: 150px;
+                min-height: 44px;
+                max-height: 44px;
+            }
+        """)
+        self.easyip_refresh_btn.clicked.connect(self._easyip_discover_cameras)
+        controls_layout.addWidget(self.easyip_refresh_btn, alignment=Qt.AlignmentFlag.AlignTop)
+        
+        wrapper_layout.addLayout(controls_layout)
+        
+        # Status label
+        self.easyip_status_label = QLabel("Ready to search for cameras")
+        self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+        wrapper_layout.addWidget(self.easyip_status_label)
+        
+        # Progress bar
+        self.easyip_progress = QProgressBar()
+        self.easyip_progress.setRange(0, 100)
+        self.easyip_progress.setValue(0)
+        self.easyip_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #1a1a24;
+                height: 24px;
+            }
+            QProgressBar::chunk {
+                background-color: #FF9500;
+                border-radius: 3px;
+            }
+        """)
+        self.easyip_progress.hide()
+        wrapper_layout.addWidget(self.easyip_progress)
+        
+        # Camera list scroll area
+        camera_scroll = TouchScrollArea()
+        camera_scroll.setWidgetResizable(True)
+        camera_scroll.setStyleSheet("""
             QScrollArea {
-                background-color: transparent;
-                border: none;
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
             }
         """)
         
-        # Container widget for network management
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(20)
+        # Container for camera cards
+        self.easyip_camera_container = QWidget()
+        self.easyip_camera_layout = QVBoxLayout(self.easyip_camera_container)
+        self.easyip_camera_layout.setSpacing(12)
+        self.easyip_camera_layout.setContentsMargins(12, 12, 12, 12)
+        self.easyip_camera_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         
-        # Network Management panel
-        self.network_group = self._create_network_management_panel()
-        content_layout.addWidget(self.network_group)
+        # Empty state
+        self.easyip_empty_label = QLabel("No cameras discovered yet.\nClick 'Search' to find Panasonic cameras.")
+        self.easyip_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.easyip_empty_label.setStyleSheet("color: #666676; font-size: 14px; padding: 40px;")
+        self.easyip_empty_label.setWordWrap(True)
+        self.easyip_camera_layout.addWidget(self.easyip_empty_label)
         
-        content_layout.addStretch()
+        camera_scroll.setWidget(self.easyip_camera_container)
+        wrapper_layout.addWidget(camera_scroll, stretch=1)
         
-        scroll_area.setWidget(content_widget)
-        wrapper_layout.addWidget(scroll_area)
+        # Initialize EasyIP discovery state
+        self._easyip_discovered_cameras = []
+        self._easyip_camera_cards = {}
+        self._easyip_discovery_worker = None
         
         return wrapper
+    
+    def _easyip_discover_cameras(self):
+        """Discover cameras for Discover page"""
+        if self._easyip_discovery_worker and self._easyip_discovery_worker.isRunning():
+            return
+        
+        # Clear UI
+        for card in list(self._easyip_camera_cards.values()):
+            card.deleteLater()
+        self._easyip_camera_cards.clear()
+        self._easyip_discovered_cameras = []
+        
+        # Show empty state
+        self.easyip_empty_label.show()
+        self.easyip_empty_label.setText("🔍 Searching network for Panasonic cameras...")
+        self.easyip_empty_label.setStyleSheet("color: #FF9500; font-size: 14px; padding: 40px;")
+        
+        # Update UI
+        self.easyip_refresh_btn.setEnabled(False)
+        self.easyip_refresh_btn.setText("⏳ Scanning...")
+        self.easyip_status_label.setText("🔍 Searching network for Panasonic cameras...")
+        self.easyip_status_label.setStyleSheet("color: #FF9500; font-size: 12px; padding: 4px;")
+        self.easyip_progress.show()
+        self.easyip_progress.setValue(0)
+        
+        # Get eth0 IP for discovery
+        network_info = self._get_eth0_network_info()
+        eth0_ip = network_info.get('ip') if network_info else None
+        
+        # Create and start worker thread
+        self._easyip_discovery_worker = DiscoveryWorker(adapter_ip=eth0_ip)
+        self._easyip_discovery_worker.camera_found.connect(self._on_easyip_camera_discovered)
+        self._easyip_discovery_worker.progress.connect(self._on_easyip_discovery_progress)
+        self._easyip_discovery_worker.progress_value.connect(self.easyip_progress.setValue)
+        self._easyip_discovery_worker.finished_signal.connect(self._on_easyip_discovery_finished)
+        self._easyip_discovery_worker.start()
+    
+    @pyqtSlot(object)
+    def _on_easyip_camera_discovered(self, camera: DiscoveredCamera):
+        """Handle discovered camera for Discover page"""
+        if camera.ip_address in self._easyip_camera_cards:
+            return
+        
+        # Hide empty state when first camera found
+        if len(self._easyip_discovered_cameras) == 0:
+            self.easyip_empty_label.hide()
+        
+        self._easyip_discovered_cameras.append(camera)
+        
+        # Create card with network info
+        network_info = self._get_eth0_network_info()
+        card = DiscoveredCameraCard(camera, network_info=network_info)
+        card.identify_clicked.connect(self._on_easyip_identify_camera)
+        card.fix_network_clicked.connect(self._on_easyip_fix_network)
+        card.add_clicked.connect(self._on_easyip_add_camera)
+        
+        self._easyip_camera_cards[camera.ip_address] = card
+        
+        # Add to layout
+        insert_index = self.easyip_camera_layout.indexOf(self.easyip_empty_label)
+        if insert_index >= 0:
+            self.easyip_camera_layout.insertWidget(insert_index, card)
+        else:
+            self.easyip_camera_layout.addWidget(card)
+        
+        # Fetch thumbnail
+        self._fetch_discovery_thumbnail(camera.ip_address, card)
+        
+        # Update status
+        count = len(self._easyip_discovered_cameras)
+        self.easyip_status_label.setText(f"✅ Found {count} camera(s)...")
+        self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+    
+    @pyqtSlot(str)
+    def _on_easyip_discovery_progress(self, message: str):
+        """Handle progress update for EasyIP discovery"""
+        self.easyip_status_label.setText(message)
+        QApplication.processEvents()
+    
+    @pyqtSlot(int)
+    def _on_easyip_discovery_finished(self, count: int):
+        """Handle EasyIP discovery completion"""
+        self.easyip_refresh_btn.setEnabled(True)
+        self.easyip_refresh_btn.setText("🔍 Search Network")
+        self.easyip_progress.setValue(100)
+        QTimer.singleShot(1000, lambda: self.easyip_progress.hide())
+        
+        if count == 0:
+            self.easyip_status_label.setText("❌ No cameras found")
+            self.easyip_status_label.setStyleSheet("color: #ef4444; font-size: 12px; padding: 4px;")
+            self.easyip_empty_label.show()
+            self.easyip_empty_label.setText(
+                "❌ No Panasonic cameras found on network.\n\n"
+                "Troubleshooting tips:\n"
+                "• Ensure cameras are on the same network\n"
+                "• Check firewall settings\n"
+                "• Verify cameras support Panasonic Easy IP protocol"
+            )
+            self.easyip_empty_label.setStyleSheet("color: #ef4444; font-size: 14px; padding: 40px;")
+        else:
+            self.easyip_status_label.setText(f"✅ Discovery complete: Found {count} camera(s)")
+            self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+    
+    def _on_easyip_identify_camera(self, ip_address: str):
+        """Handle identify camera in Discover page"""
+        from src.camera.discovery import CameraDiscovery
+        
+        # Get credentials - try from configured cameras first
+        username = "admin"
+        password = "12345"
+        
+        # Check if camera is configured
+        for camera in self.settings.cameras:
+            if camera.ip_address == ip_address:
+                username = camera.username
+                password = camera.password
+                break
+        
+        # Update status
+        self.easyip_status_label.setText(f"💡 Identifying camera at {ip_address}...")
+        self.easyip_status_label.setStyleSheet("color: #eab308; font-size: 12px; padding: 4px;")
+        
+        # Run identify in background
+        def identify_task():
+            success = CameraDiscovery.identify_camera(ip_address, username, password, duration=5)
+            return success
+        
+        def on_identify_complete(future):
+            try:
+                success = future.result()
+                if success:
+                    QTimer.singleShot(0, lambda: self._show_easyip_identify_result(ip_address, True))
+                else:
+                    QTimer.singleShot(0, lambda: self._show_easyip_identify_result(ip_address, False))
+            except:
+                QTimer.singleShot(0, lambda: self._show_easyip_identify_result(ip_address, False))
+        
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(identify_task)
+        future.add_done_callback(on_identify_complete)
+    
+    def _show_easyip_identify_result(self, ip_address: str, success: bool):
+        """Show identify result for EasyIP Tools"""
+        if success:
+            self.easyip_status_label.setText(f"💡 Camera {ip_address} LED is blinking for 5 seconds")
+            self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+        else:
+            self.easyip_status_label.setText(f"⚠️ Could not identify camera {ip_address}")
+            self.easyip_status_label.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
+        
+        # Reset status after delay
+        QTimer.singleShot(6000, self._reset_easyip_status)
+    
+    def _on_easyip_fix_network(self, camera: DiscoveredCamera):
+        """Handle network settings in Discover page"""
+        try:
+            from .network_fix_dialog import NetworkFixDialog
+        except ImportError:
+            QMessageBox.warning(self, "Error", "Network fix dialog not available")
+            return
+        
+        network_info = self._get_eth0_network_info()
+        if not network_info:
+            QMessageBox.warning(self, "Error", "Could not detect eth0 network settings")
+            return
+        
+        dialog = NetworkFixDialog(camera, network_info, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Network was changed, refresh discovery after delay
+            QTimer.singleShot(2000, self._easyip_discover_cameras)
+    
+    @pyqtSlot(object)
+    def _on_easyip_add_camera(self, camera: DiscoveredCamera):
+        """Add discovered camera to configured cameras list"""
+        # Check if camera already exists
+        for existing_camera in self.settings.cameras:
+            if existing_camera.ip_address == camera.ip_address:
+                QMessageBox.information(
+                    self,
+                    "Camera Already Added",
+                    f"Camera at {camera.ip_address} is already in your configured list."
+                )
+                return
+        
+        # Check maximum limit
+        if len(self.settings.cameras) >= 30:
+            QMessageBox.warning(self, "Error", "Maximum 30 cameras allowed")
+            return
+        
+        # Generate new ID
+        existing_ids = [c.id for c in self.settings.cameras]
+        new_id = 1
+        while new_id in existing_ids:
+            new_id += 1
+        
+        # Create camera config with default values
+        camera_name = camera.name or camera.model or f"Camera ({camera.ip_address})"
+        new_camera = CameraConfig(
+            id=new_id,
+            name=camera_name,
+            ip_address=camera.ip_address,
+            port=80,  # Default port
+            username="admin",  # Default username
+            password="12345"  # Default password
+        )
+        
+        # Add to settings
+        self.settings.add_camera(new_camera)
+        self.settings.save()
+        
+        # Refresh camera list and update badge
+        self._refresh_camera_list()
+        self._update_configured_badge()
+        self.settings_changed.emit()
+        
+        # Show success message
+        QMessageBox.information(
+            self,
+            "Camera Added",
+            f"Camera '{camera_name}' has been added to your configured list.\n\n"
+            f"You can now switch to it on the live page."
+        )
+    
+    def _reset_easyip_status(self):
+        """Reset EasyIP status to default"""
+        count = len(self._easyip_discovered_cameras)
+        if count > 0:
+            self.easyip_status_label.setText(f"✅ {count} camera(s) found")
+            self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
+        else:
+            self.easyip_status_label.setText("Ready to search for cameras")
+            self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+    
+    def _filter_easyip_cameras(self, search_text: str):
+        """Filter EasyIP camera list by search text"""
+        search_lower = search_text.lower()
+        visible_count = 0
+        
+        for ip, card in self._easyip_camera_cards.items():
+            camera = None
+            for cam in self._easyip_discovered_cameras:
+                if cam.ip_address == ip:
+                    camera = cam
+                    break
+            
+            if not camera:
+                continue
+            
+            # Check if matches search
+            matches = (
+                search_lower in camera.ip_address.lower() or
+                search_lower in (camera.name or "").lower() or
+                search_lower in (camera.model or "").lower() or
+                search_lower in (camera.mac_address or "").lower()
+            )
+            
+            card.setVisible(matches)
+            if matches:
+                visible_count += 1
+        
+        # Show/hide empty state
+        if visible_count == 0 and search_text:
+            self.easyip_empty_label.setText(f"No cameras match '{search_text}'")
+            self.easyip_empty_label.show()
+        else:
+            self.easyip_empty_label.hide()
     
     def _create_edit_form_panel(self) -> QWidget:
         """Create edit form panel for inline editing"""
@@ -1035,499 +1400,6 @@ class CameraPage(QWidget):
         self.settings_changed.emit()
         
         QMessageBox.information(self, "Success", f"Camera '{name}' updated successfully!")
-    
-    def _create_left_panel(self) -> QWidget:
-        """Create left panel with unified discovery and manual add (full width)"""
-        panel = QFrame()
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #12121a;
-                border: 1px solid #2a2a38;
-                border-radius: 12px;
-            }
-        """)
-        
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
-        # Unified Add Camera section
-        self.add_camera_group = QGroupBox("➕ Add Camera")
-        self.add_camera_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: 600;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
-            }
-        """)
-        add_camera_layout = QVBoxLayout(self.add_camera_group)
-        add_camera_layout.setSpacing(12)
-        
-        # Top buttons row: Scan Network and Add Manually toggle
-        top_buttons_layout = QHBoxLayout()
-        top_buttons_layout.setSpacing(8)
-        
-        # Scan Network button
-        self.discover_btn = QPushButton("🔍  Scan Network")
-        self.discover_btn.setFixedHeight(50)
-        self.discover_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9500;
-                border: none;
-                border-radius: 8px;
-                color: #0a0a0f;
-                font-size: 14px;
-                font-weight: 600;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a38;
-                color: #888898;
-            }
-        """)
-        self.discover_btn.clicked.connect(self._discover_cameras)
-        top_buttons_layout.addWidget(self.discover_btn)
-        
-        # Add Manually toggle button
-        self.manual_toggle_btn = QPushButton("➕ Add Manually")
-        self.manual_toggle_btn.setFixedHeight(50)
-        self.manual_toggle_btn.setCheckable(True)
-        self.manual_toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: 1px solid #3a3a48;
-                border-radius: 8px;
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: 600;
-            }
-            QPushButton:checked {
-                background-color: #FF9500;
-                color: #0a0a0f;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
-            }
-            QPushButton:checked:hover {
-                background-color: #CC7700;
-            }
-        """)
-        self.manual_toggle_btn.toggled.connect(self._toggle_manual_form)
-        top_buttons_layout.addWidget(self.manual_toggle_btn)
-        
-        add_camera_layout.addLayout(top_buttons_layout)
-        
-        # Progress bar with animation
-        self.discovery_progress = QProgressBar()
-        self.discovery_progress.setRange(0, 100)
-        self.discovery_progress.setValue(0)
-        self.discovery_progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #2a2a38;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #1a1a24;
-                height: 24px;
-            }
-            QProgressBar::chunk {
-                background-color: #FF9500;
-                border-radius: 3px;
-            }
-        """)
-        self.discovery_progress.hide()
-        add_camera_layout.addWidget(self.discovery_progress)
-        
-        # Status label with animation
-        self.discovery_status = QLabel("Ready to scan or add manually")
-        self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
-        add_camera_layout.addWidget(self.discovery_status)
-        
-        # Discovered cameras scroll area with touch scrolling
-        discovered_scroll = TouchScrollArea()
-        discovered_scroll.setWidgetResizable(True)
-        discovered_scroll.setFixedHeight(180)
-        discovered_scroll.setStyleSheet("""
-            QScrollArea {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 6px;
-            }
-        """)
-        
-        # Container widget for discovered cards
-        self.discovered_container = QWidget()
-        self.discovered_layout = QVBoxLayout(self.discovered_container)
-        self.discovered_layout.setSpacing(8)
-        self.discovered_layout.setContentsMargins(8, 8, 8, 8)
-        self.discovered_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
-        # Empty state for discovery (inside scroll area)
-        self.discovery_empty_label = QLabel("No cameras discovered yet.\nClick 'Scan Network' to search for Panasonic cameras.")
-        self.discovery_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.discovery_empty_label.setStyleSheet("color: #666676; font-size: 11px; padding: 20px;")
-        self.discovery_empty_label.setWordWrap(True)
-        self.discovered_layout.addWidget(self.discovery_empty_label)
-        
-        discovered_scroll.setWidget(self.discovered_container)
-        add_camera_layout.addWidget(discovered_scroll)
-        
-        # Manual form container (initially hidden)
-        self.manual_form_container = QWidget()
-        self.manual_form_container.setStyleSheet("""
-            QLineEdit, QComboBox {
-                background-color: #1a1a24;
-                border: 2px solid #2a2a38;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 13px;
-                color: #FFFFFF;
-                min-height: 24px;
-            }
-            QLineEdit:focus, QComboBox:focus {
-                border-color: #FF9500;
-            }
-            QLineEdit::placeholder {
-                color: #666676;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 40px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1a1a24;
-                border: 2px solid #2a2a38;
-                selection-background-color: #FF9500;
-                color: #FFFFFF;
-                padding: 4px;
-            }
-            QComboBox QAbstractItemView::item {
-                min-height: 44px;
-                padding: 12px 16px;
-            }
-            QComboBox QAbstractItemView::item:selected {
-                background-color: #FF9500;
-                color: #0a0a0f;
-            }
-            QLabel {
-                font-size: 11px;
-                color: #FFFFFF;
-                font-weight: 500;
-                border: none;
-                background: transparent;
-            }
-        """)
-        manual_layout = QVBoxLayout(self.manual_form_container)
-        manual_layout.setSpacing(12)
-        manual_layout.setContentsMargins(0, 12, 0, 0)
-        
-        # Camera Name field
-        name_container = QVBoxLayout()
-        name_container.setSpacing(4)
-        name_label = QLabel("Camera Name:")
-        name_container.addWidget(name_label)
-        
-        name_input_row = QHBoxLayout()
-        name_input_row.setSpacing(8)
-        self.camera_name_input = QLineEdit()
-        self.camera_name_input.setFixedHeight(40)
-        self.camera_name_input.setPlaceholderText("e.g. Camera 1")
-        self.camera_name_input.textChanged.connect(self._on_form_changed)
-        self.camera_name_input.textChanged.connect(lambda: self._validate_field("name"))
-        name_input_row.addWidget(self.camera_name_input)
-        self.name_validator = QLabel("✓")
-        self.name_validator.setFixedWidth(20)
-        self.name_validator.setStyleSheet("color: #22c55e; font-size: 16px; font-weight: bold;")
-        self.name_validator.hide()
-        name_input_row.addWidget(self.name_validator)
-        name_container.addLayout(name_input_row)
-        manual_layout.addLayout(name_container)
-        
-        # IP Address field
-        ip_container = QVBoxLayout()
-        ip_container.setSpacing(4)
-        ip_label = QLabel("IP Address:")
-        ip_container.addWidget(ip_label)
-        
-        ip_input_row = QHBoxLayout()
-        ip_input_row.setSpacing(8)
-        self.camera_ip_input = QLineEdit()
-        self.camera_ip_input.setFixedHeight(40)
-        self.camera_ip_input.setPlaceholderText("e.g. 192.168.1.100")
-        self.camera_ip_input.textChanged.connect(self._on_form_changed)
-        self.camera_ip_input.textChanged.connect(lambda: self._validate_field("ip"))
-        ip_input_row.addWidget(self.camera_ip_input)
-        self.ip_validator = QLabel("✓")
-        self.ip_validator.setFixedWidth(20)
-        self.ip_validator.setStyleSheet("color: #22c55e; font-size: 16px; font-weight: bold;")
-        self.ip_validator.hide()
-        ip_input_row.addWidget(self.ip_validator)
-        ip_container.addLayout(ip_input_row)
-        manual_layout.addLayout(ip_container)
-        
-        # Username and Password in a row
-        auth_row = QHBoxLayout()
-        auth_row.setSpacing(12)
-        
-        # Username
-        user_container = QVBoxLayout()
-        user_container.setSpacing(4)
-        user_label = QLabel("Username:")
-        user_container.addWidget(user_label)
-        self.camera_user_input = QLineEdit()
-        self.camera_user_input.setFixedHeight(40)
-        self.camera_user_input.setPlaceholderText("admin")
-        self.camera_user_input.setText("admin")
-        self.camera_user_input.textChanged.connect(self._on_form_changed)
-        user_container.addWidget(self.camera_user_input)
-        auth_row.addLayout(user_container)
-        
-        # Password
-        pass_container = QVBoxLayout()
-        pass_container.setSpacing(4)
-        pass_label = QLabel("Password:")
-        pass_container.addWidget(pass_label)
-        self.camera_pass_input = QLineEdit()
-        self.camera_pass_input.setFixedHeight(40)
-        self.camera_pass_input.setPlaceholderText("12345")
-        self.camera_pass_input.setText("12345")
-        self.camera_pass_input.textChanged.connect(self._on_form_changed)
-        pass_container.addWidget(self.camera_pass_input)
-        auth_row.addLayout(pass_container)
-        
-        # Hidden password toggle for compatibility
-        self.password_toggle = QPushButton()
-        self.password_toggle.hide()
-        
-        manual_layout.addLayout(auth_row)
-        
-        # Network Configuration Section
-        network_group = QGroupBox("🌐 Network Configuration")
-        network_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: 600;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
-            }
-        """)
-        network_layout = QVBoxLayout(network_group)
-        network_layout.setSpacing(12)
-        
-        # IP Address (already have camera_ip_input, but add it here for network section)
-        # We'll keep IP in basic section, but add subnet/gateway/DHCP here
-        
-        # Subnet Mask
-        subnet_layout = QVBoxLayout()
-        subnet_layout.setSpacing(4)
-        subnet_label = QLabel("Subnet Mask:")
-        subnet_layout.addWidget(subnet_label)
-        self.camera_subnet_input = QComboBox()
-        self.camera_subnet_input.setEditable(True)
-        self.camera_subnet_input.setFixedHeight(40)
-        self.camera_subnet_input.addItems([
-            "255.255.255.0",
-            "255.255.0.0",
-            "255.0.0.0",
-            "255.255.255.128",
-            "255.255.255.192",
-            "255.255.255.224",
-            "255.255.255.240",
-            "255.255.255.248",
-            "255.255.255.252"
-        ])
-        self.camera_subnet_input.setCurrentText("255.255.255.0")
-        self.camera_subnet_input.currentTextChanged.connect(self._on_form_changed)
-        subnet_layout.addWidget(self.camera_subnet_input)
-        network_layout.addLayout(subnet_layout)
-        
-        # Gateway
-        gateway_layout = QVBoxLayout()
-        gateway_layout.setSpacing(4)
-        gateway_label = QLabel("Gateway (optional):")
-        gateway_layout.addWidget(gateway_label)
-        self.camera_gateway_input = QLineEdit()
-        self.camera_gateway_input.setFixedHeight(40)
-        self.camera_gateway_input.setPlaceholderText("e.g. 192.168.1.1")
-        self.camera_gateway_input.textChanged.connect(self._on_form_changed)
-        gateway_layout.addWidget(self.camera_gateway_input)
-        network_layout.addLayout(gateway_layout)
-        
-        # DHCP Toggle
-        dhcp_layout = QHBoxLayout()
-        dhcp_layout.setSpacing(12)
-        dhcp_label = QLabel("DHCP:")
-        dhcp_layout.addWidget(dhcp_label)
-        self.camera_dhcp_checkbox = QCheckBox("Enable DHCP (auto-assign IP)")
-        self.camera_dhcp_checkbox.setStyleSheet("""
-            QCheckBox {
-                color: #ffffff;
-                font-size: 13px;
-            }
-            QCheckBox::indicator {
-                width: 20px;
-                height: 20px;
-                border: 2px solid #2a2a38;
-                border-radius: 4px;
-                background-color: #1a1a24;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #FF9500;
-                border-color: #FF9500;
-            }
-        """)
-        self.camera_dhcp_checkbox.toggled.connect(self._on_dhcp_toggled)
-        self.camera_dhcp_checkbox.toggled.connect(self._on_form_changed)
-        dhcp_layout.addWidget(self.camera_dhcp_checkbox)
-        dhcp_layout.addStretch()
-        network_layout.addLayout(dhcp_layout)
-        
-        # Auto-fill from network button
-        autofill_btn = QPushButton("🔧 Auto-fill from eth0")
-        autofill_btn.setFixedHeight(36)
-        autofill_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: 1px solid #3a3a48;
-                border-radius: 6px;
-                color: #ffffff;
-                font-size: 12px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #3a3a48;
-                border-color: #FF9500;
-            }
-        """)
-        autofill_btn.clicked.connect(self._autofill_network_settings)
-        network_layout.addWidget(autofill_btn)
-        
-        manual_layout.addWidget(network_group)
-        
-        # Add spacing
-        manual_layout.addSpacing(20)
-        
-        # Form validation message
-        self.form_error_label = QLabel("")
-        self.form_error_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 4px 0;")
-        self.form_error_label.hide()
-        manual_layout.addWidget(self.form_error_label)
-        
-        # Connection test status
-        self.test_status_label = QLabel("")
-        self.test_status_label.setStyleSheet("font-size: 11px; padding: 4px 0;")
-        self.test_status_label.hide()
-        manual_layout.addWidget(self.test_status_label)
-        
-        # Add manual form container to main layout (initially hidden)
-        self.manual_form_container.hide()
-        add_camera_layout.addWidget(self.manual_form_container)
-        
-        # Buttons container (separate from form, always at bottom)
-        self.manual_buttons_container = QWidget()
-        btn_layout = QHBoxLayout(self.manual_buttons_container)
-        btn_layout.setSpacing(8)
-        btn_layout.setContentsMargins(0, 12, 0, 20)
-        
-        # Test button
-        self.test_camera_btn = QPushButton("Test Connection")
-        self.test_camera_btn.setFixedHeight(44)
-        self.test_camera_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: 2px solid #3a3a48;
-                border-radius: 8px;
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                border-color: #FF9500;
-                background-color: #3a3a48;
-            }
-            QPushButton:disabled {
-                background-color: #1a1a24;
-                border-color: #2a2a38;
-                color: #666676;
-            }
-        """)
-        self.test_camera_btn.clicked.connect(self._test_camera)
-        btn_layout.addWidget(self.test_camera_btn)
-        
-        # Save button
-        self.save_camera_btn = QPushButton("Save Camera")
-        self.save_camera_btn.setFixedHeight(44)
-        self.save_camera_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9500;
-                border: 2px solid #FF9500;
-                border-radius: 8px;
-                color: #0a0a0f;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #CC7700;
-                border-color: #CC7700;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a38;
-                border-color: #2a2a38;
-                color: #888898;
-            }
-        """)
-        self.save_camera_btn.clicked.connect(self._save_camera)
-        btn_layout.addWidget(self.save_camera_btn)
-        
-        # Cancel edit button
-        self.cancel_edit_btn = QPushButton("Cancel")
-        self.cancel_edit_btn.setFixedHeight(44)
-        self.cancel_edit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ef4444;
-                border: 2px solid #ef4444;
-                border-radius: 8px;
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #cc3333;
-                border-color: #cc3333;
-            }
-        """)
-        self.cancel_edit_btn.clicked.connect(self._cancel_edit)
-        self.cancel_edit_btn.hide()
-        btn_layout.addWidget(self.cancel_edit_btn)
-        
-        # Hidden buttons for compatibility
-        self.clear_form_btn = QPushButton()
-        self.clear_form_btn.hide()
-        self.defaults_btn = QPushButton()
-        self.defaults_btn.hide()
-        
-        # Add buttons container (initially hidden, shown with form)
-        self.manual_buttons_container.hide()
-        add_camera_layout.addWidget(self.manual_buttons_container)
-        
-        layout.addWidget(self.add_camera_group)
-        layout.addStretch()
-        
-        return panel
     
     def _create_camera_list_panel(self, compact: bool = False) -> QWidget:
         """Create camera list panel with search and bulk operations.
@@ -1897,425 +1769,6 @@ class CameraPage(QWidget):
         parts = ip.split('.')
         return all(0 <= int(part) <= 255 for part in parts)
     
-    def _on_form_changed(self):
-        """Handle form field changes"""
-        self._form_has_changes = True
-    
-    def _toggle_manual_form(self, checked: bool):
-        """Toggle manual form visibility"""
-        if checked:
-            self.manual_form_container.show()
-            self.manual_buttons_container.show()
-        else:
-            self.manual_form_container.hide()
-            self.manual_buttons_container.hide()
-    
-    def _toggle_password_visibility(self, checked: bool):
-        """Toggle password visibility"""
-        if checked:
-            self.camera_pass_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.password_toggle.setText("🙈")
-        else:
-            self.camera_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.password_toggle.setText("👁")
-    
-    def _populate_atem_inputs(self):
-        """Populate ATEM input dropdown - deprecated, ATEM removed from Add Camera form"""
-        # This method is kept for compatibility but does nothing
-        # ATEM mapping is only available in Configured cameras edit form
-        pass
-    
-    def _get_selected_atem_input(self) -> int:
-        """Get the currently selected ATEM input value - deprecated"""
-        # ATEM removed from Add Camera form, always return 0
-        return 0
-    
-    def _set_atem_input_by_value(self, value: int):
-        """Set the ATEM combo box - deprecated"""
-        # ATEM removed from Add Camera form, do nothing
-        pass
-    
-    def _use_defaults(self):
-        """Reset form to Panasonic defaults"""
-        self.camera_user_input.setText("admin")
-        self.camera_pass_input.setText("12345")
-        self._on_form_changed()
-    
-    def _discover_cameras(self):
-        """Discover cameras on the network using background thread"""
-        if self._discovery_worker and self._discovery_worker.isRunning():
-            return
-        
-        # Clear UI
-        for card in list(self._discovered_cards.values()):
-            card.deleteLater()
-        self._discovered_cards.clear()
-        self._discovered_cameras = []
-        
-        # Show empty state initially
-        self.discovery_empty_label.show()
-        self.discovery_empty_label.setText("🔍 Searching network for Panasonic cameras...")
-        self.discovery_empty_label.setStyleSheet("color: #FF9500; font-size: 11px; padding: 20px;")
-        
-        # Update UI state
-        self.discover_btn.setEnabled(False)
-        self.discover_btn.setText("⏳ Scanning...")
-        self.discovery_status.setText("🔍 Searching network for Panasonic cameras...")
-        self.discovery_status.setStyleSheet("color: #FF9500; font-size: 12px; padding: 4px;")
-        self.discovery_progress.show()
-        self.discovery_progress.setValue(0)
-        
-        # Get eth0 IP for discovery
-        network_info = self._get_eth0_network_info()
-        eth0_ip = network_info.get('ip') if network_info else None
-        
-        # Create and start worker thread (always use eth0)
-        self._discovery_worker = DiscoveryWorker(adapter_ip=eth0_ip)
-        self._discovery_worker.camera_found.connect(self._on_camera_discovered)
-        self._discovery_worker.progress.connect(self._on_discovery_progress)
-        self._discovery_worker.progress_value.connect(self.discovery_progress.setValue)
-        self._discovery_worker.finished_signal.connect(self._on_discovery_finished)
-        self._discovery_worker.start()
-    
-    @pyqtSlot(object)
-    def _on_camera_discovered(self, camera: DiscoveredCamera):
-        """Handle discovered camera from worker thread - show in real-time"""
-        # Check if already in list
-        if camera.ip_address in self._discovered_cards:
-            return
-        
-        # Hide empty state when first camera is found
-        if len(self._discovered_cameras) == 0:
-            self.discovery_empty_label.hide()
-        
-        self._discovered_cameras.append(camera)
-        
-        # Create and add card
-        # Get network info from eth0
-        network_info = self._get_eth0_network_info()
-        card = DiscoveredCameraCard(camera, network_info=network_info)
-        card.add_clicked.connect(self._on_discovered_card_add_clicked)
-        card.identify_clicked.connect(self._on_identify_camera)
-        card.fix_network_clicked.connect(self._on_fix_network_clicked)
-        self._discovered_cards[camera.ip_address] = card
-        
-        # Add card to layout (before empty state if it exists)
-        insert_index = self.discovered_layout.indexOf(self.discovery_empty_label)
-        if insert_index >= 0:
-            self.discovered_layout.insertWidget(insert_index, card)
-        else:
-            self.discovered_layout.addWidget(card)
-        
-        # Fetch thumbnail for this camera in background
-        self._fetch_discovery_thumbnail(camera.ip_address, card)
-        
-        # Update status
-        count = len(self._discovered_cameras)
-        status = getattr(camera, 'status', 'Unknown')
-        if status == "Auth Required":
-            self.discovery_status.setText(f"✅ Found {count} camera(s) - Some require authentication")
-            self.discovery_status.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
-        else:
-            self.discovery_status.setText(f"✅ Found {count} camera(s)...")
-            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
-    
-    @pyqtSlot(str)
-    def _on_discovery_progress(self, message: str):
-        """Handle progress update from worker thread"""
-        self.discovery_status.setText(message)
-        QApplication.processEvents()
-    
-    @pyqtSlot(int)
-    def _on_discovery_finished(self, count: int):
-        """Handle discovery completion"""
-        self.discover_btn.setEnabled(True)
-        self.discover_btn.setText("🔍  Scan Network")
-        self.discovery_progress.setValue(100)
-        QTimer.singleShot(1000, lambda: self.discovery_progress.hide())
-        
-        if count == 0:
-            self.discovery_status.setText("❌ No cameras found")
-            self.discovery_status.setStyleSheet("color: #ef4444; font-size: 12px; padding: 4px;")
-            self.discovery_empty_label.show()
-            self.discovery_empty_label.setText(
-                "❌ No Panasonic cameras found on network.\n\n"
-                "Troubleshooting tips:\n"
-                "• Ensure cameras are on the same network\n"
-                "• Check firewall settings\n"
-                "• Verify cameras support Panasonic Easy IP protocol"
-            )
-            self.discovery_empty_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 20px;")
-        else:
-            self.discovery_status.setText(f"✅ Discovery complete: Found {count} camera(s)")
-            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
-            # Empty state should already be hidden if cameras were found
-    
-    def _on_identify_camera(self, ip_address: str):
-        """Handle identify camera button - make LED blink"""
-        from src.camera.discovery import CameraDiscovery
-        
-        # Get credentials from form if available
-        username = self.camera_user_input.text().strip() or "admin"
-        password = self.camera_pass_input.text().strip() or "12345"
-        
-        # Update status
-        self.discovery_status.setText(f"💡 Identifying camera at {ip_address}...")
-        self.discovery_status.setStyleSheet("color: #eab308; font-size: 12px; padding: 4px;")
-        
-        # Run identify in background
-        def identify_task():
-            success = CameraDiscovery.identify_camera(ip_address, username, password, duration=5)
-            return success
-        
-        def on_identify_complete(future):
-            try:
-                success = future.result()
-                if success:
-                    QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, True))
-                else:
-                    QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, False))
-            except:
-                QTimer.singleShot(0, lambda: self._show_identify_result(ip_address, False))
-        
-        import concurrent.futures
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(identify_task)
-        future.add_done_callback(on_identify_complete)
-    
-    def _show_identify_result(self, ip_address: str, success: bool):
-        """Show result of identify command"""
-        if success:
-            self.discovery_status.setText(f"💡 Camera {ip_address} LED is blinking for 5 seconds")
-            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
-        else:
-            self.discovery_status.setText(f"⚠️ Could not identify camera {ip_address}")
-            self.discovery_status.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
-        
-        # Clear status after a few seconds
-        QTimer.singleShot(6000, lambda: self._reset_discovery_status())
-    
-    def _reset_discovery_status(self):
-        """Reset discovery status to default"""
-        count = len(self._discovered_cameras)
-        if count > 0:
-            self.discovery_status.setText(f"✅ {count} camera(s) found")
-            self.discovery_status.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
-        else:
-            self.discovery_status.setText("Ready to scan or add manually")
-            self.discovery_status.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
-    
-    def _fetch_discovery_thumbnail(self, ip_address: str, card: 'DiscoveredCameraCard'):
-        """Fetch thumbnail for discovered camera in background"""
-        from src.camera.discovery import CameraDiscovery
-        from PyQt6.QtGui import QPixmap, QImage
-        
-        def fetch_task():
-            username = "admin"
-            password = "12345"
-            jpeg_data = CameraDiscovery.get_camera_thumbnail(ip_address, username, password, (160, 90))
-            return jpeg_data
-        
-        def on_fetch_complete(future):
-            try:
-                jpeg_data = future.result()
-                if jpeg_data:
-                    # Convert to QPixmap on main thread
-                    QTimer.singleShot(0, lambda: self._set_card_thumbnail(card, jpeg_data))
-            except:
-                pass
-        
-        import concurrent.futures
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(fetch_task)
-        future.add_done_callback(on_fetch_complete)
-    
-    def _set_card_thumbnail(self, card: 'DiscoveredCameraCard', jpeg_data: bytes):
-        """Set thumbnail on card (must be called from main thread)"""
-        from PyQt6.QtGui import QPixmap, QImage
-        
-        try:
-            qimage = QImage.fromData(jpeg_data)
-            if not qimage.isNull():
-                pixmap = QPixmap.fromImage(qimage)
-                card.set_thumbnail(pixmap)
-        except Exception as e:
-            print(f"[CameraPage] Error setting thumbnail: {e}")
-    
-    def _on_discovered_card_add_clicked(self, camera: DiscoveredCamera):
-        """Handle add button click on discovered camera card"""
-        self._add_discovered_camera(camera)
-    
-    def _on_fix_network_clicked(self, camera: DiscoveredCamera):
-        """Handle fix network button click on discovered camera card"""
-        try:
-            from .network_fix_dialog import NetworkFixDialog
-        except ImportError:
-            QMessageBox.warning(self, "Error", "Network fix dialog not available")
-            return
-        
-        network_info = self._get_eth0_network_info()
-        if not network_info:
-            QMessageBox.warning(self, "Error", "Could not detect eth0 network settings")
-            return
-        
-        dialog = NetworkFixDialog(camera, network_info, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            # Network was changed, refresh discovery
-            QTimer.singleShot(2000, self._discover_cameras)  # Wait 2 seconds for camera to reboot
-    
-    def _add_discovered_camera(self, camera: DiscoveredCamera):
-        """Add discovered camera to form with visual feedback"""
-        self.camera_name_input.setText(camera.name or camera.model or "Camera")
-        self.camera_ip_input.setText(camera.ip_address)
-        self.camera_user_input.setText("admin")
-        self.camera_pass_input.setText("12345")  # Panasonic default
-        
-        # Auto-fill network settings from eth0 if available
-        network_info = self._get_eth0_network_info()
-        if network_info:
-            if network_info.get('subnet'):
-                self.camera_subnet_input.setCurrentText(network_info['subnet'])
-            if network_info.get('gateway'):
-                self.camera_gateway_input.setText(network_info['gateway'])
-        
-        # Highlight fields that were auto-filled
-        self._highlight_auto_filled_fields()
-        self._validate_form()
-    
-    def _highlight_auto_filled_fields(self):
-        """Temporarily highlight auto-filled fields"""
-        # Flash effect could be added here with QPropertyAnimation
-        pass
-    
-    def _test_camera(self):
-        """Test camera connection from form with live status"""
-        ip = self.camera_ip_input.text().strip()
-        if not ip:
-            self.test_status_label.setText("❌ Please enter an IP address")
-            self.test_status_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 4px;")
-            self.test_status_label.show()
-            return
-        
-        if not self._is_valid_ip(ip):
-            self.test_status_label.setText("❌ Invalid IP address format")
-            self.test_status_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 4px;")
-            self.test_status_label.show()
-            return
-        
-        # Disable test button during test
-        self.test_camera_btn.setEnabled(False)
-        self.test_camera_btn.setText("⏳ Testing...")
-        self.test_status_label.setText("🔄 Testing connection...")
-        self.test_status_label.setStyleSheet("color: #FF9500; font-size: 11px; padding: 4px;")
-        self.test_status_label.show()
-        
-        port = 80  # Default port
-        username = self.camera_user_input.text() or "admin"
-        password = self.camera_pass_input.text() or "12345"
-        
-        from ..camera.stream import CameraStream, StreamConfig
-        
-        config = StreamConfig(
-            ip_address=ip,
-            port=port,
-            username=username,
-            password=password
-        )
-        
-        # Test in background thread
-        def test_complete(success: bool, message: str):
-            self.test_camera_btn.setEnabled(True)
-            self.test_camera_btn.setText("🔌 Test")
-            
-            if success:
-                self.test_status_label.setText(f"✅ Connection successful! {message}")
-                self.test_status_label.setStyleSheet("color: #22c55e; font-size: 11px; padding: 4px;")
-            else:
-                # Provide specific error messages
-                error_msg = message
-                if "timeout" in message.lower():
-                    error_msg = "Connection timeout - Check network and IP address"
-                elif "401" in message or "authentication" in message.lower():
-                    error_msg = "Authentication failed - Check username/password"
-                elif "refused" in message.lower():
-                    error_msg = "Connection refused - Check port number"
-                else:
-                    error_msg = f"Connection failed: {message}"
-                
-                self.test_status_label.setText(f"❌ {error_msg}")
-                self.test_status_label.setStyleSheet("color: #ef4444; font-size: 11px; padding: 4px;")
-        
-        # Run test in thread
-        def run_test():
-            stream = CameraStream(config)
-            success, message = stream.test_connection()
-            QTimer.singleShot(0, lambda: test_complete(success, message))
-        
-        import threading
-        thread = threading.Thread(target=run_test, daemon=True)
-        thread.start()
-    
-    def _save_camera(self):
-        """Save camera configuration"""
-        name = self.camera_name_input.text().strip()
-        ip = self.camera_ip_input.text().strip()
-        
-        if not name or not ip:
-            return
-        
-        port = 80  # Default port
-        username = self.camera_user_input.text() or "admin"
-        password = self.camera_pass_input.text() or "12345"
-        
-        if self._editing_camera_id is not None:
-            # Update existing camera
-            camera = CameraConfig(
-                id=self._editing_camera_id,
-                name=name,
-                ip_address=ip,
-                port=port,
-                username=username,
-                password=password
-            )
-            self.settings.update_camera(camera)
-            
-            # No ATEM mapping in Add Camera form
-            
-            self._editing_camera_id = None
-            self.cancel_edit_btn.hide()
-            self.save_camera_btn.setText("Save Camera")
-        else:
-            # Add new camera
-            if len(self.settings.cameras) >= 30:
-                QMessageBox.warning(self, "Error", "Maximum 30 cameras allowed")
-                return
-            
-            # Generate new ID
-            existing_ids = [c.id for c in self.settings.cameras]
-            new_id = 1
-            while new_id in existing_ids:
-                new_id += 1
-            
-            camera = CameraConfig(
-                id=new_id,
-                name=name,
-                ip_address=ip,
-                port=port,
-                username=username,
-                password=password
-            )
-            self.settings.add_camera(camera)
-            
-            # No ATEM mapping in Add Camera form
-        
-        self.settings.save()
-        self._refresh_camera_list()
-        self._clear_camera_form()
-        self.settings_changed.emit()
-        
-        # Show success feedback
-        QMessageBox.information(self, "Success", f"Camera '{name}' saved successfully!")
-    
     def _edit_camera(self, camera_id: int):
         """Edit existing camera - show inline edit form"""
         camera = self.settings.get_camera(camera_id)
@@ -2585,388 +2038,3 @@ class CameraPage(QWidget):
             pass
         return ""
     
-    def _create_network_management_panel(self) -> QGroupBox:
-        """Create network management panel with diagnostics and tools"""
-        network_group = QGroupBox("🔧 Network Management")
-        network_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 16px;
-                font-weight: 600;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
-                margin-top: 12px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px;
-            }
-        """)
-        network_layout = QVBoxLayout(network_group)
-        network_layout.setSpacing(12)
-        network_layout.setContentsMargins(16, 16, 16, 16)
-        
-        # Initialize network manager
-        self.network_manager = NetworkManager()
-        
-        # Network info display
-        network_info_frame = QFrame()
-        network_info_frame.setStyleSheet("""
-            QFrame {
-                background-color: #1a1a24;
-                border: 1px solid #2a2a38;
-                border-radius: 6px;
-            }
-        """)
-        network_info_layout = QVBoxLayout(network_info_frame)
-        network_info_layout.setContentsMargins(12, 12, 12, 12)
-        network_info_layout.setSpacing(6)
-        
-        info_title = QLabel("Network Interface (eth0)")
-        info_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff;")
-        network_info_layout.addWidget(info_title)
-        
-        self.network_info_label = QLabel("Loading...")
-        self.network_info_label.setStyleSheet("font-size: 11px; color: #888898;")
-        self.network_info_label.setWordWrap(True)
-        network_info_layout.addWidget(self.network_info_label)
-        
-        # Update network info
-        self._update_network_info_display()
-        
-        network_layout.addWidget(network_info_frame)
-        
-        # Diagnostics section
-        diagnostics_title = QLabel("Camera Diagnostics")
-        diagnostics_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
-        network_layout.addWidget(diagnostics_title)
-        
-        # IP input for diagnostics
-        diag_input_layout = QHBoxLayout()
-        diag_input_layout.setSpacing(8)
-        
-        self.diag_ip_input = QLineEdit()
-        self.diag_ip_input.setPlaceholderText("Camera IP address")
-        self.diag_ip_input.setFixedHeight(40)
-        self.diag_ip_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #1a1a24;
-                border: 2px solid #2a2a38;
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-size: 13px;
-                color: #FFFFFF;
-            }
-            QLineEdit:focus {
-                border-color: #FF9500;
-            }
-        """)
-        diag_input_layout.addWidget(self.diag_ip_input)
-        
-        self.run_diagnostics_btn = QPushButton("🔍 Run Diagnostics")
-        self.run_diagnostics_btn.setFixedHeight(40)
-        self.run_diagnostics_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9500;
-                border: none;
-                border-radius: 6px;
-                color: #0a0a0f;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #CC7700;
-            }
-            QPushButton:disabled {
-                background-color: #2a2a38;
-                color: #888898;
-            }
-        """)
-        self.run_diagnostics_btn.clicked.connect(self._run_camera_diagnostics)
-        diag_input_layout.addWidget(self.run_diagnostics_btn)
-        
-        network_layout.addLayout(diag_input_layout)
-        
-        # Diagnostics results display
-        self.diagnostics_results = QLabel("Enter IP address and click 'Run Diagnostics'")
-        self.diagnostics_results.setStyleSheet("""
-            font-size: 11px; 
-            color: #888898; 
-            padding: 8px;
-            background-color: #1a1a24;
-            border: 1px solid #2a2a38;
-            border-radius: 6px;
-        """)
-        self.diagnostics_results.setWordWrap(True)
-        self.diagnostics_results.setMinimumHeight(80)
-        network_layout.addWidget(self.diagnostics_results)
-        
-        # Port scan section
-        port_scan_title = QLabel("Network Port Scan")
-        port_scan_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
-        network_layout.addWidget(port_scan_title)
-        
-        port_scan_layout = QHBoxLayout()
-        port_scan_layout.setSpacing(8)
-        
-        # Get base IP for scanning
-        network_info = self._get_eth0_network_info()
-        base_ip = ""
-        if network_info and network_info.get('ip'):
-            ip_parts = network_info['ip'].split('.')
-            base_ip = '.'.join(ip_parts[:-1])
-        
-        self.port_scan_base_input = QLineEdit()
-        self.port_scan_base_input.setPlaceholderText("192.168.1")
-        self.port_scan_base_input.setText(base_ip)
-        self.port_scan_base_input.setFixedHeight(40)
-        self.port_scan_base_input.setStyleSheet(self.diag_ip_input.styleSheet())
-        port_scan_layout.addWidget(self.port_scan_base_input)
-        
-        self.scan_ports_btn = QPushButton("🔍 Scan Range")
-        self.scan_ports_btn.setFixedHeight(40)
-        self.scan_ports_btn.setStyleSheet(self.run_diagnostics_btn.styleSheet())
-        self.scan_ports_btn.clicked.connect(self._scan_network_range)
-        port_scan_layout.addWidget(self.scan_ports_btn)
-        
-        network_layout.addLayout(port_scan_layout)
-        
-        # Port scan results
-        self.port_scan_results = QLabel("Enter network base IP (e.g., 192.168.1) and click 'Scan Range'")
-        self.port_scan_results.setStyleSheet(self.diagnostics_results.styleSheet())
-        self.port_scan_results.setWordWrap(True)
-        self.port_scan_results.setMinimumHeight(60)
-        network_layout.addWidget(self.port_scan_results)
-        
-        # Backup/Restore section
-        backup_title = QLabel("Configuration Backup")
-        backup_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
-        network_layout.addWidget(backup_title)
-        
-        backup_layout = QHBoxLayout()
-        backup_layout.setSpacing(8)
-        
-        self.backup_configs_btn = QPushButton("💾 Backup Configs")
-        self.backup_configs_btn.setFixedHeight(40)
-        self.backup_configs_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2a38;
-                border: 2px solid #3a3a48;
-                border-radius: 6px;
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                border-color: #FF9500;
-                background-color: #3a3a48;
-            }
-        """)
-        self.backup_configs_btn.clicked.connect(self._backup_network_configs)
-        backup_layout.addWidget(self.backup_configs_btn)
-        
-        self.restore_configs_btn = QPushButton("📥 Restore Configs")
-        self.restore_configs_btn.setFixedHeight(40)
-        self.restore_configs_btn.setStyleSheet(self.backup_configs_btn.styleSheet())
-        self.restore_configs_btn.clicked.connect(self._restore_network_configs)
-        backup_layout.addWidget(self.restore_configs_btn)
-        
-        network_layout.addLayout(backup_layout)
-        
-        return network_group
-    
-    def _update_network_info_display(self):
-        """Update network info display"""
-        network_info = self._get_eth0_network_info()
-        if network_info:
-            info_text = f"IP: {network_info.get('ip', 'Unknown')}\n"
-            info_text += f"Subnet: {network_info.get('subnet', 'Unknown')}\n"
-            info_text += f"Gateway: {network_info.get('gateway', 'Unknown')}"
-            self.network_info_label.setText(info_text)
-        else:
-            self.network_info_label.setText("Could not detect network settings")
-    
-    def _run_camera_diagnostics(self):
-        """Run diagnostics on a camera IP"""
-        ip = self.diag_ip_input.text().strip()
-        if not ip:
-            QMessageBox.warning(self, "Error", "Please enter a camera IP address")
-            return
-        
-        if not self._is_valid_ip(ip):
-            QMessageBox.warning(self, "Error", "Invalid IP address format")
-            return
-        
-        self.run_diagnostics_btn.setEnabled(False)
-        self.run_diagnostics_btn.setText("⏳ Running...")
-        self.diagnostics_results.setText("Running diagnostics...")
-        self.diagnostics_results.setStyleSheet(self.diagnostics_results.styleSheet().replace("#888898", "#FF9500"))
-        
-        # Get credentials from form if available
-        username = "admin"
-        password = "12345"
-        if hasattr(self, 'camera_user_input') and self.camera_user_input:
-            username = self.camera_user_input.text().strip() or "admin"
-        if hasattr(self, 'camera_pass_input') and self.camera_pass_input:
-            password = self.camera_pass_input.text().strip() or "12345"
-        
-        # Run diagnostics in background thread
-        def run_diagnostics():
-            diagnostics = self.network_manager.run_diagnostics(ip, username, password)
-            QTimer.singleShot(0, lambda: self._display_diagnostics_results(diagnostics))
-        
-        import threading
-        thread = threading.Thread(target=run_diagnostics, daemon=True)
-        thread.start()
-    
-    def _display_diagnostics_results(self, diagnostics: NetworkDiagnostics):
-        """Display diagnostics results"""
-        self.run_diagnostics_btn.setEnabled(True)
-        self.run_diagnostics_btn.setText("🔍 Run Diagnostics")
-        
-        results_text = f"<b>Diagnostics for {diagnostics.ip_address}</b><br><br>"
-        
-        # Ping results
-        if diagnostics.ping_success:
-            results_text += f"✅ Ping: {diagnostics.ping_time_ms:.1f} ms<br>"
-        else:
-            results_text += f"❌ Ping: Failed<br>"
-        
-        # HTTP results
-        if diagnostics.http_reachable:
-            status_text = "OK" if diagnostics.http_status_code == 200 else f"Code {diagnostics.http_status_code}"
-            results_text += f"✅ HTTP ({status_text}): {diagnostics.http_response_time_ms:.1f} ms<br>"
-        else:
-            results_text += f"❌ HTTP: Not reachable<br>"
-        
-        # Port results
-        results_text += "<br><b>Ports:</b><br>"
-        results_text += f"{'✅' if diagnostics.port_80_open else '❌'} Port 80 (HTTP)<br>"
-        results_text += f"{'✅' if diagnostics.port_554_open else '❌'} Port 554 (RTSP)<br>"
-        results_text += f"{'✅' if diagnostics.port_10669_open else '❌'} Port 10669 (Panasonic)<br>"
-        results_text += f"{'✅' if diagnostics.port_10670_open else '❌'} Port 10670 (Panasonic)<br>"
-        
-        if diagnostics.error_message:
-            results_text += f"<br><span style='color: #ef4444;'>{diagnostics.error_message}</span>"
-        
-        self.diagnostics_results.setText(results_text)
-        self.diagnostics_results.setStyleSheet(self.diagnostics_results.styleSheet().replace("#FF9500", "#888898"))
-    
-    def _scan_network_range(self):
-        """Scan network range for cameras"""
-        base_ip = self.port_scan_base_input.text().strip()
-        if not base_ip:
-            QMessageBox.warning(self, "Error", "Please enter network base IP (e.g., 192.168.1)")
-            return
-        
-        # Validate base IP format
-        parts = base_ip.split('.')
-        if len(parts) != 3:
-            QMessageBox.warning(self, "Error", "Invalid network base IP format. Use format like '192.168.1'")
-            return
-        
-        self.scan_ports_btn.setEnabled(False)
-        self.scan_ports_btn.setText("⏳ Scanning...")
-        self.port_scan_results.setText("Scanning network range...")
-        self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#888898", "#FF9500"))
-        
-        # Run scan in background thread
-        def run_scan():
-            results = self.network_manager.scan_network_range(base_ip, start=1, end=254)
-            QTimer.singleShot(0, lambda: self._display_port_scan_results(results))
-        
-        import threading
-        thread = threading.Thread(target=run_scan, daemon=True)
-        thread.start()
-    
-    def _display_port_scan_results(self, results: List[Dict]):
-        """Display port scan results"""
-        self.scan_ports_btn.setEnabled(True)
-        self.scan_ports_btn.setText("🔍 Scan Range")
-        
-        if not results:
-            self.port_scan_results.setText("No devices found with open ports (80, 554)")
-            self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#FF9500", "#888898"))
-            return
-        
-        results_text = f"<b>Found {len(results)} device(s):</b><br><br>"
-        for result in results[:10]:  # Show first 10
-            ip = result['ip']
-            ports = result.get('ports_open', [])
-            port_str = ', '.join(map(str, ports))
-            results_text += f"✅ {ip} - Ports: {port_str}<br>"
-        
-        if len(results) > 10:
-            results_text += f"<br>... and {len(results) - 10} more"
-        
-        self.port_scan_results.setText(results_text)
-        self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#FF9500", "#888898"))
-    
-    def _backup_network_configs(self):
-        """Backup camera network configurations"""
-        filepath, _ = QFileDialog.getSaveFileName(
-            self,
-            "Backup Network Configurations",
-            "camera_network_backup.json",
-            "JSON Files (*.json)"
-        )
-        
-        if not filepath:
-            return
-        
-        success = NetworkManager.backup_network_configs(self.settings.cameras, filepath)
-        if success:
-            QMessageBox.information(self, "Success", f"Network configurations backed up to:\n{filepath}")
-        else:
-            QMessageBox.warning(self, "Error", "Failed to backup network configurations")
-    
-    def _restore_network_configs(self):
-        """Restore camera network configurations"""
-        filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "Restore Network Configurations",
-            "",
-            "JSON Files (*.json)"
-        )
-        
-        if not filepath:
-            return
-        
-        backup_data = NetworkManager.restore_network_configs(filepath)
-        if not backup_data:
-            QMessageBox.warning(self, "Error", "Failed to restore network configurations")
-            return
-        
-        reply = QMessageBox.question(
-            self,
-            "Confirm Restore",
-            f"Restore {len(backup_data.get('cameras', []))} camera configuration(s)?\n\n"
-            "This will update existing cameras with matching IDs.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        
-        restored_count = 0
-        for camera_data in backup_data.get('cameras', []):
-            camera_id = camera_data.get('id')
-            if camera_id:
-                camera = self.settings.get_camera(camera_id)
-                if camera:
-                    # Update network settings
-                    camera.ip_address = camera_data.get('ip_address', camera.ip_address)
-                    camera.port = camera_data.get('port', camera.port)
-                    camera.username = camera_data.get('username', camera.username)
-                    camera.password = camera_data.get('password', camera.password)
-                    self.settings.update_camera(camera)
-                    restored_count += 1
-        
-        if restored_count > 0:
-            self.settings.save()
-            self._refresh_camera_list()
-            self.settings_changed.emit()
-            QMessageBox.information(self, "Success", f"Restored {restored_count} camera configuration(s)")
-        else:
-            QMessageBox.warning(self, "Warning", "No matching cameras found to restore")
