@@ -49,18 +49,21 @@ class TouchScrollArea(QScrollArea):
             try:
                 touch_points = event.touchPoints()
                 if touch_points and len(touch_points) > 0:
-                    self._last_touch_pos = touch_points[0].pos()
-                    self._drag_start_pos = self._last_touch_pos
+                    touch_point = touch_points[0]
+                    pos = touch_point.pos()
+                    self._last_touch_pos = pos
+                    self._drag_start_pos = pos
                     self._is_dragging = False
+                    # Don't accept here - let it propagate to child widgets first
             except Exception:
                 pass
-            # Let event propagate normally
             return super().event(event)
         elif event.type() == QEvent.Type.TouchUpdate:
             try:
                 touch_points = event.touchPoints()
                 if self._last_touch_pos and touch_points and len(touch_points) > 0:
-                    current_pos = touch_points[0].pos()
+                    touch_point = touch_points[0]
+                    current_pos = touch_point.pos()
                     delta = current_pos - self._last_touch_pos
                     
                     # Check if we've moved enough to start dragging
@@ -71,27 +74,32 @@ class TouchScrollArea(QScrollArea):
                     
                     # Only scroll if dragging (not clicking on interactive widgets)
                     if self._is_dragging:
-                        widget_at_pos = self.childAt(current_pos)
+                        # Map to widget coordinates
+                        widget_at_pos = self.widget().childAt(self.mapTo(self.widget(), current_pos)) if self.widget() else None
                         if not self._is_interactive_widget(widget_at_pos):
                             # Determine scroll direction based on movement
                             abs_delta_x = abs(delta.x())
                             abs_delta_y = abs(delta.y())
                             
                             # Scroll in the dominant direction
-                            if abs_delta_x > abs_delta_y:
+                            if abs_delta_y > abs_delta_x:
+                                # Vertical scrolling (most common)
+                                v_scrollbar = self.verticalScrollBar()
+                                if v_scrollbar:
+                                    new_value = v_scrollbar.value() - int(delta.y())
+                                    v_scrollbar.setValue(new_value)
+                                    event.accept()
+                                    self._last_touch_pos = current_pos
+                                    return True
+                            elif abs_delta_x > abs_delta_y:
                                 # Horizontal scrolling
                                 h_scrollbar = self.horizontalScrollBar()
                                 if h_scrollbar:
-                                    h_scrollbar.setValue(h_scrollbar.value() - int(delta.x()))
-                            else:
-                                # Vertical scrolling
-                                v_scrollbar = self.verticalScrollBar()
-                                if v_scrollbar:
-                                    v_scrollbar.setValue(v_scrollbar.value() - int(delta.y()))
-                            
-                            self._last_touch_pos = current_pos
-                            event.accept()
-                            return True
+                                    new_value = h_scrollbar.value() - int(delta.x())
+                                    h_scrollbar.setValue(new_value)
+                                    event.accept()
+                                    self._last_touch_pos = current_pos
+                                    return True
             except Exception:
                 pass
             return super().event(event)
@@ -105,13 +113,14 @@ class TouchScrollArea(QScrollArea):
         if event.type() == QEvent.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 try:
-                    self._last_touch_pos = event.pos()
-                    self._drag_start_pos = event.pos()
+                    pos = event.pos()
+                    self._last_touch_pos = pos
+                    self._drag_start_pos = pos
                     self._is_dragging = False
                 except Exception:
                     pass
         elif event.type() == QEvent.Type.MouseMove:
-            if self._last_touch_pos:
+            if self._last_touch_pos and event.buttons() & Qt.MouseButton.LeftButton:
                 try:
                     current_pos = event.pos()
                     
@@ -123,7 +132,7 @@ class TouchScrollArea(QScrollArea):
                     
                     # Only scroll if dragging (not clicking on interactive widgets)
                     if self._is_dragging:
-                        widget_at_pos = self.childAt(current_pos)
+                        widget_at_pos = self.widget().childAt(self.mapTo(self.widget(), current_pos)) if self.widget() else None
                         if not self._is_interactive_widget(widget_at_pos):
                             delta = current_pos - self._last_touch_pos
                             
@@ -132,24 +141,29 @@ class TouchScrollArea(QScrollArea):
                             abs_delta_y = abs(delta.y())
                             
                             # Scroll in the dominant direction
-                            if abs_delta_x > abs_delta_y:
+                            if abs_delta_y > abs_delta_x:
+                                # Vertical scrolling (most common)
+                                v_scrollbar = self.verticalScrollBar()
+                                if v_scrollbar:
+                                    new_value = v_scrollbar.value() - int(delta.y())
+                                    v_scrollbar.setValue(new_value)
+                                    self._last_touch_pos = current_pos
+                                    return True
+                            elif abs_delta_x > abs_delta_y:
                                 # Horizontal scrolling
                                 h_scrollbar = self.horizontalScrollBar()
                                 if h_scrollbar:
-                                    h_scrollbar.setValue(h_scrollbar.value() - int(delta.x()))
-                            else:
-                                # Vertical scrolling
-                                v_scrollbar = self.verticalScrollBar()
-                                if v_scrollbar:
-                                    v_scrollbar.setValue(v_scrollbar.value() - int(delta.y()))
-                            
-                            self._last_touch_pos = current_pos
+                                    new_value = h_scrollbar.value() - int(delta.x())
+                                    h_scrollbar.setValue(new_value)
+                                    self._last_touch_pos = current_pos
+                                    return True
                 except Exception:
                     pass
         elif event.type() == QEvent.Type.MouseButtonRelease:
-            self._last_touch_pos = None
-            self._drag_start_pos = None
-            self._is_dragging = False
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._last_touch_pos = None
+                self._drag_start_pos = None
+                self._is_dragging = False
         
         return super().event(event)
 

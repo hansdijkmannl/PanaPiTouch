@@ -1,16 +1,12 @@
 """
 Bitfocus Companion Page
 
-Embedded web view for Bitfocus Companion configuration.
-With update detection and Pi OS keyboard support.
+Embedded web view for Bitfocus Companion configuration with update detection.
 """
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox
 from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess, Qt, QEvent
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings
-
-import subprocess
-import shutil
 
 
 class TouchWebEngineView(QWebEngineView):
@@ -37,7 +33,6 @@ class CompanionPage(QWidget):
     
     Features:
     - Update detection (emits signal when update available)
-    - Pi OS keyboard support for web input fields (triggers system keyboard on focus)
     """
     
     update_available = pyqtSignal(str)  # version string
@@ -49,22 +44,12 @@ class CompanionPage(QWidget):
         self._update_version = None
         self._update_check_timer = None
         self._update_process = None
-        self._web_input_focused = False
-        self._current_input_type = "text"
-        self._current_input_id = None
-        self._keyboard_process = None
-        self._keyboard_command = self._find_keyboard_command()
-        if self._keyboard_command:
-            print(f"Companion page: Found keyboard command: {self._keyboard_command}")
-        else:
-            print("Companion page: No keyboard command found - OSK will not work")
         
         self._setup_ui()
         self._start_update_detection()
-        self._start_input_focus_detection()
     
     def _setup_ui(self):
-        """Setup the page UI - web view with keyboard overlay"""
+        """Setup the page UI"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -91,243 +76,6 @@ class CompanionPage(QWidget):
         self.web_view.loadFinished.connect(self._on_load_finished)
         
         layout.addWidget(self.web_view)
-    
-    def _find_keyboard_command(self):
-        """Find available Pi OS keyboard command"""
-        # Try common keyboard commands in order of preference
-        keyboard_commands = [
-            'squeekboard',        # Preferred on Wayland Pi images
-            'matchbox-keyboard',  # Common on Raspberry Pi OS
-            'onboard',            # Alternative keyboard
-            'florence',           # Another alternative
-        ]
-        
-        # If squeekboard is running via D-Bus, prefer it even if binary isn't on PATH
-        if shutil.which('busctl'):
-            try:
-                result = subprocess.run(
-                    ['busctl', '--user', '--no-pager', '--no-legend', 'list'],
-                    capture_output=True, text=True, timeout=0.5
-                )
-                if result.returncode == 0 and 'sm.puri.OSK0' in result.stdout:
-                    return 'squeekboard'
-            except (subprocess.TimeoutExpired, subprocess.SubprocessError, Exception):
-                pass
-        
-        for cmd in keyboard_commands:
-            if shutil.which(cmd):
-                return cmd
-        
-        # Fall back to squeekboard if busctl exists (we'll try to start it)
-        if shutil.which('busctl'):
-            return 'squeekboard'
-        
-        return None
-    
-    def _start_input_focus_detection(self):
-        """Start periodic check for focused input fields in web page"""
-        self._input_focus_timer = QTimer(self)
-        self._input_focus_timer.timeout.connect(self._check_web_input_focus)
-        self._input_focus_timer.start(100)  # Check every 100ms for very responsive detection
-    
-    def _check_web_input_focus(self):
-        """Check if an input field is focused in the web page"""
-        js_code = """
-        (function() {
-            try {
-            var el = document.activeElement;
-                if (!el || !el.tagName) {
-                    return JSON.stringify({focused: false, reason: 'no active element'});
-                }
-                var tagName = el.tagName.toUpperCase();
-                var isInput = tagName === 'INPUT' || tagName === 'TEXTAREA';
-                var isContentEditable = el.contentEditable === 'true' || el.contentEditable === true || el.isContentEditable === true;
-                
-                if (isInput) {
-                    var inputType = (el.type || 'text').toLowerCase();
-                    var excludeTypes = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image', 'range'];
-                    if (excludeTypes.indexOf(inputType) !== -1 || tagName === 'SELECT') {
-                        return JSON.stringify({focused: false, reason: 'excluded type: ' + inputType});
-                }
-                    return JSON.stringify({focused: true, type: inputType, tag: tagName, id: el.id || '', name: el.name || ''});
-                }
-                
-                if (isContentEditable) {
-                    return JSON.stringify({focused: true, type: 'contenteditable', tag: tagName});
-                }
-                
-                return JSON.stringify({focused: false, reason: 'not input: ' + tagName});
-            } catch (e) {
-                return JSON.stringify({focused: false, reason: 'error: ' + e.message});
-            }
-        })();
-        """
-        try:
-            self.web_view.page().runJavaScript(js_code, self._on_input_focus_result)
-        except Exception as e:
-            print(f"Companion: Error checking web input focus: {e}")
-    
-    def _on_input_focus_result(self, result):
-        """Handle result of input focus check"""
-        import json
-        try:
-            if not result:
-                result = '{"focused": false}'
-            # Handle both string and dict results
-            if isinstance(result, str):
-                data = json.loads(result)
-            elif isinstance(result, dict):
-                data = result
-            else:
-                data = {"focused": False}
-        except Exception as e:
-            print(f"Companion: Error parsing result: {e}, result={result}, type={type(result)}")
-            data = {"focused": False}
-        
-        is_focused = data.get("focused", False)
-        
-        if is_focused:
-            if not self._web_input_focused:
-                self._web_input_focused = True
-                self._current_input_type = data.get("type", "text")
-                print(f"Companion: ✅ INPUT FOCUSED - type={self._current_input_type}, tag={data.get('tag')}, id={data.get('id')}")
-                # Show keyboard immediately
-                self._show_pi_keyboard()
-        else:
-            if self._web_input_focused:
-                self._web_input_focused = False
-                print(f"Companion: ❌ INPUT BLURRED - reason={data.get('reason', 'unknown')}")
-                # Hide keyboard with delay
-                QTimer.singleShot(500, self._hide_pi_keyboard)
-    
-    
-    def _show_pi_keyboard(self):
-        """Show Pi OS on-screen keyboard"""
-        if not self._keyboard_command:
-            print("No keyboard command available")
-            return  # No keyboard command available
-        
-        # Kill any existing keyboard process
-        self._hide_pi_keyboard()
-        
-        # Small delay to ensure previous keyboard is fully closed
-        QTimer.singleShot(100, self._actually_show_keyboard)
-    
-    def _actually_show_keyboard(self):
-        """Actually show the keyboard (called after delay)"""
-        if not self._keyboard_command:
-            print("Companion: ⚠️ No keyboard command available")
-            return
-        
-        print(f"Companion: 🔑 Attempting to show keyboard: {self._keyboard_command}")
-        
-        try:
-            if self._keyboard_command == 'squeekboard':
-                # Squeekboard uses sm.puri.OSK0 D-Bus interface
-                # Try user session first
-                result = subprocess.run(
-                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                    timeout=2, capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    print("Companion: ✅ Showed squeekboard via D-Bus (user)")
-                    return
-                else:
-                    print(f"Companion: User D-Bus failed: {result.stderr}")
-                    # Try system session
-                    result = subprocess.run(
-                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                        timeout=2, capture_output=True, text=True
-                    )
-                    if result.returncode == 0:
-                        print("Companion: ✅ Showed squeekboard via D-Bus (system)")
-                    else:
-                        print(f"Companion: ❌ squeekboard D-Bus error: {result.stderr}")
-                        # Fallback: try pkill and restart
-                        subprocess.run(['pkill', '-f', 'squeekboard'], 
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        QTimer.singleShot(500, lambda: subprocess.Popen(['squeekboard'], 
-                                                                       stdout=subprocess.DEVNULL, 
-                                                                       stderr=subprocess.DEVNULL))
-            elif self._keyboard_command == 'matchbox-keyboard':
-                # Kill any existing instance
-                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                QTimer.singleShot(200, self._start_matchbox_keyboard)
-            elif self._keyboard_command in ('onboard', 'florence'):
-                # Kill any existing instance
-                subprocess.run(['pkill', '-f', self._keyboard_command], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                QTimer.singleShot(200, self._start_keyboard_process)
-        except Exception as e:
-            print(f"Companion: ❌ Failed to show keyboard: {e}")
-    
-    def _start_matchbox_keyboard(self):
-        """Start matchbox-keyboard"""
-        try:
-            self._keyboard_process = subprocess.Popen(
-                [self._keyboard_command],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"Companion: ✅ Started {self._keyboard_command}")
-        except Exception as e:
-            print(f"Companion: ❌ Failed to start {self._keyboard_command}: {e}")
-    
-    def _start_keyboard_process(self):
-        """Start keyboard process"""
-        try:
-            self._keyboard_process = subprocess.Popen(
-                [self._keyboard_command],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"Companion: ✅ Started {self._keyboard_command}")
-        except Exception as e:
-            print(f"Companion: ❌ Failed to start {self._keyboard_command}: {e}")
-    
-    def _hide_pi_keyboard(self):
-        """Hide Pi OS on-screen keyboard"""
-        if self._keyboard_process:
-            try:
-                self._keyboard_process.terminate()
-                try:
-                    self._keyboard_process.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    self._keyboard_process.kill()
-                    self._keyboard_process.wait()
-            except Exception:
-                pass
-            finally:
-                self._keyboard_process = None
-        
-        try:
-            if self._keyboard_command == 'squeekboard':
-                # Squeekboard uses sm.puri.OSK0 D-Bus interface
-                # Try user session first
-                result = subprocess.run(
-                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
-                    timeout=2, capture_output=True, text=True
-                )
-                if result.returncode != 0:
-                    # Try system session
-                    subprocess.run(
-                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
-                        timeout=2, capture_output=True, text=True
-                    )
-            elif self._keyboard_command == 'matchbox-keyboard':
-                subprocess.run(['pkill', '-f', 'matchbox-keyboard'], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            elif self._keyboard_command in ('onboard', 'florence'):
-                subprocess.run(['pkill', '-f', self._keyboard_command], 
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except Exception as e:
-            print(f"Companion: Error hiding keyboard: {e}")
-    
-    def closeEvent(self, event):
-        """Clean up keyboard process on close"""
-        self._hide_pi_keyboard()
-        super().closeEvent(event)
     
     def _start_update_detection(self):
         """Start periodic check for update notifications in the page"""
@@ -527,14 +275,9 @@ exit 1
             QTimer.singleShot(1000, self._check_for_updates)
             # Inject touch scrolling support - inject immediately and retry
             self._inject_touch_support()
-            # Setup input focus listeners
-            QTimer.singleShot(500, self._setup_input_focus_listeners)
             # Also inject after delays to catch dynamic content
-            def inject_both():
-                self._inject_touch_support()
-                self._setup_input_focus_listeners()
-            QTimer.singleShot(2000, inject_both)
-            QTimer.singleShot(5000, inject_both)
+            QTimer.singleShot(2000, self._inject_touch_support)
+            QTimer.singleShot(5000, self._inject_touch_support)
     
     def _inject_touch_support(self):
         """Inject JavaScript for touch scrolling support"""
@@ -718,39 +461,6 @@ exit 1
             print("Companion: Injected touch scrolling support")
         except Exception as e:
             print(f"Companion: Failed to inject touch support: {e}")
-    
-    def _setup_input_focus_listeners(self):
-        """Setup direct event listeners for input focus/blur"""
-        js_code = """
-        (function() {
-            if (window._panapitouchInputListenersSetup) return;
-            window._panapitouchInputListenersSetup = true;
-            
-            function checkInput(el) {
-                if (!el || !el.tagName) return false;
-                var tag = el.tagName.toUpperCase();
-                if (tag !== 'INPUT' && tag !== 'TEXTAREA') return false;
-                if (tag === 'INPUT') {
-                    var type = (el.type || 'text').toLowerCase();
-                    var exclude = ['button', 'submit', 'reset', 'checkbox', 'radio', 'file', 'hidden', 'image', 'range'];
-                    if (exclude.indexOf(type) !== -1) return false;
-                }
-                return true;
-            }
-            
-            document.addEventListener('focusin', function(e) {
-                if (checkInput(e.target)) {
-                    console.log('PanaPiTouch: Input focused:', e.target.tagName, e.target.type);
-                }
-            }, true);
-            
-            console.log('PanaPiTouch: Input focus listeners setup');
-        })();
-        """
-        try:
-            self.web_view.page().runJavaScript(js_code)
-        except Exception as e:
-            print(f"Companion: Failed to setup input listeners: {e}")
     
     def set_url(self, url: str):
         """Set companion URL"""

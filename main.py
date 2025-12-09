@@ -32,18 +32,6 @@ os.environ.setdefault('QT_AUTO_SCREEN_SCALE_FACTOR', '0')
 os.environ.setdefault('QT_ENABLE_HIGHDPI_SCALING', '0')
 os.environ.pop('QT_SCALE_FACTOR', None)  # clear any forced scale
 
-# Enable system OSK (squeekboard) via Qt input method
-# On Wayland, Qt will automatically use the system input method when text fields get focus
-# This allows the Pi OS on-screen keyboard to appear automatically
-if os.environ.get('WAYLAND_DISPLAY'):
-    # On Wayland, let Qt use the default input method (squeekboard)
-    # Don't set QT_IM_MODULE - let Qt auto-detect
-    pass
-elif os.environ.get('DISPLAY'):
-    # On X11, we might need matchbox-keyboard
-    # But let's try to use the system default first
-    pass
-
 # IMPORTANT: QtWebEngineWidgets must be imported before QApplication
 from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401
 

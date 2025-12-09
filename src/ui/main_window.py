@@ -23,13 +23,10 @@ from .widgets import TouchScrollArea
 from .camera_page import CameraPage
 from .companion_page import CompanionPage
 from .joystick_widget import JoystickWidget
-# OSK disabled - using Pi OS built-in keyboard instead
-# from .keyboard_manager import KeyboardManager
 from .toast import ToastWidget
 from .styles import STYLESHEET, COLORS
 from ..core.logging_config import get_logger
 
-import shutil
 import subprocess
 
 logger = get_logger(__name__)
@@ -76,14 +73,9 @@ class MainWindow(QMainWindow):
         # Toast notification widget
         self.toast = ToastWidget(self)
         
-        # System OSK - disabled custom keyboard, using Pi OS OSK
-        
         self._setup_window()
         self._setup_ui()
         self._setup_connections()
-        
-        # System OSK will automatically appear when text fields get focus
-        # No custom implementation needed
         
         # Initialize ATEM connection if configured
         if self.settings.atem.enabled and self.settings.atem.ip_address:
@@ -104,7 +96,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PanaPiTouch - PTZ Camera Monitor")
         
         # Remove window decorations for fullscreen app look (no title bar, no borders)
-        # But allow keyboard to appear on top by not using WindowStaysOnTopHint
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         
         # Enable touch events on main window
@@ -2673,165 +2664,7 @@ class MainWindow(QMainWindow):
         else:
             super().keyPressEvent(event)
     
-    # --------------------------
-    # System OSK Support (Pi OS on-screen keyboard)
-    # --------------------------
-    # The system OSK (squeekboard) automatically appears when text fields get focus
-    # on Wayland. No custom implementation needed - Qt handles it via input method framework.
-    # No eventFilter needed - Qt's input method framework handles it automatically.
-    def _find_keyboard_command_OLD(self):
-        """Locate an available on-screen keyboard command."""
-        keyboard_commands = [
-            'squeekboard',        # Preferred on Wayland Pi images
-            'matchbox-keyboard',  # Common on Raspberry Pi OS
-            'onboard',            # Alternative keyboard
-            'florence',           # Another alternative
-        ]
-        
-        if shutil.which('busctl') and self._squeekboard_available():
-            return 'squeekboard'
-        
-        for cmd in keyboard_commands[1:]:
-            if shutil.which(cmd):
-                return cmd
-        
-        if shutil.which('busctl'):
-            return 'squeekboard'
-        
-        return None
-    
-    def _squeekboard_available_OLD(self) -> bool:
-        """Check if squeekboard is present on D-Bus."""
-        try:
-            result = subprocess.run(
-                ['busctl', '--user', '--no-pager', '--no-legend', 'list'],
-                capture_output=True, text=True, timeout=0.5
-            )
-            return result.returncode == 0 and 'sm.puri.OSK0' in result.stdout
-        except Exception:
-            return False
-    
-    def _show_keyboard_OLD(self):
-        """Show Pi OS on-screen keyboard - simplified and robust."""
-        if not self._keyboard_command:
-            logger.warning("Keyboard: No keyboard command available")
-            return
-        
-        logger.info(f"Keyboard: Attempting to show {self._keyboard_command}")
-        
-        try:
-            if self._keyboard_command == 'squeekboard':
-                # Try to lower our window slightly to allow keyboard to appear on top
-                # This is a workaround for Wayland compositor window stacking
-                try:
-                    # Temporarily lower window z-order (if possible)
-                    self.lower()
-                    QTimer.singleShot(100, lambda: self.raise_())
-                except Exception:
-                    pass
-                
-                # Call SetVisible via D-Bus
-                result = subprocess.run(
-                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                    timeout=1, capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    logger.info("Keyboard: ✅ SetVisible succeeded")
-                    # Verify it's actually visible and try to raise keyboard window
-                    QTimer.singleShot(200, self._verify_and_raise_keyboard)
-                else:
-                    logger.warning(f"Keyboard: SetVisible failed: {result.stderr}")
-                    # Fallback: try system session
-                    result2 = subprocess.run(
-                        ['busctl', 'call', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                        timeout=1, capture_output=True, text=True
-                    )
-                    if result2.returncode == 0:
-                        logger.info("Keyboard: ✅ SetVisible (system) succeeded")
-                        QTimer.singleShot(200, self._verify_and_raise_keyboard)
-            else:
-                # For other keyboards, just launch them
-                try:
-                    subprocess.run(['pkill', '-f', self._keyboard_command], 
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-                except Exception:
-                    pass
-                try:
-                    self._keyboard_process = subprocess.Popen(
-                        [self._keyboard_command],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        start_new_session=True
-                    )
-                    logger.info(f"Keyboard: ✅ {self._keyboard_command} launched")
-                except Exception as e:
-                    logger.error(f"Keyboard: ❌ Failed to launch {self._keyboard_command}: {e}")
-        except Exception as e:
-            logger.error(f"Keyboard: Error in _show_keyboard: {e}", exc_info=True)
-    
-    def _verify_and_raise_keyboard(self):
-        """Verify keyboard is visible and try to raise it above our window"""
-        try:
-            result = subprocess.run(
-                ['busctl', '--user', 'get-property', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'Visible'],
-                timeout=1, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                visible = 'true' in result.stdout.lower()
-                logger.info(f"Keyboard: Visible property = {visible}")
-                if visible:
-                    # Keyboard reports visible - try to ensure it's on top
-                    # On Wayland, we can't directly control z-order, but we can:
-                    # 1. Lower our window temporarily
-                    # 2. Call SetVisible again to trigger compositor to show keyboard
-                    try:
-                        self.lower()
-                        QTimer.singleShot(50, lambda: self.raise_())
-                        # Also call SetVisible again to ensure compositor shows it
-                        subprocess.run(
-                            ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                            timeout=0.5, capture_output=True, text=True
-                        )
-                        logger.info("Keyboard: Attempted to raise keyboard above app window")
-                    except Exception as e:
-                        logger.warning(f"Keyboard: Could not adjust window z-order: {e}")
-                else:
-                    # Not visible - retry
-                    logger.info("Keyboard: Not visible, retrying SetVisible...")
-                    subprocess.run(
-                        ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'true'],
-                        timeout=1, capture_output=True, text=True
-                    )
-        except Exception as e:
-            logger.warning(f"Keyboard: Could not verify visibility: {e}")
-    
     def closeEvent(self, event):
         """Clean up on close"""
         super().closeEvent(event)
-    
-    
-    def _hide_keyboard_OLD(self):
-        """Hide Pi OS on-screen keyboard - simplified."""
-        try:
-            if self._keyboard_command == 'squeekboard':
-                # Just hide via D-Bus - don't kill the process
-                subprocess.run(
-                    ['busctl', 'call', '--user', 'sm.puri.OSK0', '/sm/puri/OSK0', 'sm.puri.OSK0', 'SetVisible', 'b', 'false'],
-                    timeout=1, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-                )
-            elif self._keyboard_process:
-                # For other keyboards, terminate the process
-                try:
-                    self._keyboard_process.terminate()
-                    self._keyboard_process.wait(timeout=0.5)
-                except (subprocess.TimeoutExpired, ProcessLookupError):
-                    try:
-                        self._keyboard_process.kill()
-                        self._keyboard_process.wait()
-                    except Exception:
-                        pass
-                finally:
-                    self._keyboard_process = None
-        except Exception as e:
-            logger.warning(f"Keyboard: Error hiding: {e}")
 

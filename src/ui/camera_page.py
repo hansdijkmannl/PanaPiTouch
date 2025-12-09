@@ -5,6 +5,7 @@ Configuration for Panasonic PTZ cameras.
 """
 import re
 import socket
+from typing import List, Dict
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
@@ -18,6 +19,7 @@ from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
 from ..config.settings import Settings, CameraConfig
 from ..camera.discovery import CameraDiscovery, DiscoveredCamera
 from ..camera.stream import CameraStream, StreamConfig
+from ..network.manager import NetworkManager, NetworkDiagnostics
 from .widgets import TouchScrollArea
 
 
@@ -605,6 +607,7 @@ class CameraPage(QWidget):
         sections = [
             ("➕", "Add Camera"),
             ("📋", "Configured"),
+            ("🔧", "Network Management"),
         ]
         for idx, (icon, name) in enumerate(sections):
             # Create wrapper widget for Configured button to hold badge
@@ -665,6 +668,7 @@ class CameraPage(QWidget):
         self.content_stack.setStyleSheet("background-color: #0a0a0f;")
         self.content_stack.addWidget(self._create_add_content())
         self.content_stack.addWidget(self._create_configured_content())
+        self.content_stack.addWidget(self._create_network_management_content())
         main_layout.addWidget(self.content_stack, 1)
         
         # Default selection
@@ -756,6 +760,40 @@ class CameraPage(QWidget):
         # Right: Edit form panel (initially hidden)
         self.edit_form_panel = self._create_edit_form_panel()
         layout.addWidget(self.edit_form_panel, stretch=1)
+        
+        return wrapper
+    
+    def _create_network_management_content(self) -> QWidget:
+        """Network Management page"""
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(20, 20, 20, 20)
+        wrapper_layout.setSpacing(20)
+        
+        # Scroll area for network management content
+        scroll_area = TouchScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+        
+        # Container widget for network management
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(20)
+        
+        # Network Management panel
+        self.network_group = self._create_network_management_panel()
+        content_layout.addWidget(self.network_group)
+        
+        content_layout.addStretch()
+        
+        scroll_area.setWidget(content_widget)
+        wrapper_layout.addWidget(scroll_area)
         
         return wrapper
     
@@ -2546,3 +2584,389 @@ class CameraPage(QWidget):
         except:
             pass
         return ""
+    
+    def _create_network_management_panel(self) -> QGroupBox:
+        """Create network management panel with diagnostics and tools"""
+        network_group = QGroupBox("🔧 Network Management")
+        network_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: 600;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px;
+            }
+        """)
+        network_layout = QVBoxLayout(network_group)
+        network_layout.setSpacing(12)
+        network_layout.setContentsMargins(16, 16, 16, 16)
+        
+        # Initialize network manager
+        self.network_manager = NetworkManager()
+        
+        # Network info display
+        network_info_frame = QFrame()
+        network_info_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 6px;
+            }
+        """)
+        network_info_layout = QVBoxLayout(network_info_frame)
+        network_info_layout.setContentsMargins(12, 12, 12, 12)
+        network_info_layout.setSpacing(6)
+        
+        info_title = QLabel("Network Interface (eth0)")
+        info_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff;")
+        network_info_layout.addWidget(info_title)
+        
+        self.network_info_label = QLabel("Loading...")
+        self.network_info_label.setStyleSheet("font-size: 11px; color: #888898;")
+        self.network_info_label.setWordWrap(True)
+        network_info_layout.addWidget(self.network_info_label)
+        
+        # Update network info
+        self._update_network_info_display()
+        
+        network_layout.addWidget(network_info_frame)
+        
+        # Diagnostics section
+        diagnostics_title = QLabel("Camera Diagnostics")
+        diagnostics_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
+        network_layout.addWidget(diagnostics_title)
+        
+        # IP input for diagnostics
+        diag_input_layout = QHBoxLayout()
+        diag_input_layout.setSpacing(8)
+        
+        self.diag_ip_input = QLineEdit()
+        self.diag_ip_input.setPlaceholderText("Camera IP address")
+        self.diag_ip_input.setFixedHeight(40)
+        self.diag_ip_input.setStyleSheet("""
+            QLineEdit {
+                background-color: #1a1a24;
+                border: 2px solid #2a2a38;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+                color: #FFFFFF;
+            }
+            QLineEdit:focus {
+                border-color: #FF9500;
+            }
+        """)
+        diag_input_layout.addWidget(self.diag_ip_input)
+        
+        self.run_diagnostics_btn = QPushButton("🔍 Run Diagnostics")
+        self.run_diagnostics_btn.setFixedHeight(40)
+        self.run_diagnostics_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9500;
+                border: none;
+                border-radius: 6px;
+                color: #0a0a0f;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #CC7700;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a38;
+                color: #888898;
+            }
+        """)
+        self.run_diagnostics_btn.clicked.connect(self._run_camera_diagnostics)
+        diag_input_layout.addWidget(self.run_diagnostics_btn)
+        
+        network_layout.addLayout(diag_input_layout)
+        
+        # Diagnostics results display
+        self.diagnostics_results = QLabel("Enter IP address and click 'Run Diagnostics'")
+        self.diagnostics_results.setStyleSheet("""
+            font-size: 11px; 
+            color: #888898; 
+            padding: 8px;
+            background-color: #1a1a24;
+            border: 1px solid #2a2a38;
+            border-radius: 6px;
+        """)
+        self.diagnostics_results.setWordWrap(True)
+        self.diagnostics_results.setMinimumHeight(80)
+        network_layout.addWidget(self.diagnostics_results)
+        
+        # Port scan section
+        port_scan_title = QLabel("Network Port Scan")
+        port_scan_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
+        network_layout.addWidget(port_scan_title)
+        
+        port_scan_layout = QHBoxLayout()
+        port_scan_layout.setSpacing(8)
+        
+        # Get base IP for scanning
+        network_info = self._get_eth0_network_info()
+        base_ip = ""
+        if network_info and network_info.get('ip'):
+            ip_parts = network_info['ip'].split('.')
+            base_ip = '.'.join(ip_parts[:-1])
+        
+        self.port_scan_base_input = QLineEdit()
+        self.port_scan_base_input.setPlaceholderText("192.168.1")
+        self.port_scan_base_input.setText(base_ip)
+        self.port_scan_base_input.setFixedHeight(40)
+        self.port_scan_base_input.setStyleSheet(self.diag_ip_input.styleSheet())
+        port_scan_layout.addWidget(self.port_scan_base_input)
+        
+        self.scan_ports_btn = QPushButton("🔍 Scan Range")
+        self.scan_ports_btn.setFixedHeight(40)
+        self.scan_ports_btn.setStyleSheet(self.run_diagnostics_btn.styleSheet())
+        self.scan_ports_btn.clicked.connect(self._scan_network_range)
+        port_scan_layout.addWidget(self.scan_ports_btn)
+        
+        network_layout.addLayout(port_scan_layout)
+        
+        # Port scan results
+        self.port_scan_results = QLabel("Enter network base IP (e.g., 192.168.1) and click 'Scan Range'")
+        self.port_scan_results.setStyleSheet(self.diagnostics_results.styleSheet())
+        self.port_scan_results.setWordWrap(True)
+        self.port_scan_results.setMinimumHeight(60)
+        network_layout.addWidget(self.port_scan_results)
+        
+        # Backup/Restore section
+        backup_title = QLabel("Configuration Backup")
+        backup_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff; margin-top: 8px;")
+        network_layout.addWidget(backup_title)
+        
+        backup_layout = QHBoxLayout()
+        backup_layout.setSpacing(8)
+        
+        self.backup_configs_btn = QPushButton("💾 Backup Configs")
+        self.backup_configs_btn.setFixedHeight(40)
+        self.backup_configs_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                border: 2px solid #3a3a48;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                border-color: #FF9500;
+                background-color: #3a3a48;
+            }
+        """)
+        self.backup_configs_btn.clicked.connect(self._backup_network_configs)
+        backup_layout.addWidget(self.backup_configs_btn)
+        
+        self.restore_configs_btn = QPushButton("📥 Restore Configs")
+        self.restore_configs_btn.setFixedHeight(40)
+        self.restore_configs_btn.setStyleSheet(self.backup_configs_btn.styleSheet())
+        self.restore_configs_btn.clicked.connect(self._restore_network_configs)
+        backup_layout.addWidget(self.restore_configs_btn)
+        
+        network_layout.addLayout(backup_layout)
+        
+        return network_group
+    
+    def _update_network_info_display(self):
+        """Update network info display"""
+        network_info = self._get_eth0_network_info()
+        if network_info:
+            info_text = f"IP: {network_info.get('ip', 'Unknown')}\n"
+            info_text += f"Subnet: {network_info.get('subnet', 'Unknown')}\n"
+            info_text += f"Gateway: {network_info.get('gateway', 'Unknown')}"
+            self.network_info_label.setText(info_text)
+        else:
+            self.network_info_label.setText("Could not detect network settings")
+    
+    def _run_camera_diagnostics(self):
+        """Run diagnostics on a camera IP"""
+        ip = self.diag_ip_input.text().strip()
+        if not ip:
+            QMessageBox.warning(self, "Error", "Please enter a camera IP address")
+            return
+        
+        if not self._is_valid_ip(ip):
+            QMessageBox.warning(self, "Error", "Invalid IP address format")
+            return
+        
+        self.run_diagnostics_btn.setEnabled(False)
+        self.run_diagnostics_btn.setText("⏳ Running...")
+        self.diagnostics_results.setText("Running diagnostics...")
+        self.diagnostics_results.setStyleSheet(self.diagnostics_results.styleSheet().replace("#888898", "#FF9500"))
+        
+        # Get credentials from form if available
+        username = "admin"
+        password = "12345"
+        if hasattr(self, 'camera_user_input') and self.camera_user_input:
+            username = self.camera_user_input.text().strip() or "admin"
+        if hasattr(self, 'camera_pass_input') and self.camera_pass_input:
+            password = self.camera_pass_input.text().strip() or "12345"
+        
+        # Run diagnostics in background thread
+        def run_diagnostics():
+            diagnostics = self.network_manager.run_diagnostics(ip, username, password)
+            QTimer.singleShot(0, lambda: self._display_diagnostics_results(diagnostics))
+        
+        import threading
+        thread = threading.Thread(target=run_diagnostics, daemon=True)
+        thread.start()
+    
+    def _display_diagnostics_results(self, diagnostics: NetworkDiagnostics):
+        """Display diagnostics results"""
+        self.run_diagnostics_btn.setEnabled(True)
+        self.run_diagnostics_btn.setText("🔍 Run Diagnostics")
+        
+        results_text = f"<b>Diagnostics for {diagnostics.ip_address}</b><br><br>"
+        
+        # Ping results
+        if diagnostics.ping_success:
+            results_text += f"✅ Ping: {diagnostics.ping_time_ms:.1f} ms<br>"
+        else:
+            results_text += f"❌ Ping: Failed<br>"
+        
+        # HTTP results
+        if diagnostics.http_reachable:
+            status_text = "OK" if diagnostics.http_status_code == 200 else f"Code {diagnostics.http_status_code}"
+            results_text += f"✅ HTTP ({status_text}): {diagnostics.http_response_time_ms:.1f} ms<br>"
+        else:
+            results_text += f"❌ HTTP: Not reachable<br>"
+        
+        # Port results
+        results_text += "<br><b>Ports:</b><br>"
+        results_text += f"{'✅' if diagnostics.port_80_open else '❌'} Port 80 (HTTP)<br>"
+        results_text += f"{'✅' if diagnostics.port_554_open else '❌'} Port 554 (RTSP)<br>"
+        results_text += f"{'✅' if diagnostics.port_10669_open else '❌'} Port 10669 (Panasonic)<br>"
+        results_text += f"{'✅' if diagnostics.port_10670_open else '❌'} Port 10670 (Panasonic)<br>"
+        
+        if diagnostics.error_message:
+            results_text += f"<br><span style='color: #ef4444;'>{diagnostics.error_message}</span>"
+        
+        self.diagnostics_results.setText(results_text)
+        self.diagnostics_results.setStyleSheet(self.diagnostics_results.styleSheet().replace("#FF9500", "#888898"))
+    
+    def _scan_network_range(self):
+        """Scan network range for cameras"""
+        base_ip = self.port_scan_base_input.text().strip()
+        if not base_ip:
+            QMessageBox.warning(self, "Error", "Please enter network base IP (e.g., 192.168.1)")
+            return
+        
+        # Validate base IP format
+        parts = base_ip.split('.')
+        if len(parts) != 3:
+            QMessageBox.warning(self, "Error", "Invalid network base IP format. Use format like '192.168.1'")
+            return
+        
+        self.scan_ports_btn.setEnabled(False)
+        self.scan_ports_btn.setText("⏳ Scanning...")
+        self.port_scan_results.setText("Scanning network range...")
+        self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#888898", "#FF9500"))
+        
+        # Run scan in background thread
+        def run_scan():
+            results = self.network_manager.scan_network_range(base_ip, start=1, end=254)
+            QTimer.singleShot(0, lambda: self._display_port_scan_results(results))
+        
+        import threading
+        thread = threading.Thread(target=run_scan, daemon=True)
+        thread.start()
+    
+    def _display_port_scan_results(self, results: List[Dict]):
+        """Display port scan results"""
+        self.scan_ports_btn.setEnabled(True)
+        self.scan_ports_btn.setText("🔍 Scan Range")
+        
+        if not results:
+            self.port_scan_results.setText("No devices found with open ports (80, 554)")
+            self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#FF9500", "#888898"))
+            return
+        
+        results_text = f"<b>Found {len(results)} device(s):</b><br><br>"
+        for result in results[:10]:  # Show first 10
+            ip = result['ip']
+            ports = result.get('ports_open', [])
+            port_str = ', '.join(map(str, ports))
+            results_text += f"✅ {ip} - Ports: {port_str}<br>"
+        
+        if len(results) > 10:
+            results_text += f"<br>... and {len(results) - 10} more"
+        
+        self.port_scan_results.setText(results_text)
+        self.port_scan_results.setStyleSheet(self.port_scan_results.styleSheet().replace("#FF9500", "#888898"))
+    
+    def _backup_network_configs(self):
+        """Backup camera network configurations"""
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            "Backup Network Configurations",
+            "camera_network_backup.json",
+            "JSON Files (*.json)"
+        )
+        
+        if not filepath:
+            return
+        
+        success = NetworkManager.backup_network_configs(self.settings.cameras, filepath)
+        if success:
+            QMessageBox.information(self, "Success", f"Network configurations backed up to:\n{filepath}")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to backup network configurations")
+    
+    def _restore_network_configs(self):
+        """Restore camera network configurations"""
+        filepath, _ = QFileDialog.getOpenFileName(
+            self,
+            "Restore Network Configurations",
+            "",
+            "JSON Files (*.json)"
+        )
+        
+        if not filepath:
+            return
+        
+        backup_data = NetworkManager.restore_network_configs(filepath)
+        if not backup_data:
+            QMessageBox.warning(self, "Error", "Failed to restore network configurations")
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Confirm Restore",
+            f"Restore {len(backup_data.get('cameras', []))} camera configuration(s)?\n\n"
+            "This will update existing cameras with matching IDs.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        restored_count = 0
+        for camera_data in backup_data.get('cameras', []):
+            camera_id = camera_data.get('id')
+            if camera_id:
+                camera = self.settings.get_camera(camera_id)
+                if camera:
+                    # Update network settings
+                    camera.ip_address = camera_data.get('ip_address', camera.ip_address)
+                    camera.port = camera_data.get('port', camera.port)
+                    camera.username = camera_data.get('username', camera.username)
+                    camera.password = camera_data.get('password', camera.password)
+                    self.settings.update_camera(camera)
+                    restored_count += 1
+        
+        if restored_count > 0:
+            self.settings.save()
+            self._refresh_camera_list()
+            self.settings_changed.emit()
+            QMessageBox.information(self, "Success", f"Restored {restored_count} camera configuration(s)")
+        else:
+            QMessageBox.warning(self, "Warning", "No matching cameras found to restore")

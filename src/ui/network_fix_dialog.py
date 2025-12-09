@@ -458,3 +458,5 @@ class NetworkFixDialog(QDialog):
             print(f"[NetworkFix] Error sending command {command}: {e}")
             return False
 
+
+

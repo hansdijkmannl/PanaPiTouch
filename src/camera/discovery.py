@@ -217,10 +217,11 @@ class CameraDiscovery:
                 ('admin', 'admin'),  # Older default
                 (None, None),        # No auth
             ]
-            timeout = 2
+            # Reduced timeout for faster discovery (was 2s, now 0.8s)
+            timeout = 0.8
             working_auth = None
             
-            # First, test connectivity and auth
+            # First, test connectivity and auth with shorter timeout
             for auth_pair in credentials_to_try:
                 try:
                     auth = auth_pair if auth_pair[0] else None
@@ -267,56 +268,84 @@ class CameraDiscovery:
             # Continue fetching info with working credentials
             auth = working_auth
             
-            # Try to get power status (similar to EasyIPSetupToolPlus)
-            try:
-                url = f"{base_url}/cgi-bin/aw_cam?cmd=O&res=1"
-                response = requests.get(url, timeout=timeout, auth=auth)
-                if response.status_code == 200:
-                    text = response.text.strip().upper()
-                    if 'P1' in text or 'O1' in text:
-                        camera.status = "Power ON"
-                    elif 'P0' in text or 'O0' in text:
-                        camera.status = "Standby"
-                    else:
-                        camera.status = "Power ON"  # Assume on if responding
-            except:
-                if camera.reachable:
+            # Fetch all info queries in parallel for speed
+            def fetch_power_status():
+                try:
+                    url = f"{base_url}/cgi-bin/aw_cam?cmd=O&res=1"
+                    response = requests.get(url, timeout=timeout, auth=auth)
+                    if response.status_code == 200:
+                        text = response.text.strip().upper()
+                        if 'P1' in text or 'O1' in text:
+                            return "Power ON"
+                        elif 'P0' in text or 'O0' in text:
+                            return "Standby"
+                        return "Power ON"  # Assume on if responding
+                except:
+                    return None
+            
+            def fetch_serial():
+                try:
+                    url = f"{base_url}/cgi-bin/aw_cam?cmd=QSN&res=1"
+                    response = requests.get(url, timeout=timeout, auth=auth)
+                    if response.status_code == 200:
+                        text = response.text.strip()
+                        if 'SN:' in text:
+                            return text.split('SN:')[1].strip()
+                except:
+                    pass
+                return None
+            
+            def fetch_firmware():
+                try:
+                    url = f"{base_url}/cgi-bin/aw_cam?cmd=QSV&res=1"
+                    response = requests.get(url, timeout=timeout, auth=auth)
+                    if response.status_code == 200:
+                        text = response.text.strip()
+                        if 'SV:' in text:
+                            return text.split('SV:')[1].strip()
+                except:
+                    pass
+                return None
+            
+            def fetch_title():
+                try:
+                    url = f"{base_url}/cgi-bin/aw_cam?cmd=QCT&res=1"
+                    response = requests.get(url, timeout=timeout, auth=auth)
+                    if response.status_code == 200:
+                        text = response.text.strip()
+                        if 'CT:' in text:
+                            title = text.split('CT:')[1].strip()
+                            if title:
+                                return title
+                except:
+                    pass
+                return None
+            
+            # Execute all queries in parallel
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                power_future = executor.submit(fetch_power_status)
+                serial_future = executor.submit(fetch_serial)
+                firmware_future = executor.submit(fetch_firmware)
+                title_future = executor.submit(fetch_title)
+                
+                # Collect results
+                status = power_future.result()
+                if status:
+                    camera.status = status
+                elif camera.reachable:
                     camera.status = "Power ON"
-            
-            # Try to get serial number
-            try:
-                url = f"{base_url}/cgi-bin/aw_cam?cmd=QSN&res=1"
-                response = requests.get(url, timeout=timeout, auth=auth)
-                if response.status_code == 200:
-                    text = response.text.strip()
-                    if 'SN:' in text:
-                        camera.serial = text.split('SN:')[1].strip()
-            except:
-                pass
-            
-            # Try to get firmware version
-            try:
-                url = f"{base_url}/cgi-bin/aw_cam?cmd=QSV&res=1"
-                response = requests.get(url, timeout=timeout, auth=auth)
-                if response.status_code == 200:
-                    text = response.text.strip()
-                    if 'SV:' in text:
-                        camera.firmware = text.split('SV:')[1].strip()
-            except:
-                pass
-            
-            # Try to get camera title/name
-            try:
-                url = f"{base_url}/cgi-bin/aw_cam?cmd=QCT&res=1"
-                response = requests.get(url, timeout=timeout, auth=auth)
-                if response.status_code == 200:
-                    text = response.text.strip()
-                    if 'CT:' in text:
-                        title = text.split('CT:')[1].strip()
-                        if title:
-                            camera.name = title
-            except:
-                pass
+                
+                serial = serial_future.result()
+                if serial:
+                    camera.serial = serial
+                
+                firmware = firmware_future.result()
+                if firmware:
+                    camera.firmware = firmware
+                
+                title = title_future.result()
+                if title:
+                    camera.name = title
             
             # Set default name if not set
             if not camera.name:
