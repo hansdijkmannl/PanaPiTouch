@@ -49,6 +49,8 @@ class Settings:
     atem: ATEMConfig = field(default_factory=ATEMConfig)
     selected_camera: int = 0
     companion_url: str = "http://localhost:8000"
+    # Orientation mode
+    portrait_mode: bool = False  # False = landscape, True = portrait
     # Target display: Wisecoco 10.5" 2560x1600 (16:10)
     fullscreen: bool = False  # False for development
     display_width: int = 1600  # Dev window (16:10 aspect)
@@ -58,6 +60,8 @@ class Settings:
     native_height: int = 1600
     preview_width: int = 1920
     preview_height: int = 1080
+    # OSK preset texts (6 customizable preset buttons)
+    osk_presets: List[str] = field(default_factory=lambda: ["", "", "", "", "", ""])
     
     _config_path: str = field(default="", repr=False)
     
@@ -94,6 +98,7 @@ class Settings:
                     atem=atem,
                     selected_camera=data.get('selected_camera', 0),
                     companion_url=data.get('companion_url', 'http://localhost:8000'),
+                    portrait_mode=data.get('portrait_mode', False),
                     fullscreen=data.get('fullscreen', False),
                     display_width=data.get('display_width', 1600),
                     display_height=data.get('display_height', 1000),
@@ -101,6 +106,7 @@ class Settings:
                     native_height=data.get('native_height', 1600),
                     preview_width=data.get('preview_width', 1920),
                     preview_height=data.get('preview_height', 1080),
+                    osk_presets=data.get('osk_presets', ["", "", "", "", "", ""]),
                 )
                 settings._config_path = str(config_path)
                 return settings
@@ -136,6 +142,7 @@ class Settings:
             },
             'selected_camera': self.selected_camera,
             'companion_url': self.companion_url,
+            'portrait_mode': self.portrait_mode,
             'fullscreen': self.fullscreen,
             'display_width': self.display_width,
             'display_height': self.display_height,
@@ -143,6 +150,7 @@ class Settings:
             'native_height': self.native_height,
             'preview_width': self.preview_width,
             'preview_height': self.preview_height,
+            'osk_presets': self.osk_presets,
         }
         
         with open(config_path, 'w') as f:

@@ -8,10 +8,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
     QButtonGroup, QSpacerItem, QSlider, QMenu, QDialog, QComboBox,
     QApplication, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox,
-    QDoubleSpinBox
+    QDoubleSpinBox, QGroupBox, QRadioButton, QInputDialog
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize, QEvent
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize, QEvent, QRect, QPoint
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QPixmap, QIcon, QImage, QCursor
 
 from ..config.settings import Settings
 from ..camera.stream import CameraStream, StreamConfig
@@ -26,13 +26,323 @@ from .joystick_widget import JoystickWidget
 # OSK disabled - using Pi OS built-in keyboard instead
 # from .keyboard_manager import KeyboardManager
 from .toast import ToastWidget
+from .osk_widget import OSKWidget
+from .preset_rename_dialog import PresetRenameDialog
 from .styles import STYLESHEET, COLORS
 from ..core.logging_config import get_logger
 
 import shutil
 import subprocess
+import cv2
+import numpy as np
+from pathlib import Path
+import json
 
 logger = get_logger(__name__)
+
+
+class PresetButton(QPushButton):
+    """Custom preset button with thumbnail support and long press detection"""
+    
+    long_press_timeout = 500  # milliseconds
+    
+    def __init__(self, preset_num: int, camera_id: int, main_window, parent=None):
+        super().__init__(parent)
+        self.preset_num = preset_num
+        self.camera_id = camera_id
+        self.main_window = main_window
+        self.thumbnail_path = self._get_thumbnail_path()
+        self.preset_name_path = self._get_preset_name_path()
+        self.has_thumbnail = False
+        self.preset_name = self._load_preset_name()
+        
+        # Long press detection
+        self._press_timer = QTimer()
+        self._press_timer.setSingleShot(True)
+        self._press_timer.timeout.connect(self._on_long_press)
+        self._pressed = False
+        
+        # Setup button - ensure truly square 80x80px
+        self.setFixedSize(80, 80)
+        self.setMinimumSize(80, 80)
+        self.setMaximumSize(80, 80)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setObjectName("cameraButton")
+        self.setCheckable(False)
+        self.setText("")  # No text on button itself
+        
+        # Load thumbnail if exists
+        self._load_thumbnail()
+        
+        # Connect click
+        self.clicked.connect(self._on_click)
+    
+    def _get_thumbnail_path(self) -> Path:
+        """Get thumbnail file path for this preset"""
+        preset_dir = Path.home() / ".config" / "panapitouch" / "presets" / str(self.camera_id)
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        return preset_dir / f"preset_{self.preset_num:02d}.jpg"
+    
+    def _get_preset_name_path(self) -> Path:
+        """Get preset name JSON file path"""
+        preset_dir = Path.home() / ".config" / "panapitouch" / "presets" / str(self.camera_id)
+        preset_dir.mkdir(parents=True, exist_ok=True)
+        return preset_dir / "preset_names.json"
+    
+    def _load_preset_name(self) -> str:
+        """Load preset name from JSON file"""
+        if self.preset_name_path.exists():
+            try:
+                with open(self.preset_name_path, 'r') as f:
+                    names = json.load(f)
+                    return names.get(str(self.preset_num), "")
+            except Exception as e:
+                logger.error(f"Error loading preset name: {e}")
+        return ""
+    
+    def _save_preset_name(self, name: str):
+        """Save preset name to JSON file"""
+        try:
+            names = {}
+            if self.preset_name_path.exists():
+                with open(self.preset_name_path, 'r') as f:
+                    names = json.load(f)
+            names[str(self.preset_num)] = name
+            with open(self.preset_name_path, 'w') as f:
+                json.dump(names, f, indent=2)
+            self.preset_name = name
+        except Exception as e:
+            logger.error(f"Error saving preset name: {e}")
+    
+    def _load_thumbnail(self):
+        """Load thumbnail image if it exists"""
+        if self.thumbnail_path.exists():
+            try:
+                pixmap = QPixmap(str(self.thumbnail_path))
+                if not pixmap.isNull():
+                    # Thumbnails are saved as 16:9 (80x45px), scale to fit button (80x80)
+                    # Keep 16:9 aspect ratio, will fit within 80x80 button
+                    scaled = pixmap.scaled(80, 45, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    
+                    icon = QIcon(scaled)
+                    self.setIcon(icon)
+                    self.setIconSize(QSize(80, 45))  # 16:9 aspect ratio
+                    self.has_thumbnail = True
+                    # Ensure button stays square 80x80px - enforce size
+                    self.setFixedSize(80, 80)
+                    self.setMinimumSize(80, 80)
+                    self.setMaximumSize(80, 80)
+                    self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+                    # Set text color to white for visibility over thumbnail
+                    self.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: transparent;
+                            border: 3px solid {COLORS['tally_off']};
+                            border-radius: 10px;
+                            color: white;
+                            font-size: 14px;
+                            font-weight: 700;
+                            text-align: center;
+                            padding: 0px;
+                        }}
+                        QPushButton:hover {{
+                            border-color: {COLORS['border_light']};
+                        }}
+                        QPushButton:pressed {{
+                            border-color: {COLORS['primary']};
+                        }}
+                    """)
+                    return
+            except Exception as e:
+                logger.error(f"Error loading thumbnail for preset {self.preset_num}: {e}")
+        
+        # No thumbnail - use default style
+        self.has_thumbnail = False
+        self.setIcon(QIcon())  # Clear icon
+        # Ensure button stays square 80x80px - enforce size
+        self.setFixedSize(80, 80)
+        self.setMinimumSize(80, 80)
+        self.setMaximumSize(80, 80)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 3px solid {COLORS['tally_off']};
+                border-radius: 10px;
+                color: {COLORS['text']};
+                font-size: 16px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+                border-color: {COLORS['border_light']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """)
+    
+    def mousePressEvent(self, event):
+        """Handle mouse press for long press detection"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pressed = True
+            self._press_timer.start(self.long_press_timeout)
+        super().mousePressEvent(event)
+    
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - cancel long press if released early"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            was_pressed = self._pressed
+            timer_was_active = self._press_timer.isActive()
+            self._press_timer.stop()
+            self._pressed = False
+            
+            # If released before long press timeout, treat as short click
+            if was_pressed and not timer_was_active:
+                # Timer already fired (long press happened)
+                pass  # Long press menu was shown
+            elif was_pressed:
+                # Released early - this was a short click
+                self._on_click()
+        super().mouseReleaseEvent(event)
+    
+    def _on_click(self):
+        """Handle short click - recall preset"""
+        if self.main_window.current_camera_id == self.camera_id:
+            self.main_window._send_camera_command(f"R{self.preset_num:02d}", endpoint="aw_ptz")
+            if hasattr(self.main_window, "toast") and self.main_window.toast:
+                self.main_window.toast.show_message(f"Recalled Preset {self.preset_num}", duration=1500)
+    
+    def _on_long_press(self):
+        """Handle long press - show context menu"""
+        if not self._pressed:
+            return
+        
+        menu = QMenu(self)
+        # Make menu touch-friendly with larger items
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 18px;
+                font-weight: 600;
+            }}
+            QMenu::item {{
+                background-color: transparent;
+                padding: 16px 24px;
+                border-radius: 6px;
+                min-width: 200px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['surface_hover']};
+                color: {COLORS['primary']};
+            }}
+        """)
+        
+        save_action = menu.addAction("💾 Save Preset")
+        save_action.triggered.connect(self._save_preset)
+        
+        if self.has_thumbnail:
+            rename_action = menu.addAction("✏️ Rename Preset")
+            rename_action.triggered.connect(self._rename_preset)
+            
+            delete_action = menu.addAction("🗑️ Delete Preset")
+            delete_action.triggered.connect(self._delete_preset)
+        
+        # Show menu below button
+        global_pos = self.mapToGlobal(QPoint(0, self.height()))
+        menu.exec(global_pos)
+        self._pressed = False
+    
+    def _save_preset(self):
+        """Save current camera position as preset with thumbnail"""
+        if self.main_window.current_camera_id != self.camera_id:
+            if hasattr(self.main_window, "toast") and self.main_window.toast:
+                self.main_window.toast.show_message("Please select the correct camera first", duration=2000)
+            return
+        
+        # Save preset position
+        success = self.main_window._send_camera_command(f"M{self.preset_num:02d}", endpoint="aw_ptz")
+        if not success:
+            if hasattr(self.main_window, "toast") and self.main_window.toast:
+                self.main_window.toast.show_message("Failed to save preset", duration=2000, error=True)
+            return
+        
+        # Capture thumbnail from current camera frame
+        thumbnail_saved = self.main_window._capture_preset_thumbnail(self.camera_id, self.preset_num)
+        
+        if thumbnail_saved:
+            self._load_thumbnail()
+            # Update label if it exists
+            if hasattr(self, '_name_label'):
+                display_name = self.preset_name if self.preset_name else str(self.preset_num)
+                self._name_label.setText(display_name)
+            if hasattr(self.main_window, "toast") and self.main_window.toast:
+                self.main_window.toast.show_message(f"Preset {self.preset_num} saved", duration=2000)
+        else:
+            if hasattr(self.main_window, "toast") and self.main_window.toast:
+                self.main_window.toast.show_message(f"Preset {self.preset_num} saved (no thumbnail)", duration=2000)
+
+        # Prompt for name immediately after saving (custom OSK dialog)
+        # (Works even if thumbnail capture failed.)
+        QTimer.singleShot(150, self._rename_preset)
+    
+    def _rename_preset(self):
+        """Rename preset"""
+        current_name = self.preset_name if self.preset_name else f"Preset {self.preset_num}"
+        
+        # Use custom dialog with OSK for Live/Preview page
+        dialog = PresetRenameDialog(self.preset_num, current_name, self.main_window)
+        dialog.accepted.connect(lambda name: self._on_preset_renamed(name))
+        dialog.exec()
+    
+    def _on_preset_renamed(self, name: str):
+        """Handle preset rename from dialog"""
+        self._save_preset_name(name)
+        # Update the label above button if it exists
+        if hasattr(self, '_name_label'):
+            self._name_label.setText(name if name else str(self.preset_num))
+        if hasattr(self.main_window, "toast") and self.main_window.toast:
+            self.main_window.toast.show_message(f"Preset {self.preset_num} renamed", duration=2000)
+    
+    def _delete_preset(self):
+        """Delete preset and thumbnail"""
+        # Delete camera's internal preset thumbnail (OSJ:3A command)
+        # Note: Preset numbers are 0-indexed for OSJ:3A (00-99), so preset 1 = 00, preset 2 = 01, etc.
+        preset_index = self.preset_num - 1  # Convert to 0-indexed
+        self.main_window._send_camera_command(f"OSJ:3A:{preset_index:02d}", endpoint="aw_cam")
+        
+        # Delete local thumbnail file
+        if self.thumbnail_path.exists():
+            try:
+                self.thumbnail_path.unlink()
+            except Exception as e:
+                logger.error(f"Error deleting thumbnail: {e}")
+        
+        # Delete preset name
+        try:
+            if self.preset_name_path.exists():
+                with open(self.preset_name_path, 'r') as f:
+                    names = json.load(f)
+                if str(self.preset_num) in names:
+                    del names[str(self.preset_num)]
+                    with open(self.preset_name_path, 'w') as f:
+                        json.dump(names, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error deleting preset name: {e}")
+        
+        self.preset_name = ""
+        
+        # Reload button (will show empty state)
+        self._load_thumbnail()
+        # Update the label above button if it exists
+        if hasattr(self, '_name_label'):
+            self._name_label.setText(str(self.preset_num))
+        if hasattr(self.main_window, "toast") and self.main_window.toast:
+            self.main_window.toast.show_message(f"Preset {self.preset_num} deleted", duration=2000)
 
 
 class MainWindow(QMainWindow):
@@ -76,14 +386,13 @@ class MainWindow(QMainWindow):
         # Toast notification widget
         self.toast = ToastWidget(self)
         
-        # System OSK - disabled custom keyboard, using Pi OS OSK
+        # On-Screen Keyboard (slides from bottom for settings pages)
+        self.osk = None  # Will be created after UI setup
         
         self._setup_window()
         self._setup_ui()
         self._setup_connections()
-        
-        # System OSK will automatically appear when text fields get focus
-        # No custom implementation needed
+        self._setup_osk()
         
         # Initialize ATEM connection if configured
         if self.settings.atem.enabled and self.settings.atem.ip_address:
@@ -131,6 +440,7 @@ class MainWindow(QMainWindow):
         
         # Top navigation bar
         nav_bar = self._create_nav_bar()
+        self.nav_bar = nav_bar
         main_layout.addWidget(nav_bar)
         
         # Page stack
@@ -142,7 +452,7 @@ class MainWindow(QMainWindow):
         self.companion_page = CompanionPage(self.settings.companion_url)
         self.companion_page.update_available.connect(self._on_companion_update_available)
         self.companion_page.update_cleared.connect(self._on_companion_update_cleared)
-        self.settings_page = SettingsPage(self.settings)
+        self.settings_page = SettingsPage(self.settings, parent=self)
         
         self.page_stack.addWidget(self.preview_page)       # 0
         self.page_stack.addWidget(self.camera_page)        # 1
@@ -155,6 +465,7 @@ class MainWindow(QMainWindow):
     def _create_nav_bar(self) -> QWidget:
         """Create the top navigation bar"""
         nav_bar = QFrame()
+        # Add border-bottom for separation
         nav_bar.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS['surface']};
@@ -167,18 +478,8 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 0, 20, 0)
         layout.setSpacing(0)
         
-        # App title/logo
-        title = QLabel("PanaPiTouch")
-        title.setStyleSheet(f"""
-            font-size: 20px;
-            font-weight: 700;
-            color: {COLORS['primary']};
-            padding-right: 30px;
-        """)
-        layout.addWidget(title)
-        
-        # Add 25px spacing after title
-        layout.addSpacing(25)
+        # Add stretch to center buttons
+        layout.addStretch()
         
         # Navigation buttons container (centered)
         nav_buttons_container = QWidget()
@@ -214,35 +515,11 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(nav_buttons_container)
         
-        # Companion update button (hidden by default, shown when update available)
-        self.companion_update_btn = QPushButton("⬆️ Companion Update")
-        self.companion_update_btn.setFixedHeight(50)
-        self.companion_update_btn.setToolTip("Companion update available")
-        self.companion_update_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: #22c55e;
-                border: none;
-                border-radius: 8px;
-                color: #0a0a0f;
-                font-size: 13px;
-                font-weight: 600;
-                padding: 0px;
-                margin: 0px;
-                margin-left: 12px;
-            }}
-            QPushButton:hover {{
-                background-color: #16a34a;
-            }}
-            QPushButton:pressed {{
-                background-color: #15803d;
-            }}
-        """)
-        self.companion_update_btn.clicked.connect(self._on_companion_update_clicked)
-        self.companion_update_btn.hide()
-        layout.addWidget(self.companion_update_btn)
-        
-        # Add stretch before system menu button
+        # Add stretch after buttons to keep them centered
         layout.addStretch()
+        
+        # Companion update is surfaced in Settings → Companion (not in top nav).
+        self.companion_update_btn = None
         
         # System menu button - text only, no icons
         system_menu_btn = QPushButton("X")
@@ -275,7 +552,14 @@ class MainWindow(QMainWindow):
         return nav_bar
     
     def _create_preview_page(self) -> QWidget:
-        """Create the preview page with tally bar, side panel, and camera bar (16:10 optimized)"""
+        """Create the preview page - landscape or portrait based on settings"""
+        if self.settings.portrait_mode:
+            return self._create_preview_page_portrait()
+        else:
+            return self._create_preview_page_landscape()
+    
+    def _create_preview_page_landscape(self) -> QWidget:
+        """Create the landscape preview page with side panel (16:10 optimized)"""
         page = QWidget()
         main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(16, 12, 16, 12)
@@ -343,6 +627,2439 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(middle_layout, stretch=1)
         
         return page
+
+    def _create_preview_page_portrait(self) -> QWidget:
+        """Create the portrait preview page with bottom panel (vertical layout)"""
+        page = QWidget()
+        page.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['surface']};
+            }}
+        """)
+        main_layout = QVBoxLayout(page)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # No margins - full screen
+        main_layout.setSpacing(0)  # No spacing between elements
+        
+        # Preview container - full width, no border, 16:9 aspect ratio
+        preview_container = QFrame()
+        preview_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['background']};
+                border: none;
+            }}
+        """)
+        # Maintain 16:9 aspect ratio - Expanding horizontally, Preferred vertically (will be constrained by aspect ratio)
+        preview_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        
+        preview_inner_layout = QVBoxLayout(preview_container)
+        preview_inner_layout.setContentsMargins(0, 0, 0, 0)
+        preview_inner_layout.setSpacing(0)
+        
+        # Preview wrapper (for FPS overlay positioning)
+        preview_wrapper = QWidget()
+        preview_wrapper.setStyleSheet("background: transparent;")
+        preview_wrapper_layout = QVBoxLayout(preview_wrapper)
+        preview_wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        preview_wrapper_layout.setSpacing(0)
+        
+        self.preview_widget = PreviewWidget()
+        preview_wrapper_layout.addWidget(self.preview_widget, stretch=1)
+        
+        # FPS label (top-left corner overlay) - absolutely positioned
+        self.fps_label = QLabel("-- fps", preview_wrapper)
+        self.fps_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self.fps_label.setStyleSheet(f"""
+            color: {COLORS['text']};
+            font-size: 11px;
+            font-weight: 600;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 2px 6px;
+            border-radius: 4px;
+        """)
+        self.fps_label.setFixedHeight(20)
+        self.fps_label.setFixedWidth(60)  # Fixed width so it doesn't resize
+        # Position at top-left corner (8px from top and left)
+        self.fps_label.move(8, 8)
+        self.fps_label.raise_()  # Bring to front
+        
+        preview_inner_layout.addWidget(preview_wrapper, stretch=1)
+        
+        # Store reference for aspect ratio calculation
+        self.preview_container_portrait = preview_container
+        
+        # Add to layout without stretch - preview will size to its 16:9 aspect ratio
+        main_layout.addWidget(preview_container)
+        
+        # Install event filter to maintain 16:9 aspect ratio
+        preview_container.installEventFilter(self)
+        
+        # Overlay buttons bar at bottom of preview (full width, app-wide)
+        overlay_buttons_bar = self._create_overlay_buttons_bar()
+        main_layout.addWidget(overlay_buttons_bar)
+        
+        # Bottom menu bar (horizontal buttons)
+        bottom_menu = self._create_bottom_menu_bar()
+        main_layout.addWidget(bottom_menu)
+        
+        # Bottom panel (QStackedWidget with all panels) - expands to fill remaining space
+        bottom_panel = self._create_bottom_panel()
+        main_layout.addWidget(bottom_panel, stretch=1)  # Give it stretch to fill remaining space
+        
+        # Camera selection bar (moved to bottom)
+        camera_bar = self._create_camera_bar()
+        main_layout.addWidget(camera_bar)
+        
+        # Set initial aspect ratio after a short delay to ensure widget is sized
+        QTimer.singleShot(100, lambda: self._update_preview_aspect_ratio())
+        
+        return page
+    
+    def _update_preview_aspect_ratio(self):
+        """Update preview container height to maintain 16:9 aspect ratio"""
+        if hasattr(self, 'preview_container_portrait') and self.preview_container_portrait:
+            width = self.preview_container_portrait.width()
+            if width > 0:
+                height_16_9 = int(width * 9 / 16)
+                # Set both min and max height to maintain aspect ratio
+                self.preview_container_portrait.setMinimumHeight(height_16_9)
+                self.preview_container_portrait.setMaximumHeight(height_16_9)
+    
+    def _show_margin_debug_overlay(self):
+        """Show or cycle display mode of visual overlay lines displaying all margins/padding for debugging"""
+        if not hasattr(self, 'settings') or not self.settings.portrait_mode:
+            print("Margin debug overlay only available in portrait mode")
+            return
+        
+        # Cycle mode if overlay exists and is visible
+        if hasattr(self, 'margin_debug_overlay') and self.margin_debug_overlay:
+            if self.margin_debug_overlay.isVisible():
+                # Cycle to next display mode
+                self.margin_debug_overlay.cycle_display_mode()
+            else:
+                # Show overlay with current mode
+                self.margin_debug_overlay.setVisible(True)
+            return
+        
+        # Create custom widget that draws margin/padding lines
+        class MarginDebugOverlay(QWidget):
+            # Display modes: 0=all, 1=borders only, 2=margins only, 3=padding only
+            DISPLAY_MODE_ALL = 0
+            DISPLAY_MODE_BORDERS = 1
+            DISPLAY_MODE_MARGINS = 2
+            DISPLAY_MODE_PADDING = 3
+            
+            def __init__(self, parent, main_window):
+                super().__init__(parent)
+                self.main_window = main_window
+                self.display_mode = self.DISPLAY_MODE_ALL  # Start with all visible
+                self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+                self.setStyleSheet("background: transparent;")
+                self.drawn_labels = []  # Track drawn label rectangles to prevent overlap
+            
+            def cycle_display_mode(self):
+                """Cycle through display modes"""
+                self.display_mode = (self.display_mode + 1) % 4
+                self.update()  # Trigger repaint
+                mode_names = ["All", "Borders Only", "Margins Only", "Padding Only"]
+                print(f"Display mode: {mode_names[self.display_mode]}")
+            
+            def get_widget_rect(self, widget):
+                """Get widget rectangle in preview_page coordinates"""
+                try:
+                    widget_global_pos = widget.mapToGlobal(widget.rect().topLeft())
+                    overlay_global_pos = self.main_window.preview_page.mapToGlobal(self.main_window.preview_page.rect().topLeft())
+                    dx = widget_global_pos.x() - overlay_global_pos.x()
+                    dy = widget_global_pos.y() - overlay_global_pos.y()
+                    return QRect(dx, dy, widget.width(), widget.height())
+                except Exception:
+                    try:
+                        widget_pos = widget.mapTo(self.main_window.preview_page, widget.rect().topLeft())
+                        return QRect(widget_pos.x(), widget_pos.y(), widget.width(), widget.height())
+                    except:
+                        return widget.geometry()
+            
+            def get_widget_attribute_name(self, widget):
+                """Find the attribute name of a widget in main_window"""
+                try:
+                    for attr_name in dir(self.main_window):
+                        if not attr_name.startswith('_'):
+                            attr_value = getattr(self.main_window, attr_name, None)
+                            if attr_value is widget:
+                                return attr_name
+                    # Try to find in parent's children
+                    if widget.parent():
+                        parent = widget.parent()
+                        for attr_name in dir(parent):
+                            if not attr_name.startswith('_'):
+                                try:
+                                    attr_value = getattr(parent, attr_name, None)
+                                    if attr_value is widget:
+                                        return attr_name
+                                except:
+                                    pass
+                except:
+                    pass
+                return None
+            
+            def draw_widget_margins(self, painter, widget, widget_rect, margin_pen, padding_pen, border_pen, widget_name=None, draw_children=True):
+                """Draw margins, padding, and border for a widget"""
+                is_small_widget = widget.width() < 200 or widget.height() < 50
+                pen_width = 1 if is_small_widget else 2
+                
+                # Get widget name if not provided
+                if widget_name is None:
+                    widget_name = self.get_widget_attribute_name(widget)
+                    if widget_name is None:
+                        widget_name = widget.__class__.__name__
+                
+                # Check layout properties first to determine what will be drawn
+                layout = widget.layout()
+                will_draw_border = (self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_BORDERS)
+                will_draw_margins = False
+                will_draw_padding = False
+                
+                if layout:
+                    margins = layout.getContentsMargins()
+                    has_margins = any(m > 0 for m in margins)
+                    has_padding = any(m > 0 for m in margins)  # Padding area exists if margins exist
+                    
+                    # Check if margins will actually be drawn
+                    if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS:
+                        will_draw_margins = has_margins
+                    
+                    # Check if padding area will actually be drawn
+                    if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_PADDING:
+                        will_draw_padding = has_padding
+                
+                # Determine if we should show labels - only when the relevant visual element is being drawn
+                should_show_label = False
+                
+                if self.display_mode == self.DISPLAY_MODE_ALL:
+                    # In "All" mode, show labels for all widgets
+                    should_show_label = True
+                elif self.display_mode == self.DISPLAY_MODE_BORDERS:
+                    # In "Borders Only" mode, show labels only when borders are drawn (all widgets)
+                    should_show_label = will_draw_border
+                elif self.display_mode == self.DISPLAY_MODE_MARGINS:
+                    # In "Margins Only" mode, only show labels when margin lines are actually drawn
+                    should_show_label = will_draw_margins
+                elif self.display_mode == self.DISPLAY_MODE_PADDING:
+                    # In "Padding Only" mode, only show labels when padding area is actually drawn
+                    should_show_label = will_draw_padding
+                
+                # Draw widget name and height label (only if relevant and widget is large enough)
+                if should_show_label and widget_rect.width() > 50 and widget_rect.height() > 30:
+                    painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                    font_size = 8 if is_small_widget else 9
+                    painter.setFont(QFont("Courier New", font_size))
+                    
+                    # In Borders Only mode, only show name and height (no width)
+                    if self.display_mode == self.DISPLAY_MODE_BORDERS:
+                        label_text = f"{widget_name}\nH:{widget.height()}px"
+                    else:
+                        label_text = f"{widget_name}\nH:{widget.height()}px"
+                        if widget.width() > 150:  # Only show width if widget is large enough
+                            label_text += f" W:{widget.width()}px"
+                    
+                    # Calculate actual label size
+                    fm = painter.fontMetrics()
+                    # Find the widest line for multi-line text
+                    lines = label_text.split('\n')
+                    text_width = max([fm.horizontalAdvance(line) for line in lines])
+                    text_height = fm.height() * len(lines)
+                    label_size = QSize(text_width + 6, text_height + 6)  # Add padding
+                    
+                    # Find a non-overlapping position
+                    label_pos = self.find_non_overlapping_position(widget_rect, label_size, padding=5)
+                    
+                    if label_pos:
+                        # Ensure label stays within widget bounds
+                        label_x = max(widget_rect.left() + 2, min(label_pos.x(), widget_rect.right() - label_size.width() - 2))
+                        label_y = max(widget_rect.top() + 2, min(label_pos.y(), widget_rect.bottom() - label_size.height() - 2))
+                        
+                        label_bg = QRect(label_x, label_y, label_size.width(), label_size.height())
+                        
+                        # Draw background and text
+                        painter.fillRect(label_bg, QColor(0, 0, 0, 220))
+                        painter.drawText(label_x + 3, label_y + 3, label_text)
+                        
+                        # Record this label to prevent future overlaps
+                        self.drawn_labels.append(label_bg)
+                
+                # Draw widget border (green) - if mode is ALL or BORDERS_ONLY
+                if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_BORDERS:
+                    painter.setPen(QPen(QColor(0, 255, 0, 150), pen_width, Qt.PenStyle.SolidLine))
+                    painter.drawRect(widget_rect)
+                
+                # Get layout margins
+                layout = widget.layout()
+                if layout:
+                    margins = layout.getContentsMargins()
+                    left_margin, top_margin, right_margin, bottom_margin = margins
+                    spacing = layout.spacing()
+                    
+                    # Draw margin lines (red dashed) - if mode is ALL or MARGINS_ONLY
+                    if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS:
+                        margin_line_width = 1 if is_small_widget else 2
+                        margin_pen_thin = QPen(QColor(255, 0, 0, 200), margin_line_width, Qt.PenStyle.DashLine)
+                        
+                        # Left margin
+                        if left_margin > 0:
+                            painter.setPen(margin_pen_thin)
+                            painter.drawLine(
+                                widget_rect.left() - left_margin, widget_rect.top(),
+                                widget_rect.left() - left_margin, widget_rect.bottom()
+                            )
+                            # Only draw margin text when in MARGINS_ONLY or ALL mode
+                            if (not is_small_widget) and (self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS):
+                                painter.setPen(QPen(QColor(255, 0, 0, 255), 1))
+                                painter.drawText(
+                                    widget_rect.left() - left_margin - 30, widget_rect.top() + 15,
+                                    f"M:{left_margin}"
+                                )
+                        
+                        # Top margin
+                        if top_margin > 0:
+                            painter.setPen(margin_pen_thin)
+                            painter.drawLine(
+                                widget_rect.left(), widget_rect.top() - top_margin,
+                                widget_rect.right(), widget_rect.top() - top_margin
+                            )
+                            # Only draw margin text when in MARGINS_ONLY or ALL mode
+                            if (not is_small_widget) and (self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS):
+                                painter.setPen(QPen(QColor(255, 0, 0, 255), 1))
+                                painter.drawText(
+                                    widget_rect.left() + 5, widget_rect.top() - top_margin - 5,
+                                    f"M:{top_margin}"
+                                )
+                        
+                        # Right margin
+                        if right_margin > 0:
+                            painter.setPen(margin_pen_thin)
+                            painter.drawLine(
+                                widget_rect.right() + right_margin, widget_rect.top(),
+                                widget_rect.right() + right_margin, widget_rect.bottom()
+                            )
+                            # Only draw margin text when in MARGINS_ONLY or ALL mode
+                            if (not is_small_widget) and (self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS):
+                                painter.setPen(QPen(QColor(255, 0, 0, 255), 1))
+                                painter.drawText(
+                                    widget_rect.right() + right_margin + 5, widget_rect.top() + 15,
+                                    f"M:{right_margin}"
+                                )
+                        
+                        # Bottom margin
+                        if bottom_margin > 0:
+                            painter.setPen(margin_pen_thin)
+                            painter.drawLine(
+                                widget_rect.left(), widget_rect.bottom() + bottom_margin,
+                                widget_rect.right(), widget_rect.bottom() + bottom_margin
+                            )
+                            # Only draw margin text when in MARGINS_ONLY or ALL mode
+                            if (not is_small_widget) and (self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS):
+                                painter.setPen(QPen(QColor(255, 0, 0, 255), 1))
+                                painter.drawText(
+                                    widget_rect.left() + 5, widget_rect.bottom() + bottom_margin + 15,
+                                    f"M:{bottom_margin}"
+                                )
+                    
+                    # Draw padding lines (blue dotted) - if mode is ALL or PADDING_ONLY
+                    if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_PADDING:
+                        if left_margin > 0 or top_margin > 0 or right_margin > 0 or bottom_margin > 0:
+                            padding_line_width = 1 if is_small_widget else 2
+                            padding_pen_thin = QPen(QColor(0, 0, 255, 200), padding_line_width, Qt.PenStyle.DotLine)
+                            painter.setPen(padding_pen_thin)
+                            padding_rect = QRect(
+                                widget_rect.left() + left_margin,
+                                widget_rect.top() + top_margin,
+                                widget_rect.width() - left_margin - right_margin,
+                                widget_rect.height() - top_margin - bottom_margin
+                            )
+                            painter.drawRect(padding_rect)
+                    
+                    # Draw spacing between items (yellow)
+                    if spacing > 0 and draw_children:
+                        spacing_pen = QPen(QColor(255, 255, 0, 150), 1, Qt.PenStyle.DashDotLine)
+                        painter.setPen(spacing_pen)
+                        # This is approximate - spacing is between items
+                        # We'll draw it when we process children
+                
+                # Draw children widgets recursively
+                if draw_children:
+                    for child in widget.findChildren(QWidget):
+                        if child.isVisible() and child.parent() == widget:
+                            child_rect = self.get_widget_rect(child)
+                            # Only draw if child is reasonably sized (not too small)
+                            if child_rect.width() > 10 and child_rect.height() > 10:
+                                child_name = self.get_widget_attribute_name(child)
+                                if child_name is None:
+                                    child_name = child.objectName() or child.__class__.__name__
+                                self.draw_widget_margins(painter, child, child_rect, margin_pen, padding_pen, border_pen, widget_name=child_name, draw_children=True)
+            
+            def check_label_overlap(self, label_rect, padding=5):
+                """Check if a label rectangle would overlap with existing labels"""
+                expanded_rect = label_rect.adjusted(-padding, -padding, padding, padding)
+                for existing_rect in self.drawn_labels:
+                    if expanded_rect.intersects(existing_rect):
+                        return True
+                return False
+            
+            def find_non_overlapping_position(self, widget_rect, label_size, padding=5):
+                """Find a non-overlapping position for a label within or near the widget"""
+                label_width, label_height = label_size.width(), label_size.height()
+                
+                # Try different positions: top-left, top-right, bottom-left, bottom-right, center
+                positions = [
+                    (widget_rect.left() + 5, widget_rect.top() + 5),  # Top-left
+                    (widget_rect.right() - label_width - 5, widget_rect.top() + 5),  # Top-right
+                    (widget_rect.left() + 5, widget_rect.bottom() - label_height - 5),  # Bottom-left
+                    (widget_rect.right() - label_width - 5, widget_rect.bottom() - label_height - 5),  # Bottom-right
+                    (widget_rect.left() + (widget_rect.width() - label_width) // 2, 
+                     widget_rect.top() + (widget_rect.height() - label_height) // 2),  # Center
+                ]
+                
+                for x, y in positions:
+                    test_rect = QRect(x, y, label_width, label_height)
+                    if not self.check_label_overlap(test_rect, padding):
+                        return test_rect
+                
+                # If all positions overlap, return None to skip this label
+                return None
+            
+            def paintEvent(self, event):
+                painter = QPainter(self)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                
+                # Clear drawn labels at start of paint
+                self.drawn_labels = []
+                
+                # Red pen for margins
+                margin_pen = QPen(QColor(255, 0, 0, 200), 2, Qt.PenStyle.DashLine)
+                # Blue pen for padding
+                padding_pen = QPen(QColor(0, 0, 255, 200), 2, Qt.PenStyle.DotLine)
+                # Green pen for widget borders
+                border_pen = QPen(QColor(0, 255, 0, 150), 1, Qt.PenStyle.SolidLine)
+                
+                # Draw margins and padding for each widget
+                widgets_to_check = []
+                
+                # Main page layout
+                if hasattr(self.main_window, 'preview_page') and self.main_window.preview_page:
+                    widgets_to_check.append(('preview_page', self.main_window.preview_page))
+                
+                # Overlay buttons bar
+                if hasattr(self.main_window, 'overlay_buttons_bar') and self.main_window.overlay_buttons_bar:
+                    widgets_to_check.append(('overlay_buttons_bar', self.main_window.overlay_buttons_bar))
+                
+                # Preview container
+                if hasattr(self.main_window, 'preview_container_portrait') and self.main_window.preview_container_portrait:
+                    widgets_to_check.append(('preview_container_portrait', self.main_window.preview_container_portrait))
+                
+                # Camera bar
+                if hasattr(self.main_window, 'camera_bar') and self.main_window.camera_bar:
+                    widgets_to_check.append(('camera_bar', self.main_window.camera_bar))
+                
+                # Bottom menu bar
+                if hasattr(self.main_window, 'bottom_menu_bar') and self.main_window.bottom_menu_bar:
+                    widgets_to_check.append(('bottom_menu_bar', self.main_window.bottom_menu_bar))
+                
+                # Bottom panel
+                if hasattr(self.main_window, 'bottom_panel') and self.main_window.bottom_panel:
+                    widgets_to_check.append(('bottom_panel', self.main_window.bottom_panel))
+                
+                for attr_name, widget in widgets_to_check:
+                    if not widget.isVisible():
+                        continue
+                    
+                    # Get widget geometry in overlay's coordinate system (preview_page)
+                    widget_rect = self.get_widget_rect(widget)
+                    
+                    # Draw widget margins/padding and all children recursively
+                    self.draw_widget_margins(painter, widget, widget_rect, margin_pen, padding_pen, border_pen, widget_name=attr_name, draw_children=True)
+                
+                # Draw legend in top-right corner
+                legend_y = 10
+                legend_x = self.width() - 240
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                painter.setFont(QFont("Arial", 10))
+                
+                # Mode names
+                mode_names = ["All", "Borders Only", "Margins Only", "Padding Only"]
+                current_mode = mode_names[self.display_mode]
+                
+                # Adjust legend height based on what's visible
+                legend_height = 110
+                painter.fillRect(legend_x - 5, legend_y - 5, 235, legend_height, QColor(0, 0, 0, 200))
+                
+                # Current mode indicator
+                painter.setPen(QPen(QColor(255, 255, 0, 255), 1))
+                painter.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+                painter.drawText(legend_x, legend_y + 15, f"Mode: {current_mode}")
+                
+                painter.setFont(QFont("Arial", 10))
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                
+                # Only show legend items that are visible in current mode
+                y_offset = 30
+                
+                if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_BORDERS:
+                    painter.setPen(QPen(QColor(0, 255, 0, 255), 2))
+                    painter.drawLine(legend_x, legend_y + y_offset, legend_x + 20, legend_y + y_offset)
+                    painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                    painter.drawText(legend_x + 25, legend_y + y_offset + 5, "Widget border")
+                    y_offset += 20
+                
+                if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_MARGINS:
+                    painter.setPen(QPen(QColor(255, 0, 0, 255), 2, Qt.PenStyle.DashLine))
+                    painter.drawLine(legend_x, legend_y + y_offset, legend_x + 20, legend_y + y_offset)
+                    painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                    painter.drawText(legend_x + 25, legend_y + y_offset + 5, "Margin")
+                    y_offset += 20
+                
+                if self.display_mode == self.DISPLAY_MODE_ALL or self.display_mode == self.DISPLAY_MODE_PADDING:
+                    painter.setPen(QPen(QColor(0, 0, 255, 255), 2, Qt.PenStyle.DotLine))
+                    painter.drawLine(legend_x, legend_y + y_offset, legend_x + 20, legend_y + y_offset)
+                    painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                    painter.drawText(legend_x + 25, legend_y + y_offset + 5, "Padding area")
+                    y_offset += 20
+                
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 1))
+                painter.drawText(legend_x, legend_y + y_offset + 5, "Press Ctrl+M to cycle modes")
+        
+        # Create overlay widget that covers the preview page
+        overlay = MarginDebugOverlay(self.preview_page, self)
+        
+        # Make overlay cover entire preview page
+        def update_overlay_geometry():
+            if overlay and self.preview_page:
+                overlay.setGeometry(0, 0, self.preview_page.width(), self.preview_page.height())
+                overlay.update()  # Trigger repaint
+        
+        update_overlay_geometry()
+        
+        # Update geometry periodically to handle resizes
+        resize_timer = QTimer()
+        resize_timer.timeout.connect(update_overlay_geometry)
+        resize_timer.start(100)
+        overlay.resize_timer = resize_timer  # Keep reference
+        
+        overlay.setParent(self.preview_page)
+        overlay.raise_()
+        overlay.show()
+        
+        self.margin_debug_overlay = overlay
+        
+        # Auto-hide after 15 seconds
+        QTimer.singleShot(15000, lambda: overlay.hide() if hasattr(self, 'margin_debug_overlay') and self.margin_debug_overlay else None)
+        
+        print("Margin debug overlay shown. Press Ctrl+M to cycle display modes.")
+        print("Modes: All → Borders Only → Margins Only → Padding Only")
+    
+    def _create_bottom_menu_bar(self) -> QWidget:
+        """Create horizontal menu bar for bottom panel tabs - matches top menu style"""
+        menu_bar = QFrame()
+        menu_bar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        menu_bar.setFixedHeight(60)  # Reduced height - less padding
+        
+        layout = QHBoxLayout(menu_bar)
+        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setSpacing(0)
+        
+        # Add stretch to center buttons
+        layout.addStretch()
+        
+        # Menu buttons container (centered)
+        menu_buttons_container = QWidget()
+        menu_buttons_container.setStyleSheet("background: transparent;")
+        menu_buttons_layout = QHBoxLayout(menu_buttons_container)
+        menu_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        menu_buttons_layout.setSpacing(0)
+        
+        self.bottom_menu_button_group = QButtonGroup(self)
+        self.bottom_menu_button_group.setExclusive(True)
+        
+        # Menu buttons: PTZ, Grid, Guides, Multiview, Camera Control
+        menu_buttons = [
+            ("🎮 Presets", 0),
+            ("⚙️ Camera Control", 1),
+            ("📐 Guides", 2),
+            ("📺 Multiview", 3),
+        ]
+        
+        for text, panel_idx in menu_buttons:
+            btn = QPushButton(text)
+            btn.setObjectName("navButton")  # Use same style as top menu
+            btn.setCheckable(True)
+            btn.setFixedHeight(60)  # Match menu bar height - reduced padding
+            btn.setMinimumWidth(150)
+            
+            self.bottom_menu_button_group.addButton(btn, panel_idx)
+            menu_buttons_layout.addWidget(btn)
+            
+            if panel_idx == 0:
+                btn.setChecked(True)  # Default to Presets
+        
+        self.bottom_menu_button_group.idClicked.connect(self._switch_bottom_panel)
+        
+        layout.addWidget(menu_buttons_container)
+        
+        # Add stretch after buttons to keep them centered
+        layout.addStretch()
+        
+        return menu_bar
+    
+    def _create_bottom_panel(self) -> QWidget:
+        """Create bottom panel with QStackedWidget containing all control panels"""
+        # Container frame
+        container = QFrame()
+        container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border-top: 1px solid {COLORS['border']};
+            }}
+        """)
+        # Minimum height of 300px, but allow expansion to fill remaining space
+        container.setMinimumHeight(300)
+        container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Stacked widget for panels
+        self.bottom_panel_stack = QStackedWidget()
+        self.bottom_panel_stack.setStyleSheet("QStackedWidget { background: transparent; }")
+        
+        # Create and add panels
+        # Panel 0: Presets
+        presets_panel = self._create_presets_panel()
+        self.bottom_panel_stack.addWidget(presets_panel)
+        
+        # Panel 1: Camera Control
+        camera_control_panel = self._create_camera_control_panel_content()
+        self.bottom_panel_stack.addWidget(camera_control_panel)
+        
+        # Panel 2: Guides (includes Grid options)
+        guides_panel = self._create_frame_guides_panel_content()
+        self.bottom_panel_stack.addWidget(guides_panel)
+        
+        # Panel 3: Multiview
+        multiview_panel = self._create_multiview_panel_content()
+        self.bottom_panel_stack.addWidget(multiview_panel)
+        
+        layout.addWidget(self.bottom_panel_stack)
+        
+        return container
+    
+    def _switch_bottom_panel(self, index: int):
+        """Switch bottom panel content based on menu button selection"""
+        self.bottom_panel_stack.setCurrentIndex(index)
+        # Refresh preset panel if switching to it (to ensure correct camera presets are shown)
+        if index == 0:  # Presets panel
+            self._refresh_presets_panel()
+    
+    def _refresh_camera_dependent_panels(self):
+        """Refresh panels that depend on the current camera selection"""
+        # Refresh preset panel if it's currently visible
+        if hasattr(self, 'bottom_panel_stack') and self.bottom_panel_stack.currentIndex() == 0:
+            self._refresh_presets_panel()
+    
+    def _refresh_presets_panel(self):
+        """Refresh the presets panel to show presets for the current camera"""
+        if not hasattr(self, 'bottom_panel_stack'):
+            return
+        
+        # Store current index to restore it
+        current_index = self.bottom_panel_stack.currentIndex()
+        was_on_presets = (current_index == 0)
+        
+        # Get current presets panel widget
+        presets_panel_widget = self.bottom_panel_stack.widget(0)
+        if presets_panel_widget is None:
+            return
+        
+        # Remove old panel
+        self.bottom_panel_stack.removeWidget(presets_panel_widget)
+        presets_panel_widget.deleteLater()
+        
+        # Create new panel with current camera
+        new_presets_panel = self._create_presets_panel()
+        self.bottom_panel_stack.insertWidget(0, new_presets_panel)
+        
+        # Restore current index
+        self.bottom_panel_stack.setCurrentIndex(current_index)
+    
+    def _create_ptz_panel_content(self) -> QWidget:
+        """Create PTZ control panel content (for portrait bottom panel)"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        
+        # Virtual Joystick
+        joystick_container = QWidget()
+        joystick_layout = QHBoxLayout(joystick_container)
+        joystick_layout.setContentsMargins(0, 0, 0, 0)
+        joystick_layout.addStretch()
+        
+        # Reuse existing joystick if available, otherwise create new
+        if not hasattr(self, 'ptz_joystick'):
+            self.ptz_joystick = JoystickWidget()
+            self.ptz_joystick.setFixedSize(140, 140)
+            self.ptz_joystick.position_changed.connect(self._on_joystick_move)
+            self.ptz_joystick.released.connect(self._on_joystick_release)
+        
+        joystick_layout.addWidget(self.ptz_joystick)
+        joystick_layout.addStretch()
+        layout.addWidget(joystick_container)
+        
+        # Zoom Slider
+        zoom_label = QLabel("Zoom")
+        zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        zoom_label.setStyleSheet(f"font-size: 10px; color: {COLORS['text_dim']}; background: transparent; border: none;")
+        layout.addWidget(zoom_label)
+        
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(4)
+        
+        zoom_out_label = QLabel("−")
+        zoom_out_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']}; background: transparent; border: none;")
+        zoom_row.addWidget(zoom_out_label)
+        
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(-50, 50)
+        self.zoom_slider.setValue(0)
+        self.zoom_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {COLORS['surface']};
+                height: 8px;
+                border-radius: 4px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {COLORS['primary']};
+                width: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
+            }}
+        """)
+        self.zoom_slider.sliderPressed.connect(self._on_zoom_pressed)
+        self.zoom_slider.sliderMoved.connect(self._on_zoom_moved)
+        self.zoom_slider.sliderReleased.connect(self._on_zoom_released)
+        zoom_row.addWidget(self.zoom_slider, stretch=1)
+        
+        zoom_in_label = QLabel("+")
+        zoom_in_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLORS['text']}; background: transparent; border: none;")
+        zoom_row.addWidget(zoom_in_label)
+        
+        layout.addLayout(zoom_row)
+        layout.addStretch()
+        
+        return widget
+    
+    def _create_overlay_buttons_bar(self) -> QWidget:
+        """Create overlay buttons bar at bottom of preview - full width app-wide"""
+        bar = QWidget()
+        bar.setFixedHeight(50)  # Bar height with reduced padding
+        bar.setStyleSheet(f"""
+            QWidget {{
+                background-color: {COLORS['surface']};
+                border: none;
+            }}
+        """)
+        
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(0, 0, 0, 0)  # No margins - full width
+        layout.setSpacing(0)
+        
+        # Add stretch to center buttons
+        layout.addStretch()
+        
+        # Overlay toggle buttons container (centered, with padding)
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet("background: transparent;")
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(20, 0, 20, 0)  # Horizontal padding for buttons
+        buttons_layout.setSpacing(0)
+        
+        # Overlay toggle buttons
+        if not hasattr(self, 'overlay_buttons'):
+            self.overlay_buttons = {}
+        
+        overlays = [
+            ("False Color", "false_color"),
+            ("Waveform", "waveform"),
+            ("Vectorscope", "vectorscope"),
+            ("Focus Assist", "focus_assist"),
+        ]
+        
+        # Button style with 2/3 font size (16px * 2/3 = ~11px)
+        # No background, only text color change and orange line when checked
+        overlay_btn_style = f"""
+            QPushButton {{
+                background-color: transparent;
+                border-radius: 0px;
+                border: none;
+                border-bottom: 3px solid transparent;
+                padding: 0px;
+                margin: 0px;
+                font-size: 11px;
+                font-weight: 600;
+                color: {COLORS['text']};
+            }}
+            QPushButton:checked {{
+                background-color: transparent;
+                border-bottom: 3px solid {COLORS['primary']};
+                color: {COLORS['primary']};
+            }}
+        """
+        
+        for name, key in overlays:
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setFixedHeight(50)  # Match bar height
+            btn.setMinimumWidth(120)  # Smaller width for smaller text
+            btn.setStyleSheet(overlay_btn_style)
+            btn.clicked.connect(lambda checked, k=key: self._toggle_overlay(k))
+            self.overlay_buttons[key] = btn
+            buttons_layout.addWidget(btn)
+        
+        layout.addWidget(buttons_container)
+        
+        # Add stretch after buttons to keep them centered
+        layout.addStretch()
+        
+        return bar
+    
+    def _create_grid_panel_content(self) -> QWidget:
+        """Create grid/guides panel content (for portrait bottom panel)"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        # Grid mode radios (Off / Thirds / Full / Both)
+        layout.addWidget(self._ensure_grid_mode_radio_list(context_key="portrait_grid"))
+        
+        layout.addStretch()
+        return widget
+    
+    def _create_frame_guides_panel_content(self) -> QWidget:
+        """Create frame guides panel content (includes Grid options)"""
+        widget = QWidget()
+        outer = QHBoxLayout(widget)
+        outer.setContentsMargins(12, 12, 12, 12)
+        outer.setSpacing(16)
+
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+
+        right_col = QWidget()
+        right_layout = QVBoxLayout(right_col)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+
+        outer.addWidget(left_col, 1)
+        outer.addWidget(right_col, 1)
+        
+        grid_label = QLabel("Grid")
+        grid_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: 600;
+                padding: 4px 0px;
+            }}
+        """)
+        left_layout.addWidget(grid_label)
+
+        # Grid mode radios (Off / Thirds / Full / Both)
+        left_layout.addWidget(self._ensure_grid_mode_radio_list(context_key="guides_bottom"))
+        
+        left_layout.addStretch()
+
+        # Add separator (between columns visually)
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet(f"QFrame {{ color: {COLORS['border']}; max-height: 1px; }}")
+        right_layout.addWidget(separator)
+        
+        # Frame Guides section
+        guides_label = QLabel("Frame Guides")
+        guides_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: 600;
+                padding: 4px 0px;
+            }}
+        """)
+        right_layout.addWidget(guides_label)
+        
+        # Category + Template selection (radio buttons instead of dropdowns)
+        category_row = self._ensure_frame_category_radio_row(context_key="guides_bottom")
+        right_layout.addWidget(category_row)
+
+        templates_list = self._ensure_frame_template_radio_list(context_key="guides_bottom")
+        right_layout.addWidget(templates_list)
+        
+        # Color picker radios (orange only when selected) + small swatch
+        if not hasattr(self, '_frame_colors'):
+            self._frame_colors = {
+                "White": ((255, 255, 255), "#FFFFFF"),
+                "Red": ((0, 0, 255), "#FF0000"),
+                "Green": ((0, 255, 0), "#00FF00"),
+                "Blue": ((255, 0, 0), "#0000FF"),
+                "Yellow": ((0, 255, 255), "#FFFF00"),
+            }
+
+        # Create (or reuse) radio group
+        if not hasattr(self, '_frame_color_group'):
+            self._frame_color_group = QButtonGroup(widget)
+            self._frame_color_group.setExclusive(True)
+            self._color_radios = {}
+
+        radio_style = f"""
+            QRadioButton {{
+                color: {COLORS['text']};
+                font-size: 12px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 9px;
+                background-color: {COLORS['surface']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        color_grid = QGridLayout()
+        color_grid.setHorizontalSpacing(16)
+        color_grid.setVerticalSpacing(10)
+
+        # determine current color to avoid resetting selection every rebuild
+        current_bgr = None
+        try:
+            current_bgr = getattr(self.preview_widget.frame_guide, 'line_color', None)
+        except Exception:
+            current_bgr = None
+
+        for idx, (name, (bgr, hex_color)) in enumerate(self._frame_colors.items()):
+            row = idx // 2
+            col = idx % 2
+
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+
+            radio = self._color_radios.get(name)
+            if radio is None:
+                radio = QRadioButton(name)
+                radio.setStyleSheet(radio_style)
+                radio.toggled.connect(lambda checked, n=name: self._on_frame_color_clicked(n) if checked else None)
+                self._frame_color_group.addButton(radio)
+                self._color_radios[name] = radio
+
+            swatch = QLabel()
+            swatch.setFixedSize(14, 14)
+            swatch.setStyleSheet(f"background-color: {hex_color}; border: 1px solid {COLORS['border']}; border-radius: 3px;")
+
+            row_layout.addWidget(radio)
+            row_layout.addWidget(swatch)
+            row_layout.addStretch()
+            color_grid.addWidget(row_widget, row, col)
+
+            if current_bgr == bgr:
+                radio.setChecked(True)
+
+        # Default to white if nothing matched
+        if hasattr(self, '_color_radios') and self._color_radios.get("White") and not any(r.isChecked() for r in self._color_radios.values()):
+            self._color_radios["White"].setChecked(True)
+            # Apply immediately so UI and overlay are in sync
+            self._on_frame_color_clicked("White")
+
+        right_layout.addLayout(color_grid)
+        
+        # Custom Frame button (Guides bottom panel)
+        if not hasattr(self, 'drag_mode_btn_guides'):
+            self.drag_mode_btn_guides = QPushButton("Custom Frame")
+            self.drag_mode_btn_guides.setCheckable(True)
+            self.drag_mode_btn_guides.setFixedHeight(36)
+            self.drag_mode_btn_guides.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 4px;
+                    color: {COLORS['text']};
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+                QPushButton:checked {{
+                    background-color: {COLORS['primary']};
+                    color: white;
+                }}
+            """)
+            # Option A: tap to toggle; when turning OFF, show naming row
+            self.drag_mode_btn_guides.toggled.connect(lambda checked: self._on_custom_frame_toggled("bottom", checked))
+
+        # Clear button (Guides bottom panel) - side by side with Custom Frame
+        if not hasattr(self, "_clear_guide_btn_guides"):
+            self._clear_guide_btn_guides = QPushButton("Clear")
+            self._clear_guide_btn_guides.setFixedHeight(36)
+            self._clear_guide_btn_guides.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 4px;
+                    color: {COLORS['text']};
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+                QPushButton:pressed {{
+                    background-color: #ff4444;
+                }}
+            """)
+            self._clear_guide_btn_guides.clicked.connect(self._clear_frame_guide)
+
+        top_btn_row = QHBoxLayout()
+        top_btn_row.setSpacing(8)
+        top_btn_row.addWidget(self.drag_mode_btn_guides)
+        top_btn_row.addWidget(self._clear_guide_btn_guides)
+        right_layout.addLayout(top_btn_row)
+
+        # Inline "Save name" row (Option A) for Custom Guide saving
+        if not hasattr(self, "_custom_guide_name_row_bottom"):
+            self._custom_guide_name_row_bottom = QWidget()
+            name_row_layout = QHBoxLayout(self._custom_guide_name_row_bottom)
+            name_row_layout.setContentsMargins(0, 0, 0, 0)
+            name_row_layout.setSpacing(8)
+
+            self._custom_guide_name_input_bottom = QLineEdit()
+            self._custom_guide_name_input_bottom.setPlaceholderText("Custom guide name…")
+            self._custom_guide_name_input_bottom.setFixedHeight(36)
+            self._custom_guide_name_input_bottom.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 6px;
+                    padding: 8px 10px;
+                    color: {COLORS['text']};
+                    font-size: 12px;
+                }}
+                QLineEdit:focus {{
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            # Allow OSK on Live page for this specific field
+            self._custom_guide_name_input_bottom._osk_allow_on_live = True
+            self._connect_field_to_osk(self._custom_guide_name_input_bottom)
+            name_row_layout.addWidget(self._custom_guide_name_input_bottom, 1)
+
+            self._custom_guide_name_cancel_bottom = QPushButton("Cancel")
+            self._custom_guide_name_cancel_bottom.setFixedHeight(36)
+            self._custom_guide_name_cancel_bottom.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 6px;
+                    color: {COLORS['text']};
+                    font-size: 11px;
+                    font-weight: 600;
+                    padding: 0px 10px;
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['surface_hover']};
+                }}
+            """)
+            self._custom_guide_name_cancel_bottom.clicked.connect(lambda: self._hide_custom_guide_name_row("bottom"))
+            name_row_layout.addWidget(self._custom_guide_name_cancel_bottom)
+
+            self._custom_guide_name_save_bottom = QPushButton("Save")
+            self._custom_guide_name_save_bottom.setFixedHeight(36)
+            self._custom_guide_name_save_bottom.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['primary']};
+                    border: 1px solid {COLORS['primary']};
+                    border-radius: 6px;
+                    color: {COLORS['background']};
+                    font-size: 11px;
+                    font-weight: 700;
+                    padding: 0px 12px;
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['primary_dark'] if 'primary_dark' in COLORS else COLORS['primary']};
+                }}
+            """)
+            self._custom_guide_name_save_bottom.clicked.connect(lambda: self._commit_custom_guide_name("bottom"))
+            name_row_layout.addWidget(self._custom_guide_name_save_bottom)
+
+            self._custom_guide_name_row_bottom.setVisible(False)
+
+        right_layout.addWidget(self._custom_guide_name_row_bottom)
+        # Extra breathing room so the bottom of the row/buttons never clip
+        right_layout.addSpacing(6)
+        
+        # Initialize frame guide templates
+        QTimer.singleShot(100, lambda: self._on_frame_category_changed(getattr(self, "_frame_category_selected", "Social")))
+        
+        right_layout.addStretch()
+        return widget
+    
+    def _create_multiview_panel_content(self) -> QWidget:
+        """Create multiview panel content (for portrait bottom panel)"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        
+        # Quad Split button
+        if not hasattr(self, 'multiview_btn'):
+            self.multiview_btn = QPushButton("Quad Split")
+            self.multiview_btn.setCheckable(True)
+            self.multiview_btn.setFixedHeight(50)
+            multiview_btn_style = f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: {COLORS['text']};
+                }}
+                QPushButton:checked {{
+                    background-color: {COLORS['surface']};
+                    color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                }}
+            """
+            self.multiview_btn.setStyleSheet(multiview_btn_style)
+            self.multiview_btn.clicked.connect(self._toggle_multiview)
+        
+        layout.addWidget(self.multiview_btn)
+        layout.addStretch()
+        return widget
+    
+    def _send_camera_command(self, command: str, endpoint: str = "aw_cam") -> bool:
+        """
+        Send HTTP command to current camera.
+        
+        Args:
+            command: Command string (e.g., "OSD:48:0" or "R01")
+            endpoint: CGI endpoint ("aw_cam" or "aw_ptz")
+            
+        Returns:
+            True if command sent successfully
+        """
+        if self.current_camera_id is None:
+            return False
+        
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return False
+        
+        import requests
+        try:
+            url = f"http://{camera.ip_address}/cgi-bin/{endpoint}?cmd={command}&res=1"
+            response = requests.get(url, auth=(camera.username, camera.password), timeout=2.0)
+            if response.status_code == 200:
+                return True
+            else:
+                logger.warning(f"Camera command failed: {command} (status {response.status_code})")
+                return False
+        except Exception as e:
+            logger.error(f"Camera command error: {e}")
+            if hasattr(self, "toast") and self.toast:
+                self.toast.show_message("Camera command failed", duration=2000, error=True)
+            return False
+    
+    def _capture_preset_thumbnail(self, camera_id: int, preset_num: int) -> bool:
+        """
+        Capture current camera frame as preset thumbnail.
+        
+        Args:
+            camera_id: Camera ID
+            preset_num: Preset number (1-32)
+            
+        Returns:
+            True if thumbnail captured successfully
+        """
+        try:
+            # Get current frame from preview widget
+            if not hasattr(self, 'preview_widget') or self.preview_widget is None:
+                return False
+            
+            # Try to get frame from preview widget's current frame
+            frame = None
+            if hasattr(self.preview_widget, '_current_frame'):
+                frame = self.preview_widget._current_frame
+            
+            # Fallback: try display frame
+            if frame is None and hasattr(self.preview_widget, '_display_frame'):
+                frame = self.preview_widget._display_frame
+            
+            # Fallback: try to get from camera stream
+            if frame is None and camera_id in self.camera_streams:
+                stream = self.camera_streams[camera_id]
+                if hasattr(stream, 'current_frame'):
+                    frame = stream.current_frame
+            
+            if frame is None:
+                logger.warning("No frame available for thumbnail capture")
+                return False
+            
+            # Convert numpy frame to QPixmap
+            h, w = frame.shape[:2]
+            if len(frame.shape) == 3:
+                # BGR to RGB conversion
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                bytes_per_line = 3 * w
+                q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+            else:
+                # Grayscale
+                bytes_per_line = w
+                q_img = QImage(frame.data, w, h, bytes_per_line, QImage.Format.Format_Grayscale8)
+            
+            pixmap = QPixmap.fromImage(q_img)
+            
+            # Resize to 16:9 aspect ratio (80x45px to fit in 80x80 button)
+            thumbnail = pixmap.scaled(80, 45, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+            
+            # Crop to center if needed (to maintain 16:9 aspect ratio)
+            if thumbnail.width() / thumbnail.height() != 16 / 9:
+                # Calculate 16:9 crop
+                target_width = thumbnail.width()
+                target_height = int(target_width * 9 / 16)
+                if target_height > thumbnail.height():
+                    target_height = thumbnail.height()
+                    target_width = int(target_height * 16 / 9)
+                
+                x = (thumbnail.width() - target_width) // 2
+                y = (thumbnail.height() - target_height) // 2
+                thumbnail = thumbnail.copy(x, y, target_width, target_height)
+            
+            # Save to file
+            preset_dir = Path.home() / ".config" / "panapitouch" / "presets" / str(camera_id)
+            preset_dir.mkdir(parents=True, exist_ok=True)
+            thumbnail_path = preset_dir / f"preset_{preset_num:02d}.jpg"
+            
+            thumbnail.save(str(thumbnail_path), "JPEG", quality=85)
+            logger.info(f"Thumbnail saved for preset {preset_num} (camera {camera_id})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error capturing thumbnail: {e}", exc_info=True)
+            return False
+    
+    def _create_camera_control_panel_content(self) -> QWidget:
+        """Create camera control panel with category submenu and control panels"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        
+        # Category submenu bar
+        category_menu = QFrame()
+        category_menu.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border-bottom: 1px solid {COLORS['border']};
+            }}
+        """)
+        category_menu.setFixedHeight(60)
+        
+        category_layout = QHBoxLayout(category_menu)
+        category_layout.setContentsMargins(20, 0, 20, 0)
+        category_layout.setSpacing(0)
+        category_layout.addStretch()
+        
+        # Category buttons container
+        category_buttons_container = QWidget()
+        category_buttons_container.setStyleSheet("background: transparent;")
+        category_buttons_layout = QHBoxLayout(category_buttons_container)
+        category_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        category_buttons_layout.setSpacing(0)
+        
+        self.camera_control_category_group = QButtonGroup(self)
+        self.camera_control_category_group.setExclusive(True)
+        
+        # Category buttons: Exposure, Color, Image, Operations (Presets moved to bottom menu)
+        category_buttons = [
+            ("Exposure", 0),
+            ("Color", 1),
+            ("Image", 2),
+            ("Operations", 3),
+        ]
+        
+        for text, cat_idx in category_buttons:
+            btn = QPushButton(text)
+            btn.setObjectName("navButton")
+            btn.setCheckable(True)
+            btn.setFixedHeight(60)
+            btn.setMinimumWidth(100)
+            
+            self.camera_control_category_group.addButton(btn, cat_idx)
+            category_buttons_layout.addWidget(btn)
+            
+            if cat_idx == 0:
+                btn.setChecked(True)  # Default to Exposure
+        
+        self.camera_control_category_group.idClicked.connect(self._switch_camera_control_category)
+        
+        category_layout.addWidget(category_buttons_container)
+        category_layout.addStretch()
+        
+        layout.addWidget(category_menu)
+        
+        # Stacked widget for category panels
+        self.camera_control_stack = QStackedWidget()
+        self.camera_control_stack.setStyleSheet("QStackedWidget { background: transparent; }")
+        
+        # Create and add category panels
+        self.camera_control_stack.addWidget(self._create_exposure_panel())
+        self.camera_control_stack.addWidget(self._create_color_panel())
+        self.camera_control_stack.addWidget(self._create_image_panel())  # Includes Advanced features
+        self.camera_control_stack.addWidget(self._create_operations_panel())
+        
+        layout.addWidget(self.camera_control_stack)
+        
+        return widget
+    
+    def _switch_camera_control_category(self, index: int):
+        """Switch camera control category panel"""
+        self.camera_control_stack.setCurrentIndex(index)
+    
+    def _create_slider_with_buttons(self, label_text: str, min_val: int, max_val: int, default_val: int, 
+                                     value_format: callable, command_template: str, step: int = 1, endpoint: str = "aw_cam") -> tuple:
+        """Create a slider with +/- buttons and value display above"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+        
+        # Label
+        label = QLabel(label_text.upper())
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        container_layout.addWidget(label)
+        
+        # Value display box (above slider)
+        value_label = QLabel(value_format(default_val))
+        value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        value_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['surface_light']};
+                color: {COLORS['text']};
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 14px;
+                min-width: 80px;
+            }}
+        """)
+        container_layout.addWidget(value_label)
+        
+        # Slider row with +/- buttons
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(8)
+        
+        # Minus button
+        minus_btn = QPushButton("−")
+        minus_btn.setFixedSize(40, 40)
+        minus_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        
+        # Slider
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(min_val, max_val)
+        slider.setValue(default_val)
+        slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {COLORS['surface']};
+                height: 8px;
+                border-radius: 4px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {COLORS['primary']};
+                width: 20px;
+                height: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
+            }}
+            QSlider::handle:horizontal:hover {{
+                background: {COLORS['primary_dark']};
+            }}
+        """)
+        
+        # Plus button
+        plus_btn = QPushButton("+")
+        plus_btn.setFixedSize(40, 40)
+        plus_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        
+        # Connect slider value changes
+        def update_value(val):
+            value_label.setText(value_format(val))
+            if '{' in command_template:
+                self._send_camera_command(command_template.format(val), endpoint=endpoint)
+            else:
+                self._send_camera_command(command_template, endpoint=endpoint)
+        
+        slider.valueChanged.connect(update_value)
+        
+        # Connect +/- buttons
+        def decrement():
+            if slider.value() > min_val:
+                slider.setValue(max(min_val, slider.value() - step))
+        
+        def increment():
+            if slider.value() < max_val:
+                slider.setValue(min(max_val, slider.value() + step))
+        
+        minus_btn.clicked.connect(decrement)
+        plus_btn.clicked.connect(increment)
+        
+        slider_row.addWidget(minus_btn)
+        slider_row.addWidget(slider, stretch=1)
+        slider_row.addWidget(plus_btn)
+        
+        container_layout.addLayout(slider_row)
+        
+        return container, slider, value_label
+    
+    def _create_radio_group(self, label_text: str, options: list, default_idx: int, command_template: str, endpoint: str = "aw_cam") -> QWidget:
+        """Create a radio button group"""
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        
+        # Label
+        if label_text:  # Only add label if text provided
+            label = QLabel(label_text.upper())
+            label.setStyleSheet(f"""
+                QLabel {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    font-weight: bold;
+                    background-color: {COLORS['surface_light']};
+                    border: 2px solid {COLORS['border_light']};
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                }}
+            """)
+            layout.addWidget(label)
+        
+        # Radio button group
+        radio_group = QButtonGroup(container)
+        radio_layout = QHBoxLayout()
+        radio_layout.setSpacing(16)
+        
+        for idx, option_text in enumerate(options):
+            radio = QRadioButton(option_text)
+            radio.setStyleSheet(f"""
+                QRadioButton {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    spacing: 8px;
+                }}
+                QRadioButton::indicator {{
+                    width: 20px;
+                    height: 20px;
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 10px;
+                    background-color: {COLORS['surface']};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            if idx == default_idx:
+                radio.setChecked(True)
+            
+            def make_handler(i, text):
+                return lambda checked: self._send_camera_command(command_template.format(i), endpoint=endpoint) if checked else None
+            
+            radio.toggled.connect(make_handler(idx, option_text))
+            radio_group.addButton(radio, idx)
+            radio_layout.addWidget(radio)
+        
+        radio_layout.addStretch()
+        layout.addLayout(radio_layout)
+        
+        return container
+    
+    def _create_separator(self) -> QFrame:
+        """Create a horizontal separator line"""
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet(f"""
+            QFrame {{
+                color: {COLORS['border']};
+                background-color: {COLORS['border']};
+                max-height: 1px;
+            }}
+        """)
+        return separator
+    
+    def _create_two_column_layout(self) -> tuple:
+        """Create a two-column layout container"""
+        container = QWidget()
+        main_layout = QVBoxLayout(container)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(16)
+        
+        columns_widget = QWidget()
+        columns_layout = QHBoxLayout(columns_widget)
+        columns_layout.setContentsMargins(0, 0, 0, 0)
+        columns_layout.setSpacing(20)
+        
+        left_column = QWidget()
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(16)
+        
+        right_column = QWidget()
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(16)
+        
+        columns_layout.addWidget(left_column, stretch=1)
+        columns_layout.addWidget(right_column, stretch=1)
+        
+        main_layout.addWidget(columns_widget)
+        
+        return container, main_layout, left_layout, right_layout
+    
+    def _create_exposure_panel(self) -> QWidget:
+        """Create Exposure Control panel (Category 1) - two columns"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        container, main_layout, left_layout, right_layout = self._create_two_column_layout()
+        
+        # LEFT COLUMN
+        
+        # Picture Level slider
+        picture_level_container, picture_slider, picture_label = self._create_slider_with_buttons(
+            "Picture Level", 0, 100, 0,
+            lambda v: str(v),
+            "OSD:48:{}"
+        )
+        left_layout.addWidget(picture_level_container)
+        
+        left_layout.addWidget(self._create_separator())
+        
+        # Iris Mode radio buttons
+        iris_mode_container = self._create_radio_group(
+            "Iris Mode",
+            ["Manual", "Auto"],
+            0,
+            "OSD:48:{}"
+        )
+        left_layout.addWidget(iris_mode_container)
+        
+        # Auto Iris Speed radio buttons
+        iris_speed_container = self._create_radio_group(
+            "Auto Iris Speed",
+            ["Slow", "Normal", "Fast"],
+            1,
+            "OSD:50:{}"
+        )
+        left_layout.addWidget(iris_speed_container)
+        
+        # Auto Iris Window radio buttons
+        iris_window_container = self._create_radio_group(
+            "Auto Iris Window",
+            ["Normal1", "Normal2", "Center"],
+            0,
+            "OSD:51:{}"
+        )
+        left_layout.addWidget(iris_window_container)
+        
+        left_layout.addWidget(self._create_separator())
+        
+        # Shutter Mode radio buttons (2 rows)
+        shutter_mode_label = QLabel("Shutter Mode")
+        shutter_mode_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 14px; font-weight: 600;")
+        left_layout.addWidget(shutter_mode_label)
+        
+        shutter_mode_group = QButtonGroup(container)
+        shutter_mode_layout = QGridLayout()
+        shutter_options = ["Off", "Step", "Synchro", "ELC"]
+        for idx, option in enumerate(shutter_options):
+            radio = QRadioButton(option)
+            radio.setStyleSheet(f"""
+                QRadioButton {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    spacing: 8px;
+                }}
+                QRadioButton::indicator {{
+                    width: 20px;
+                    height: 20px;
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 10px;
+                    background-color: {COLORS['surface']};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            if idx == 0:
+                radio.setChecked(True)
+            radio.toggled.connect(lambda checked, i=idx: self._send_camera_command(f"OSD:52:{i}") if checked else None)
+            shutter_mode_group.addButton(radio, idx)
+            shutter_mode_layout.addWidget(radio, idx // 2, idx % 2)
+        left_layout.addLayout(shutter_mode_layout)
+        
+        # Step slider (indented)
+        shutter_speeds = [100, 250, 500, 1000, 2000, 4000, 8000, 10000]
+        step_container, step_slider, step_label = self._create_slider_with_buttons(
+            "Step", 0, 7, 0,
+            lambda v: f"1/{shutter_speeds[v] if v < len(shutter_speeds) else 100}",
+            "OSD:53:{}"
+        )
+        step_container.layout().setContentsMargins(20, 0, 0, 0)
+        left_layout.addWidget(step_container)
+        
+        # Synchro slider (indented)
+        synchro_container, synchro_slider, synchro_label = self._create_slider_with_buttons(
+            "Synchro", 50, 60, 60,
+            lambda v: str(v),
+            "OSD:54:{}"
+        )
+        synchro_container.layout().setContentsMargins(20, 0, 0, 0)
+        left_layout.addWidget(synchro_container)
+        
+        # ELC Limit radio buttons (indented)
+        elc_limit_container = self._create_radio_group(
+            "ELC Limit",
+            ["1/100", "1/120", "1/250"],
+            2,
+            "OSD:55:{}"
+        )
+        elc_limit_container.layout().setContentsMargins(20, 0, 0, 0)
+        left_layout.addWidget(elc_limit_container)
+        
+        left_layout.addStretch()
+        
+        # RIGHT COLUMN
+        
+        # Gain slider with Auto button
+        gain_label = QLabel("GAIN")
+        gain_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(gain_label)
+        
+        gain_value_label = QLabel("0dB")
+        gain_value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        gain_value_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {COLORS['surface_light']};
+                color: {COLORS['text']};
+                border: none;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 14px;
+                min-width: 80px;
+            }}
+        """)
+        right_layout.addWidget(gain_value_label)
+        
+        gain_row = QHBoxLayout()
+        gain_row.setSpacing(8)
+        
+        gain_minus_btn = QPushButton("−")
+        gain_minus_btn.setFixedSize(40, 40)
+        gain_minus_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        
+        gain_slider = QSlider(Qt.Orientation.Horizontal)
+        gain_slider.setRange(-3, 42)
+        gain_slider.setValue(0)
+        gain_slider.setStyleSheet(f"""
+            QSlider::groove:horizontal {{
+                background: {COLORS['surface']};
+                height: 8px;
+                border-radius: 4px;
+            }}
+            QSlider::handle:horizontal {{
+                background: {COLORS['primary']};
+                width: 20px;
+                height: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
+            }}
+        """)
+        
+        gain_plus_btn = QPushButton("+")
+        gain_plus_btn.setFixedSize(40, 40)
+        gain_plus_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 20px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        
+        gain_auto_btn = QPushButton("Auto")
+        gain_auto_btn.setCheckable(True)
+        gain_auto_btn.setFixedSize(60, 40)
+        gain_auto_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        
+        def update_gain(val):
+            gain_value_label.setText(f"{val}dB")
+            self._send_camera_command(f"OSD:51:{val}")
+        
+        gain_slider.valueChanged.connect(update_gain)
+        gain_minus_btn.clicked.connect(lambda: gain_slider.setValue(max(-3, gain_slider.value() - 1)))
+        gain_plus_btn.clicked.connect(lambda: gain_slider.setValue(min(42, gain_slider.value() + 1)))
+        gain_auto_btn.toggled.connect(lambda checked: self._send_camera_command(f"OSD:50:{'1' if checked else '0'}"))
+        
+        gain_row.addWidget(gain_minus_btn)
+        gain_row.addWidget(gain_slider, stretch=1)
+        gain_row.addWidget(gain_plus_btn)
+        gain_row.addWidget(gain_auto_btn)
+        right_layout.addLayout(gain_row)
+        
+        # Super Gain radio buttons
+        super_gain_container = self._create_radio_group(
+            "Super Gain",
+            ["Off", "On"],
+            0,
+            "OSD:56:{}"
+        )
+        right_layout.addWidget(super_gain_container)
+        
+        # AGC Max Gain radio buttons
+        agc_max_container = self._create_radio_group(
+            "AGC Max Gain",
+            ["6dB", "12dB", "18dB"],
+            2,
+            "OSD:57:{}"
+        )
+        right_layout.addWidget(agc_max_container)
+        
+        right_layout.addWidget(self._create_separator())
+        
+        # ND Filter radio buttons (2 rows)
+        nd_label = QLabel("ND FILTER")
+        nd_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(nd_label)
+        
+        nd_group = QButtonGroup(container)
+        nd_layout = QGridLayout()
+        nd_options = ["Through", "1/4", "1/16", "1/64"]
+        for idx, option in enumerate(nd_options):
+            radio = QRadioButton(option)
+            radio.setStyleSheet(f"""
+                QRadioButton {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    spacing: 8px;
+                }}
+                QRadioButton::indicator {{
+                    width: 20px;
+                    height: 20px;
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 10px;
+                    background-color: {COLORS['surface']};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            if idx == 0:
+                radio.setChecked(True)
+            radio.toggled.connect(lambda checked, i=idx: self._send_camera_command(f"OSD:55:{i}") if checked else None)
+            nd_group.addButton(radio, idx)
+            nd_layout.addWidget(radio, idx // 2, idx % 2)
+        right_layout.addLayout(nd_layout)
+        
+        # Day/Night radio buttons
+        day_night_container = self._create_radio_group(
+            "Day/Night",
+            ["Day", "Night"],
+            0,
+            "OSD:58:{}"
+        )
+        right_layout.addWidget(day_night_container)
+        
+        # Frame Mix radio buttons
+        frame_mix_container = self._create_radio_group(
+            "FRAME MIX",
+            ["Off", "On"],
+            0,
+            "OSD:59:{}"
+        )
+        right_layout.addWidget(frame_mix_container)
+        
+        right_layout.addStretch()
+        
+        scroll.setWidget(container)
+        return scroll
+    
+    def _create_color_panel(self) -> QWidget:
+        """Create Color & White Balance panel (Category 2) - redesigned with two columns"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        container, main_layout, left_layout, right_layout = self._create_two_column_layout()
+        
+        # LEFT COLUMN
+        
+        # White Balance Mode
+        wb_mode_container = self._create_radio_group(
+            "White Balance Mode",
+            ["Auto", "Indoor", "Outdoor", "Manual", "ATW"],
+            0,
+            "OSD:54:{}"
+        )
+        left_layout.addWidget(wb_mode_container)
+        
+        # Color Temperature slider
+        color_temp_container, _, _ = self._create_slider_with_buttons(
+            "Color Temperature", 2000, 15000, 5600,
+            lambda v: f"{v}K",
+            "OSD:55:{}"
+        )
+        left_layout.addWidget(color_temp_container)
+        
+        # Red Gain slider
+        red_gain_container, _, _ = self._create_slider_with_buttons(
+            "Red Gain", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:56:{}"
+        )
+        left_layout.addWidget(red_gain_container)
+        
+        # Blue Gain slider
+        blue_gain_container, _, _ = self._create_slider_with_buttons(
+            "Blue Gain", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:57:{}"
+        )
+        left_layout.addWidget(blue_gain_container)
+        
+        # WB Speed
+        wb_speed_container = self._create_radio_group(
+            "WB Speed",
+            ["Fast", "Normal", "Slow"],
+            1,
+            "OSD:58:{}"
+        )
+        left_layout.addWidget(wb_speed_container)
+        
+        left_layout.addWidget(self._create_separator())
+        
+        # Color Matrix Type
+        matrix_type_container = self._create_radio_group(
+            "Matrix Type",
+            ["Normal", "EBU", "NTSC", "User"],
+            0,
+            "OSD:59:{}"
+        )
+        left_layout.addWidget(matrix_type_container)
+        
+        # Saturation slider
+        saturation_container, _, _ = self._create_slider_with_buttons(
+            "Saturation", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:60:{}"
+        )
+        left_layout.addWidget(saturation_container)
+        
+        # Hue slider
+        hue_container, _, _ = self._create_slider_with_buttons(
+            "Hue", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:61:{}"
+        )
+        left_layout.addWidget(hue_container)
+        
+        left_layout.addStretch()
+        
+        # RIGHT COLUMN
+        
+        # Gamma Mode
+        gamma_label = QLabel("GAMMA MODE")
+        gamma_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(gamma_label)
+        
+        gamma_group = QButtonGroup(container)
+        gamma_layout = QGridLayout()
+        gamma_options = ["Standard", "Cinema", "Wide", "HD", "FILMLIKE1", "FILMLIKE2", "FILMLIKE3", "FILM-REC", "VIDEO-REC", "HLG"]
+        for idx, option in enumerate(gamma_options):
+            radio = QRadioButton(option)
+            radio.setStyleSheet(f"""
+                QRadioButton {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    spacing: 8px;
+                }}
+                QRadioButton::indicator {{
+                    width: 20px;
+                    height: 20px;
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 10px;
+                    background-color: {COLORS['surface']};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            if idx == 0:
+                radio.setChecked(True)
+            radio.toggled.connect(lambda checked, i=idx: self._send_camera_command(f"OSD:62:{i}") if checked else None)
+            gamma_group.addButton(radio, idx)
+            gamma_layout.addWidget(radio, idx // 2, idx % 2)
+        right_layout.addLayout(gamma_layout)
+        
+        # Gamma Level
+        gamma_level_container = self._create_radio_group(
+            "Gamma Level",
+            ["Low", "Mid", "High"],
+            1,
+            "OSD:63:{}"
+        )
+        right_layout.addWidget(gamma_level_container)
+        
+        right_layout.addWidget(self._create_separator())
+        
+        # Black Balance
+        black_balance_container = self._create_radio_group(
+            "Black Balance",
+            ["Auto", "Manual"],
+            0,
+            "OSD:64:{}"
+        )
+        right_layout.addWidget(black_balance_container)
+        
+        # Master Black slider
+        master_black_container, _, _ = self._create_slider_with_buttons(
+            "Master Black", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:65:{}"
+        )
+        right_layout.addWidget(master_black_container)
+        
+        right_layout.addStretch()
+        
+        scroll.setWidget(container)
+        return scroll
+    
+    def _create_image_panel(self) -> QWidget:
+        """Create Image Enhancement panel (Category 3) - includes Advanced features, two columns"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        container, main_layout, left_layout, right_layout = self._create_two_column_layout()
+        
+        # LEFT COLUMN
+        
+        # Detail Level slider
+        detail_level_container, _, _ = self._create_slider_with_buttons(
+            "Detail Level", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:64:{}"
+        )
+        left_layout.addWidget(detail_level_container)
+        
+        # H/V Ratio slider
+        hv_ratio_container, _, _ = self._create_slider_with_buttons(
+            "H/V Ratio", 0, 100, 50,
+            lambda v: str(v),
+            "OSD:65:{}"
+        )
+        left_layout.addWidget(hv_ratio_container)
+        
+        left_layout.addWidget(self._create_separator())
+        
+        # Knee Mode
+        knee_mode_container = self._create_radio_group(
+            "Knee Mode",
+            ["Off", "Auto", "Manual"],
+            0,
+            "OSD:66:{}"
+        )
+        left_layout.addWidget(knee_mode_container)
+        
+        # Knee Point slider
+        knee_point_container, _, _ = self._create_slider_with_buttons(
+            "Knee Point", 70, 105, 95,
+            lambda v: f"{v}%",
+            "OSD:67:{}"
+        )
+        left_layout.addWidget(knee_point_container)
+        
+        left_layout.addWidget(self._create_separator())
+        
+        # DNR Level
+        dnr_level_container = self._create_radio_group(
+            "DNR Level",
+            ["Off", "Low", "High"],
+            0,
+            "OSD:68:{}"
+        )
+        left_layout.addWidget(dnr_level_container)
+        
+        # White Clip slider
+        white_clip_container, _, _ = self._create_slider_with_buttons(
+            "White Clip", 100, 109, 109,
+            lambda v: f"{v}%",
+            "OSD:69:{}"
+        )
+        left_layout.addWidget(white_clip_container)
+        
+        # Chroma Level slider
+        chroma_container, _, _ = self._create_slider_with_buttons(
+            "Chroma Level", -99, 99, 0,
+            lambda v: str(v),
+            "OSD:70:{}"
+        )
+        left_layout.addWidget(chroma_container)
+        
+        left_layout.addStretch()
+        
+        # RIGHT COLUMN - Advanced Features
+        
+        # Image Transform
+        transform_label = QLabel("IMAGE TRANSFORM")
+        transform_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(transform_label)
+        
+        # Flip Horizontal
+        flip_h_btn = QPushButton("Flip Horizontal")
+        flip_h_btn.setCheckable(True)
+        flip_h_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                padding: 8px;
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        flip_h_btn.clicked.connect(lambda checked: self._send_camera_command(f"OSD:80:{'1' if checked else '0'}"))
+        right_layout.addWidget(flip_h_btn)
+        
+        # Flip Vertical
+        flip_v_btn = QPushButton("Flip Vertical")
+        flip_v_btn.setCheckable(True)
+        flip_v_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                padding: 8px;
+            }}
+            QPushButton:checked {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        flip_v_btn.clicked.connect(lambda checked: self._send_camera_command(f"OSD:81:{'1' if checked else '0'}"))
+        right_layout.addWidget(flip_v_btn)
+        
+        # Rotation
+        rotation_label = QLabel("ROTATION")
+        rotation_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(rotation_label)
+        
+        rotation_container = self._create_radio_group(
+            "",
+            ["0°", "90°", "180°", "270°"],
+            0,
+            "OSD:82:{}"
+        )
+        right_layout.addWidget(rotation_container)
+        
+        right_layout.addStretch()
+        
+        scroll.setWidget(container)
+        return scroll
+    
+    def _create_presets_panel(self) -> QWidget:
+        """Create Presets panel with 48-button grid (8×6) - matching Companion module"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(16)
+        
+        # Get current camera ID (or use first camera if none selected)
+        camera_id = self.current_camera_id
+        if camera_id is None and self.settings.cameras:
+            camera_id = self.settings.cameras[0].id
+        
+        if camera_id is None:
+            # No cameras configured
+            no_cameras_label = QLabel("No cameras configured")
+            no_cameras_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_cameras_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 16px;")
+            layout.addWidget(no_cameras_label)
+            layout.addStretch()
+            scroll.setWidget(widget)
+            return scroll
+        
+        # Create 8×6 grid (48 presets)
+        presets_grid = QGridLayout()
+        presets_grid.setSpacing(6)  # Reduced horizontal spacing
+        presets_grid.setVerticalSpacing(8)  # Reduced vertical spacing for tighter layout
+        
+        # Prevent columns from stretching - set all column stretch to 0
+        for col in range(8):
+            presets_grid.setColumnStretch(col, 0)
+        
+        # Store preset buttons for potential refresh
+        preset_buttons = []
+        for preset_num in range(1, 49):  # Presets 1-48
+            row = (preset_num - 1) // 8  # 6 rows (0-5)
+            col = (preset_num - 1) % 8   # 8 columns (0-7)
+            
+            # Create container widget with label above and button below
+            container = QWidget()
+            container.setFixedWidth(80)  # Fixed width to match button size
+            container_layout = QVBoxLayout(container)
+            container_layout.setContentsMargins(0, 0, 0, 0)
+            container_layout.setSpacing(4)
+            
+            # Label above button
+            preset_btn = PresetButton(preset_num, camera_id, self)
+            name_label = QLabel()
+            name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            name_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {COLORS['text']};
+                    font-size: 14px;
+                    font-weight: 600;
+                    padding: 0px;
+                    margin: 0px;
+                    border: none;
+                    border-top: none;
+                }}
+            """)
+            # Set label text (use preset name if available, otherwise preset number)
+            display_name = preset_btn.preset_name if preset_btn.preset_name else str(preset_num)
+            name_label.setText(display_name)
+            preset_btn._name_label = name_label  # Store reference for updates
+            
+            container_layout.addWidget(name_label)
+            container_layout.addWidget(preset_btn)
+            container_layout.addStretch()
+            
+            preset_buttons.append(preset_btn)
+            presets_grid.addWidget(container, row, col)
+        
+        layout.addLayout(presets_grid)
+        layout.addStretch()
+        
+        scroll.setWidget(widget)
+        return scroll
+    
+    
+    def _create_operations_panel(self) -> QWidget:
+        """Create Camera Operations panel (Category 6) - two columns"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        container, main_layout, left_layout, right_layout = self._create_two_column_layout()
+        
+        # LEFT COLUMN
+        
+        power_label = QLabel("POWER CONTROL")
+        power_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        left_layout.addWidget(power_label)
+        
+        power_on_btn = QPushButton("Power ON")
+        power_on_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        power_on_btn.clicked.connect(lambda: self._send_camera_command("O", endpoint="aw_cam"))
+        left_layout.addWidget(power_on_btn)
+        
+        power_standby_btn = QPushButton("Standby")
+        power_standby_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        power_standby_btn.clicked.connect(lambda: self._send_camera_command("S", endpoint="aw_cam"))
+        left_layout.addWidget(power_standby_btn)
+        
+        left_layout.addStretch()
+        
+        # RIGHT COLUMN
+        
+        status_label = QLabel("STATUS")
+        status_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 14px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border_light']};
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+        """)
+        right_layout.addWidget(status_label)
+        
+        query_status_btn = QPushButton("Query Status")
+        query_status_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                color: {COLORS['text']};
+                font-size: 14px;
+                padding: 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        query_status_btn.clicked.connect(lambda: self._send_camera_command("QID", endpoint="aw_cam"))
+        right_layout.addWidget(query_status_btn)
+        
+        right_layout.addStretch()
+        
+        scroll.setWidget(container)
+        return scroll
+    
+    def _create_advanced_panel(self) -> QWidget:
+        """Create Advanced Features panel (Category 7)"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
+        
+        # Image Transform Group
+        transform_group = QGroupBox("Image Transform")
+        transform_layout = QVBoxLayout(transform_group)
+        transform_layout.setSpacing(8)
+        
+        flip_h_btn = QPushButton("Flip Horizontal")
+        flip_h_btn.setCheckable(True)
+        flip_h_btn.clicked.connect(lambda checked: self._send_camera_command(f"OSD:80:{'1' if checked else '0'}"))
+        transform_layout.addWidget(flip_h_btn)
+        
+        flip_v_btn = QPushButton("Flip Vertical")
+        flip_v_btn.setCheckable(True)
+        flip_v_btn.clicked.connect(lambda checked: self._send_camera_command(f"OSD:81:{'1' if checked else '0'}"))
+        transform_layout.addWidget(flip_v_btn)
+        
+        rotation_combo = QComboBox()
+        rotation_combo.addItems(["0°", "90°", "180°", "270°"])
+        rotation_combo.currentTextChanged.connect(lambda v: self._send_camera_command(f"OSD:82:{['0°', '90°', '180°', '270°'].index(v)}"))
+        transform_layout.addWidget(QLabel("Rotation:"))
+        transform_layout.addWidget(rotation_combo)
+        
+        layout.addWidget(transform_group)
+        
+        layout.addStretch()
+        
+        scroll.setWidget(widget)
+        return scroll
     
     def _create_side_panel(self) -> QWidget:
         """Create right side panel with collapsible PTZ controls, OSD menu, overlays, and multiview"""
@@ -445,11 +3162,16 @@ class MainWindow(QMainWindow):
         def setup_combo_view(combo: QComboBox):
             """Set up a dark styled view for combo box"""
             view = QListView()
+            view.setAutoFillBackground(True)
             view.setStyleSheet(f"""
-                QListView {{
+                QListView, QListView::viewport, QAbstractScrollArea, QAbstractScrollArea::viewport, QWidget, QFrame {{
                     background-color: {COLORS['surface']};
+                }}
+                QListView {{
                     border: none;
                     outline: none;
+                    padding: 0px;
+                    margin: 0px;
                 }}
                 QListView::item {{
                     background-color: {COLORS['surface']};
@@ -631,21 +3353,8 @@ class MainWindow(QMainWindow):
         grid_layout.setContentsMargins(8, 8, 8, 8)
         grid_layout.setSpacing(6)
         
-        # Grid type buttons
-        self.grid_buttons = {}
-        grid_types = [
-            ("Rule of Thirds", "thirds"),
-            ("Full Grid", "grid"),
-        ]
-        
-        for name, key in grid_types:
-            btn = QPushButton(name)
-            btn.setObjectName("overlayButton")
-            btn.setCheckable(True)
-            btn.setFixedHeight(32)
-            btn.clicked.connect(lambda checked, k=key: self._toggle_grid_type(k))
-            self.grid_buttons[key] = btn
-            grid_layout.addWidget(btn)
+        # Grid mode radios (Off / Thirds / Full / Both)
+        grid_layout.addWidget(self._ensure_grid_mode_radio_list(context_key="live_overlay_grid"))
         
         self.grid_panel.setVisible(False)
         layout.addWidget(self.grid_panel)
@@ -658,83 +3367,110 @@ class MainWindow(QMainWindow):
         self.frame_guide_toggle_btn.clicked.connect(self._toggle_frame_guide_panel)
         layout.addWidget(self.frame_guide_toggle_btn)
         
-        # Frame Guides Panel (collapsible)
-        self.frame_guide_panel = QFrame()
-        self.frame_guide_panel.setStyleSheet(f"""
+        # Frame Guides Panel (collapsible) - scrollable (Option B) to avoid clipping
+        self.frame_guide_panel = TouchScrollArea()
+        self.frame_guide_panel.setWidgetResizable(True)
+        self.frame_guide_panel.setStyleSheet("background: transparent; border: none;")
+        self.frame_guide_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        self._frame_guide_panel_inner = QFrame()
+        self._frame_guide_panel_inner.setStyleSheet(f"""
             QFrame {{
                 background-color: {COLORS['surface_light']};
                 border: 1px solid {COLORS['border']};
                 border-radius: 8px;
             }}
         """)
-        frame_guide_layout = QVBoxLayout(self.frame_guide_panel)
+        self.frame_guide_panel.setWidget(self._frame_guide_panel_inner)
+
+        frame_guide_layout = QVBoxLayout(self._frame_guide_panel_inner)
         frame_guide_layout.setContentsMargins(6, 6, 6, 6)
         frame_guide_layout.setSpacing(4)
         
-        # Template category dropdown - touch friendly
-        self.frame_category_combo = QComboBox()
-        self.frame_category_combo.setFixedHeight(38)
-        self.frame_category_combo.setStyleSheet(touch_combo_style)
-        setup_combo_view(self.frame_category_combo)
-        self.frame_category_combo.addItems(["Social", "Cinema", "TV/Broadcast", "Custom"])
-        self.frame_category_combo.currentTextChanged.connect(self._on_frame_category_changed)
-        frame_guide_layout.addWidget(self.frame_category_combo)
+        # Category + Template selection (radio buttons instead of dropdowns)
+        frame_guide_layout.addWidget(self._ensure_frame_category_radio_row(context_key="live_overlay"))
+        frame_guide_layout.addWidget(self._ensure_frame_template_radio_list(context_key="live_overlay"))
         
-        # Template selection dropdown - touch friendly
-        self.frame_template_combo = QComboBox()
-        self.frame_template_combo.setFixedHeight(38)
-        self.frame_template_combo.setStyleSheet(touch_combo_style)
-        setup_combo_view(self.frame_template_combo)
-        self.frame_template_combo.currentTextChanged.connect(self._on_frame_template_changed)
-        frame_guide_layout.addWidget(self.frame_template_combo)
+        # Color picker radios + small swatches (match Camera Control radio look)
+        if not hasattr(self, '_frame_colors'):
+            self._frame_colors = {
+                "White": ((255, 255, 255), "#FFFFFF"),
+                "Red": ((0, 0, 255), "#FF0000"),      # BGR for OpenCV
+                "Green": ((0, 255, 0), "#00FF00"),    # BGR for OpenCV
+                "Blue": ((255, 0, 0), "#0000FF"),     # BGR for OpenCV
+                "Yellow": ((0, 255, 255), "#FFFF00"), # BGR for OpenCV
+            }
         
-        # Color picker buttons - 25x25px, centered, rounded
-        self._frame_colors = {
-            "White": ((255, 255, 255), "#FFFFFF"),
-            "Red": ((0, 0, 255), "#FF0000"),      # BGR for OpenCV
-            "Green": ((0, 255, 0), "#00FF00"),    # BGR for OpenCV
-            "Blue": ((255, 0, 0), "#0000FF"),     # BGR for OpenCV
-            "Yellow": ((0, 255, 255), "#FFFF00"), # BGR for OpenCV
-        }
-        
-        color_row = QWidget()
-        color_row.setFixedHeight(45)
-        color_row_layout = QHBoxLayout(color_row)
-        color_row_layout.setContentsMargins(0, 5, 0, 20)
-        color_row_layout.setSpacing(8)
-        color_row_layout.addStretch()
-        
-        self._color_buttons = {}
-        for name, (bgr, hex_color) in self._frame_colors.items():
-            btn = QPushButton()
-            btn.setFixedSize(25, 25)
-            btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {hex_color};
-                    border: 2px solid {COLORS['border']};
-                    border-radius: 6px;
-                    padding: 0px;
-                    margin: 0px;
-                }}
-                QPushButton:hover {{
-                    border-color: {COLORS['text']};
-                }}
-                QPushButton:checked {{
-                    border-color: {COLORS['primary']};
-                    border-width: 3px;
-                }}
-            """)
-            btn.setCheckable(True)
-            btn.clicked.connect(lambda checked, n=name: self._on_frame_color_clicked(n))
-            color_row_layout.addWidget(btn)
-            self._color_buttons[name] = btn
-        
-        color_row_layout.addStretch()
-        # Default to white selected
-        self._color_buttons["White"].setChecked(True)
-        frame_guide_layout.addWidget(color_row)
-        frame_guide_layout.addSpacing(8)  # Space after color buttons
+        if not hasattr(self, '_frame_color_group'):
+            self._frame_color_group = QButtonGroup(self._frame_guide_panel_inner)
+            self._frame_color_group.setExclusive(True)
+        if not hasattr(self, '_color_radios'):
+            self._color_radios = {}
+
+        radio_style = f"""
+            QRadioButton {{
+                color: {COLORS['text']};
+                font-size: 12px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 9px;
+                background-color: {COLORS['surface']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        color_grid = QGridLayout()
+        color_grid.setHorizontalSpacing(12)
+        color_grid.setVerticalSpacing(6)
+
+        current_bgr = None
+        try:
+            current_bgr = getattr(self.preview_widget.frame_guide, 'line_color', None)
+        except Exception:
+            current_bgr = None
+
+        for idx, (name, (bgr, hex_color)) in enumerate(self._frame_colors.items()):
+            row = idx // 2
+            col = idx % 2
+
+            item = QWidget()
+            item_layout = QHBoxLayout(item)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+            item_layout.setSpacing(6)
+
+            radio = self._color_radios.get(name)
+            if radio is None:
+                radio = QRadioButton(name)
+                radio.setStyleSheet(radio_style)
+                radio.toggled.connect(lambda checked, n=name: self._on_frame_color_clicked(n) if checked else None)
+                self._frame_color_group.addButton(radio)
+                self._color_radios[name] = radio
+
+            swatch = QLabel()
+            swatch.setFixedSize(12, 12)
+            swatch.setStyleSheet(f"background-color: {hex_color}; border: 1px solid {COLORS['border']}; border-radius: 3px;")
+
+            item_layout.addWidget(radio)
+            item_layout.addWidget(swatch)
+            item_layout.addStretch()
+            color_grid.addWidget(item, row, col)
+
+            if current_bgr == bgr:
+                radio.setChecked(True)
+
+        if self._color_radios.get("White") and not any(r.isChecked() for r in self._color_radios.values()):
+            self._color_radios["White"].setChecked(True)
+            self._on_frame_color_clicked("White")
+
+        frame_guide_layout.addLayout(color_grid)
+        frame_guide_layout.addSpacing(8)
         
         # Button style for Save/Clear/Custom Frame
         action_btn_style = f"""
@@ -753,24 +3489,15 @@ class MainWindow(QMainWindow):
             }}
         """
         
-        # Custom Frame button - same style as Save/Clear
-        self.drag_mode_btn = QPushButton("Custom Frame")
-        self.drag_mode_btn.setCheckable(True)
-        self.drag_mode_btn.setFixedHeight(30)
-        self.drag_mode_btn.setStyleSheet(action_btn_style)
-        self.drag_mode_btn.clicked.connect(self._toggle_drag_mode)
-        frame_guide_layout.addWidget(self.drag_mode_btn)
+        # Custom Frame button (Live overlay panel)
+        self.drag_mode_btn_overlay = QPushButton("Custom Frame")
+        self.drag_mode_btn_overlay.setCheckable(True)
+        self.drag_mode_btn_overlay.setFixedHeight(30)
+        self.drag_mode_btn_overlay.setStyleSheet(action_btn_style)
+        # Option A: tap to toggle; when turning OFF, show naming row
+        self.drag_mode_btn_overlay.toggled.connect(lambda checked: self._on_custom_frame_toggled("overlay", checked))
         
-        # Save and Clear buttons - side by side
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(4)
-        
-        save_custom_btn = QPushButton("Save")
-        save_custom_btn.setFixedHeight(30)
-        save_custom_btn.setStyleSheet(action_btn_style)
-        save_custom_btn.clicked.connect(self._save_custom_frame_guide)
-        btn_row.addWidget(save_custom_btn)
-        
+        # Clear button (Live overlay panel) - side by side with Custom Frame
         clear_guide_btn = QPushButton("Clear")
         clear_guide_btn.setFixedHeight(30)
         clear_guide_btn.setStyleSheet(f"""
@@ -789,15 +3516,77 @@ class MainWindow(QMainWindow):
             }}
         """)
         clear_guide_btn.clicked.connect(self._clear_frame_guide)
+
+        # Custom Frame + Clear row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(4)
+        btn_row.addWidget(self.drag_mode_btn_overlay)
         btn_row.addWidget(clear_guide_btn)
         
         frame_guide_layout.addLayout(btn_row)
+
+        # Inline "Save name" row (Option A) for overlay panel
+        if not hasattr(self, "_custom_guide_name_row_overlay"):
+            self._custom_guide_name_row_overlay = QWidget()
+            self._custom_guide_name_row_overlay.setStyleSheet("background: transparent;")
+            name_row_layout = QHBoxLayout(self._custom_guide_name_row_overlay)
+            name_row_layout.setContentsMargins(0, 0, 0, 0)
+            name_row_layout.setSpacing(6)
+
+            self._custom_guide_name_input_overlay = QLineEdit()
+            self._custom_guide_name_input_overlay.setPlaceholderText("Custom guide name…")
+            self._custom_guide_name_input_overlay.setFixedHeight(30)
+            self._custom_guide_name_input_overlay.setStyleSheet(f"""
+                QLineEdit {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 6px;
+                    padding: 6px 8px;
+                    color: {COLORS['text']};
+                    font-size: 12px;
+                }}
+                QLineEdit:focus {{
+                    border-color: {COLORS['primary']};
+                }}
+            """)
+            self._custom_guide_name_input_overlay._osk_allow_on_live = True
+            self._connect_field_to_osk(self._custom_guide_name_input_overlay)
+            name_row_layout.addWidget(self._custom_guide_name_input_overlay, 1)
+
+            cancel_btn = QPushButton("Cancel")
+            cancel_btn.setFixedHeight(30)
+            cancel_btn.setStyleSheet(action_btn_style)
+            cancel_btn.clicked.connect(lambda: self._hide_custom_guide_name_row("overlay"))
+            name_row_layout.addWidget(cancel_btn)
+
+            ok_btn = QPushButton("Save")
+            ok_btn.setFixedHeight(30)
+            ok_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['primary']};
+                    border: 1px solid {COLORS['primary']};
+                    border-radius: 4px;
+                    color: {COLORS['background']};
+                    font-size: 10px;
+                    font-weight: 700;
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['primary']};
+                }}
+            """)
+            ok_btn.clicked.connect(lambda: self._commit_custom_guide_name("overlay"))
+            name_row_layout.addWidget(ok_btn)
+
+            self._custom_guide_name_row_overlay.setVisible(False)
+
+        frame_guide_layout.addWidget(self._custom_guide_name_row_overlay)
         
         # Add spacing at bottom
-        frame_guide_layout.addSpacing(20)
+        frame_guide_layout.addSpacing(32)
         
         self.frame_guide_panel.setVisible(False)
-        layout.addWidget(self.frame_guide_panel)
+        # Give Frame Guides the remaining vertical space when expanded
+        layout.addWidget(self.frame_guide_panel, 1)
         
         # Initialize frame guide templates
         self._on_frame_category_changed("Social")
@@ -1038,63 +3827,469 @@ class MainWindow(QMainWindow):
             self._populate_split_cameras()
     
     def _toggle_grid_type(self, grid_type: str):
-        """Toggle specific grid type"""
+        """
+        Legacy toggle entrypoint (kept for compatibility).
+
+        We now expose a radio-group UI (Off / Thirds / Full / Both). This method
+        preserves old behavior: toggling one flag while keeping the other.
+        """
+        overlay = getattr(self.preview_widget, "grid_overlay", None)
+        if overlay is None:
+            return
+
+        thirds = bool(getattr(overlay, "rule_of_thirds", False))
+        full = bool(getattr(overlay, "full_grid", False))
+
         if grid_type == "thirds":
-            enabled = self.preview_widget.toggle_rule_of_thirds()
-            self.grid_buttons["thirds"].setChecked(enabled)
+            thirds = not thirds
         elif grid_type == "grid":
-            enabled = self.preview_widget.toggle_full_grid()
-            self.grid_buttons["grid"].setChecked(enabled)
+            full = not full
+        else:
+            return
+
+        overlay.rule_of_thirds = thirds
+        overlay.full_grid = full
+        overlay.set_enabled(bool(thirds or full))
+        self._sync_grid_mode_radios()
+
+    # === Grid mode selectors (radio-based) ===
+
+    def _current_grid_mode(self) -> str:
+        """Return current grid mode: off | thirds | grid | both."""
+        overlay = getattr(self.preview_widget, "grid_overlay", None)
+        if overlay is None or not bool(getattr(overlay, "enabled", False)):
+            return "off"
+
+        thirds = bool(getattr(overlay, "rule_of_thirds", False))
+        full = bool(getattr(overlay, "full_grid", False))
+
+        if thirds and full:
+            return "both"
+        if thirds:
+            return "thirds"
+        if full:
+            return "grid"
+        return "off"
+
+    def _apply_grid_mode(self, mode: str):
+        """Apply grid mode to the underlying overlay and sync UIs."""
+        overlay = getattr(self.preview_widget, "grid_overlay", None)
+        if overlay is None:
+            return
+
+        mode = (mode or "off").lower()
+        if mode == "off":
+            overlay.rule_of_thirds = False
+            overlay.full_grid = False
+            overlay.set_enabled(False)
+        elif mode == "thirds":
+            overlay.rule_of_thirds = True
+            overlay.full_grid = False
+            overlay.set_enabled(True)
+        elif mode == "grid":
+            overlay.rule_of_thirds = False
+            overlay.full_grid = True
+            overlay.set_enabled(True)
+        elif mode == "both":
+            overlay.rule_of_thirds = True
+            overlay.full_grid = True
+            overlay.set_enabled(True)
+        else:
+            return
+
+        self._sync_grid_mode_radios()
+
+    def _sync_grid_mode_radios(self):
+        """Sync grid radio selections across all contexts."""
+        mode = self._current_grid_mode()
+        for _, info in getattr(self, "_grid_mode_radios_by_ctx", {}).items():
+            radios = info.get("radios", {})
+            if mode in radios and not radios[mode].isChecked():
+                radios[mode].blockSignals(True)
+                radios[mode].setChecked(True)
+                radios[mode].blockSignals(False)
+    
+    def _ensure_grid_mode_radio_list(self, context_key: str) -> QWidget:
+        """Create (or reuse) a vertical radio list for grid modes."""
+        if not hasattr(self, "_grid_mode_radios_by_ctx"):
+            self._grid_mode_radios_by_ctx = {}
+
+        if context_key in self._grid_mode_radios_by_ctx:
+            return self._grid_mode_radios_by_ctx[context_key]["widget"]
+
+        container = QWidget()
+        col = QVBoxLayout(container)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(8)
+
+        style = f"""
+            QRadioButton {{
+                color: {COLORS['text']};
+                font-size: 12px;
+                spacing: 10px;
+            }}
+            QRadioButton::indicator {{
+                width: 20px;
+                height: 20px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 10px;
+                background-color: {COLORS['surface']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        group = QButtonGroup(container)
+        group.setExclusive(True)
+        radios: dict[str, QRadioButton] = {}
+
+        # Keep labels short and touch-friendly
+        options = [
+            ("Off", "off"),
+            ("Thirds", "thirds"),
+            ("Full Grid", "grid"),
+            ("Both", "both"),
+        ]
+
+        current = self._current_grid_mode()
+        for label, mode in options:
+            r = QRadioButton(label)
+            r.setStyleSheet(style)
+            r.setMinimumHeight(32)
+            r.setChecked(mode == current)
+            r.toggled.connect(lambda checked, m=mode: self._apply_grid_mode(m) if checked else None)
+            group.addButton(r)
+            radios[mode] = r
+            col.addWidget(r)
+
+        self._grid_mode_radios_by_ctx[context_key] = {"widget": container, "group": group, "radios": radios}
+        return container
+
+    # === Frame guide selectors (radio-based, replaces dropdowns) ===
+
+    def _ensure_frame_category_radio_row(self, context_key: str) -> QWidget:
+        """Create (or reuse) a radio row for frame guide categories."""
+        if not hasattr(self, "_frame_category_selected"):
+            self._frame_category_selected = "Social"
+        if not hasattr(self, "_frame_category_radios_by_ctx"):
+            self._frame_category_radios_by_ctx = {}
+
+        if context_key in self._frame_category_radios_by_ctx:
+            return self._frame_category_radios_by_ctx[context_key]["widget"]
+
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(16)
+
+        style = f"""
+            QRadioButton {{
+                color: {COLORS['text']};
+                font-size: 12px;
+                spacing: 8px;
+            }}
+            QRadioButton::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 9px;
+                background-color: {COLORS['surface']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        group = QButtonGroup(container)
+        group.setExclusive(True)
+        radios: dict[str, QRadioButton] = {}
+
+        for cat in ["Social", "Cinema", "TV/Broadcast", "Custom"]:
+            r = QRadioButton(cat)
+            r.setStyleSheet(style)
+            r.setChecked(cat == self._frame_category_selected)
+            r.toggled.connect(lambda checked, c=cat: self._on_frame_category_changed(c) if checked else None)
+            group.addButton(r)
+            radios[cat] = r
+            row.addWidget(r)
+
+        row.addStretch()
+        self._frame_category_radios_by_ctx[context_key] = {"widget": container, "group": group, "radios": radios}
+        return container
+
+    def _ensure_frame_template_radio_list(self, context_key: str) -> QWidget:
+        """Create (or reuse) a scrollable radio list for templates."""
+        if not hasattr(self, "_frame_template_lists_by_ctx"):
+            self._frame_template_lists_by_ctx = {}
+
+        if context_key in self._frame_template_lists_by_ctx:
+            return self._frame_template_lists_by_ctx[context_key]["widget"]
+
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        # Show 2 columns × 4 rows (8 items) with compact spacing
+        scroll.setFixedHeight(132)  # ~4×28px rows + spacing
+
+        inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
+        grid = QGridLayout(inner)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(2)
+        scroll.setWidget(inner)
+
+        info = {
+            "widget": scroll,
+            "inner": inner,
+            "layout": grid,
+            "group": QButtonGroup(inner),
+            "radios": {},
+        }
+        info["group"].setExclusive(True)
+        self._frame_template_lists_by_ctx[context_key] = info
+
+        self._rebuild_frame_template_radios()
+        return scroll
+
+    def _get_frame_templates_for_category(self, category: str) -> list[str]:
+        templates = self.preview_widget.frame_guide.get_all_templates()
+        if category in templates:
+            return [g.name for g in templates[category]]
+        if category == "Custom":
+            custom_guides = getattr(self.preview_widget.frame_guide, "custom_guides", [])
+            if not custom_guides:
+                return ["(No custom guides)"]
+            return [g.name for g in custom_guides]
+        return []
+
+    def _rebuild_frame_template_radios(self):
+        """Rebuild template radio lists for all contexts based on selected category."""
+        if not hasattr(self, "_frame_category_selected"):
+            self._frame_category_selected = "Social"
+        if not hasattr(self, "_frame_template_selected"):
+            self._frame_template_selected = ""
+
+        names = self._get_frame_templates_for_category(self._frame_category_selected)
+        if not names:
+            names = ["(No custom guides)"]
+
+        radio_style = f"""
+            QRadioButton {{
+                color: {COLORS['text']};
+                font-size: 11px;
+                spacing: 6px;
+                padding: 0px;
+                margin: 0px;
+            }}
+            QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                background-color: {COLORS['surface']};
+            }}
+            QRadioButton::indicator:checked {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+            }}
+        """
+
+        is_custom_category = self._frame_category_selected == "Custom"
+
+        for _, info in getattr(self, "_frame_template_lists_by_ctx", {}).items():
+            layout: QGridLayout = info["layout"]
+            while layout.count():
+                item = layout.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
+            info["radios"].clear()
+
+            info["group"] = QButtonGroup(info["inner"])
+            info["group"].setExclusive(True)
+
+            for idx, name in enumerate(names):
+                row = idx // 2
+                col = idx % 2
+                r = QRadioButton(name)
+                r.setStyleSheet(radio_style)
+                r.setMinimumHeight(28)
+                r.toggled.connect(lambda checked, n=name: self._on_frame_template_changed(n) if checked else None)
+                info["group"].addButton(r)
+                info["radios"][name] = r
+                layout.addWidget(r, row, col)
+
+                # Placeholder should not be selectable
+                if name == "(No custom guides)":
+                    r.setEnabled(False)
+                # Long press on custom guides -> delete menu
+                elif is_custom_category:
+                    self._attach_custom_guide_long_press(r, name)
+        
+            # Preserve selection if it still exists in the new list.
+            # Otherwise, leave unselected (matches old dropdown behavior: category change does not auto-enable).
+            if self._frame_template_selected in info["radios"]:
+                info["radios"][self._frame_template_selected].blockSignals(True)
+                info["radios"][self._frame_template_selected].setChecked(True)
+                info["radios"][self._frame_template_selected].blockSignals(False)
+
+    def _attach_custom_guide_long_press(self, radio: QRadioButton, guide_name: str):
+        """Attach long-press handler to a radio to delete a custom guide."""
+        if hasattr(radio, "_has_long_press"):
+            return
+        radio._has_long_press = True
+
+        timer = QTimer(radio)
+        timer.setSingleShot(True)
+        timer.setInterval(700)  # ms long-press
+
+        def on_timeout():
+            self._show_delete_custom_guide_menu(guide_name)
+
+        def on_pressed():
+            timer.start()
+
+        def on_released():
+            if timer.isActive():
+                timer.stop()
+
+        timer.timeout.connect(on_timeout)
+        radio.pressed.connect(on_pressed)
+        radio.released.connect(on_released)
+
+    def _show_delete_custom_guide_menu(self, guide_name: str):
+        """Show context menu for deleting a custom frame guide."""
+        menu = QMenu(self)
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {COLORS['surface_light']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                padding: 8px;
+                font-size: 16px;
+                color: {COLORS['text']};
+            }}
+            QMenu::item {{
+                padding: 10px 14px;
+            }}
+            QMenu::item:selected {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+        delete_action = menu.addAction("Delete")
+
+        action = menu.exec(QCursor.pos())
+        if action != delete_action:
+            return
+
+        from PyQt6.QtWidgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "Delete Custom Guide",
+            f"Delete custom frame guide '{guide_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            deleted = self.preview_widget.frame_guide.delete_custom_guide(guide_name)
+            if deleted:
+                # If we just deleted the selected guide, clear selection & disable
+                if getattr(self.preview_widget.frame_guide.active_guide, "name", None) == guide_name:
+                    self.preview_widget.frame_guide.clear()
+                    self.preview_widget.frame_guide.set_enabled(False)
+                    self._frame_template_selected = ""
+                # Refresh lists
+                self._rebuild_frame_template_radios()
+                if hasattr(self, "toast") and self.toast:
+                    # ToastWidget API is show_message(message, duration=..., error=...)
+                    try:
+                        self.toast.show_message("Custom guide deleted", duration=1500)
+                    except TypeError:
+                        # Fallback (older usage)
+                        self.toast.show_message("Custom guide deleted", 1500)
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Could not delete: {e}")
     
     def _on_frame_category_changed(self, category: str):
         """Handle frame guide category change"""
-        # Block signals to prevent auto-enabling frame guides when populating dropdown
-        self.frame_template_combo.blockSignals(True)
-        self.frame_template_combo.clear()
-        
-        templates = self.preview_widget.frame_guide.get_all_templates()
-        if category in templates:
-            for guide in templates[category]:
-                self.frame_template_combo.addItem(guide.name)
-        elif category == "Custom":
-            # Show custom guides
-            custom_guides = self.preview_widget.frame_guide.custom_guides
-            for guide in custom_guides:
-                self.frame_template_combo.addItem(guide.name)
-            if not custom_guides:
-                self.frame_template_combo.addItem("(No custom guides)")
-        
-        # Unblock signals
-        self.frame_template_combo.blockSignals(False)
+        self._frame_category_selected = category
+
+        # Keep category radios in sync across contexts
+        for _, info in getattr(self, "_frame_category_radios_by_ctx", {}).items():
+            radios = info["radios"]
+            if category in radios and not radios[category].isChecked():
+                radios[category].blockSignals(True)
+                radios[category].setChecked(True)
+                radios[category].blockSignals(False)
+
+        self._rebuild_frame_template_radios()
     
     def _on_frame_template_changed(self, template_name: str):
         """Handle frame guide template selection"""
         if not template_name or template_name == "(No custom guides)":
             return
         
-        category = self.frame_category_combo.currentText()
+        self._frame_template_selected = template_name
+        category = getattr(self, "_frame_category_selected", "Social")
+
+        # Sync selection across all template radio lists
+        for _, info in getattr(self, "_frame_template_lists_by_ctx", {}).items():
+            radios = info.get("radios", {})
+            if template_name in radios and not radios[template_name].isChecked():
+                radios[template_name].blockSignals(True)
+                radios[template_name].setChecked(True)
+                radios[template_name].blockSignals(False)
+
         if self.preview_widget.frame_guide.set_guide_by_name(category, template_name):
             # Enable frame guide when user explicitly selects from dropdown
             self.preview_widget.frame_guide.set_enabled(True)
-            # Update Custom Frame button state based on whether guide has custom_rect
-            if self.preview_widget.frame_guide.drag_mode:
-                self.drag_mode_btn.setChecked(True)
-            else:
-                self.drag_mode_btn.setChecked(False)
+            # Keep both Custom Frame buttons in sync
+            self._set_drag_buttons_checked(bool(self.preview_widget.frame_guide.drag_mode))
     
     def _toggle_drag_mode(self):
         """Toggle drag/resize mode for frame guide"""
-        if self.drag_mode_btn.isChecked():
+        btn = self.sender() if isinstance(self.sender(), QPushButton) else None
+        checked = btn.isChecked() if btn is not None and btn.isCheckable() else False
+        self._set_drag_buttons_checked(checked)
+        if checked:
             self.preview_widget.frame_guide.enable_drag_mode()
             self.preview_widget.frame_guide.set_enabled(True)
         else:
             self.preview_widget.frame_guide.disable_drag_mode()
+
+    def _on_custom_frame_toggled(self, which: str, checked: bool):
+        """
+        Option A (updated):
+        - Tap 1: enable drag mode AND show inline name row
+        - Tap 2: disable drag mode AND keep inline name row visible
+        OSK only opens when the user taps the name field.
+        """
+        self._set_drag_buttons_checked(checked)
+        if checked:
+            self.preview_widget.frame_guide.enable_drag_mode()
+            self.preview_widget.frame_guide.set_enabled(True)
+            self._show_custom_guide_name_row(which, focus=False)
+        else:
+            self.preview_widget.frame_guide.disable_drag_mode()
+            self._show_custom_guide_name_row(which, focus=False)
     
     def _on_frame_color_clicked(self, color_name: str):
         """Handle frame guide color button click"""
-        # Uncheck all other color buttons
-        for name, btn in self._color_buttons.items():
-            btn.setChecked(name == color_name)
+        # Sync UI state (support legacy square buttons and new radio buttons)
+        if hasattr(self, '_color_buttons'):
+            for name, btn in self._color_buttons.items():
+                btn.setChecked(name == color_name)
+        if hasattr(self, '_color_radios'):
+            for name, radio in self._color_radios.items():
+                if name == color_name and not radio.isChecked():
+                    radio.setChecked(True)
         
         # Apply color
         if color_name in self._frame_colors:
@@ -1102,34 +4297,111 @@ class MainWindow(QMainWindow):
             self.preview_widget.frame_guide.line_color = bgr_color
     
     def _save_custom_frame_guide(self):
-        """Save current frame guide as custom preset"""
-        from PyQt6.QtWidgets import QInputDialog
-        
-        name, ok = QInputDialog.getText(
-            self, "Save Custom Guide",
-            "Enter a name for this frame guide:"
-        )
-        
-        if ok and name:
-            if self.preview_widget.frame_guide.save_current_as_custom(name):
-                # Uncheck Custom Frame button and disable drag mode
-                self.drag_mode_btn.setChecked(False)
-                self.preview_widget.frame_guide.disable_drag_mode()
+        """Deprecated entrypoint (kept for compatibility)."""
+        self._show_custom_guide_name_row("bottom")
+
+    def _show_custom_guide_name_row(self, which: str, focus: bool = False):
+        """Show the inline name row. If focus=True, focus the input (will open OSK)."""
+        row = getattr(self, f"_custom_guide_name_row_{which}", None)
+        inp = getattr(self, f"_custom_guide_name_input_{which}", None)
+        if row is None or inp is None:
+            return
+
+        row.setVisible(True)
+        if focus:
+            inp.setFocus()
+            inp.selectAll()
+
+    def _hide_custom_guide_name_row(self, which: str):
+        """Hide inline name row and clear."""
+        row = getattr(self, f"_custom_guide_name_row_{which}", None)
+        inp = getattr(self, f"_custom_guide_name_input_{which}", None)
+        if inp is not None:
+            inp.setText("")
+            inp.clearFocus()
+        if row is not None:
+            row.setVisible(False)
+        # Hide OSK when cancelling
+        if self.osk:
+            self.osk.hide_keyboard()
+
+    def _commit_custom_guide_name(self, which: str):
+        """Save current frame guide as custom preset using the inline name."""
+        inp = getattr(self, f"_custom_guide_name_input_{which}", None)
+        if inp is None:
+            return
+        name = inp.text().strip()
+        if not name:
+            return
+        # Important: don't hide the row synchronously while the Save button click
+        # handler is still executing (can trigger Qt crashes on some builds).
+        if not self.preview_widget.frame_guide.save_current_as_custom(name):
+            if hasattr(self, "toast") and self.toast:
+                self.toast.show_message("Nothing to save", duration=1500, error=True)
+            return
+
+        def _after_save():
+            # Now safe to hide the row
+            self._hide_custom_guide_name_row(which)
+
+            # Uncheck Custom Frame button and disable drag mode
+            self._set_drag_buttons_checked(False)
+            self.preview_widget.frame_guide.disable_drag_mode()
                 
-                # Switch to Custom category and select the saved guide
-                self.frame_category_combo.setCurrentText("Custom")
-                self._on_frame_category_changed("Custom")
-                
-                # Select the newly saved guide in the template dropdown
-                index = self.frame_template_combo.findText(name)
-                if index >= 0:
-                    self.frame_template_combo.setCurrentIndex(index)
+            # Switch to Custom category and select the saved guide
+            self._on_frame_category_changed("Custom")
+            self._on_frame_template_changed(name)
+
+            if hasattr(self, "toast") and self.toast:
+                self.toast.show_message("Custom guide saved", duration=1500)
+
+        QTimer.singleShot(0, _after_save)
+
+    def _set_drag_buttons_checked(self, checked: bool):
+        """Keep both Custom Frame buttons (if present) in sync."""
+        for attr in ("drag_mode_btn_guides", "drag_mode_btn_overlay"):
+            btn = getattr(self, attr, None)
+            if btn is not None and btn.isCheckable():
+                btn.blockSignals(True)
+                btn.setChecked(checked)
+                btn.blockSignals(False)
+
+    def _attach_long_press(self, widget: QWidget, callback, ms: int = 700):
+        """Attach a long-press callback to a widget with pressed/released."""
+        if hasattr(widget, "_long_press_attached"):
+            return
+        widget._long_press_attached = True
+        timer = QTimer(widget)
+        timer.setSingleShot(True)
+        timer.setInterval(ms)
+
+        def on_timeout():
+            callback()
+
+        def on_pressed():
+            timer.start()
+
+        def on_released():
+            if timer.isActive():
+                timer.stop()
+
+        timer.timeout.connect(on_timeout)
+        if hasattr(widget, "pressed"):
+            widget.pressed.connect(on_pressed)
+        if hasattr(widget, "released"):
+            widget.released.connect(on_released)
+
+    # (Removed: 3-second auto-hide timer; inline row stays visible until user saves/cancels/clears.)
     
     def _clear_frame_guide(self):
         """Clear the active frame guide"""
         self.preview_widget.frame_guide.clear()
         self.preview_widget.frame_guide.set_enabled(False)
-        self.drag_mode_btn.setChecked(False)
+        self.preview_widget.frame_guide.disable_drag_mode()
+        self._set_drag_buttons_checked(False)
+        # Hide inline naming rows when clearing
+        self._hide_custom_guide_name_row("bottom")
+        self._hide_custom_guide_name_row("overlay")
     
     def _populate_split_cameras(self):
         """Populate split screen camera dropdown"""
@@ -1365,20 +4637,31 @@ class MainWindow(QMainWindow):
     def _create_camera_bar(self) -> QWidget:
         """Create bottom camera selection bar"""
         # Outer scroll area for the entire bar with touch scrolling
+        # In portrait mode: 100px height (80px button + 10px top margin + 10px bottom margin)
+        bar_height = 100 if (hasattr(self, 'settings') and self.settings.portrait_mode) else 120
         bar_scroll = TouchScrollArea()
         bar_scroll.setWidgetResizable(True)
-        bar_scroll.setFixedHeight(140)
-        bar_scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-            }}
-        """)
+        bar_scroll.setFixedHeight(bar_height)  # Height with matching top/bottom padding in portrait
+        # Add border-top for separation in portrait mode
+        if hasattr(self, 'settings') and self.settings.portrait_mode:
+            bar_scroll.setStyleSheet(f"""
+                QScrollArea {{
+                    background-color: {COLORS['surface']};
+                    border-top: 1px solid {COLORS['border']};
+                }}
+            """)
+        else:
+            bar_scroll.setStyleSheet(f"""
+                QScrollArea {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 8px;
+                }}
+            """)
         
         # Inner bar frame
         bar = QFrame()
-        bar.setFixedHeight(140)
+        bar.setFixedHeight(bar_height)  # Match scroll area height
         bar.setStyleSheet(f"""
             QFrame {{
                 background-color: transparent;
@@ -1386,8 +4669,12 @@ class MainWindow(QMainWindow):
         """)
         
         layout = QHBoxLayout(bar)
-        # Calculate vertical margins to center buttons (bar height 140, button height 80, so (140-80)/2 = 30)
-        layout.setContentsMargins(12, 0, 12, 0)
+        # Matching top and bottom padding in portrait mode
+        if hasattr(self, 'settings') and self.settings.portrait_mode:
+            # Bar height 100px, button height 80px, top margin 10px, bottom margin 10px
+            layout.setContentsMargins(0, 10, 0, 10)
+        else:
+            layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(12)
         
         # Center all buttons
@@ -1679,6 +4966,306 @@ class MainWindow(QMainWindow):
         self.fps_timer = QTimer()
         self.fps_timer.timeout.connect(self._update_fps)
         self.fps_timer.start(500)
+
+        # Page change - show/hide OSK based on page
+        self.page_stack.currentChanged.connect(self._on_page_changed)
+    
+    def _setup_osk(self):
+        """Setup On-Screen Keyboard for settings pages"""
+        try:
+            # Only create OSK if it doesn't exist yet
+            if self.osk is not None:
+                return
+            
+            # Create OSK widget (slides from bottom) - parent to central widget for proper positioning
+            central_widget = self.centralWidget()
+            # Safely get preset texts - ensure osk_presets exists
+            try:
+                preset_texts = getattr(self.settings, 'osk_presets', ["", "", "", "", "", ""])
+                if not isinstance(preset_texts, list) or len(preset_texts) != 6:
+                    preset_texts = ["", "", "", "", "", ""]
+            except (AttributeError, TypeError):
+                preset_texts = ["", "", "", "", "", ""]
+            
+            if central_widget:
+                self.osk = OSKWidget(central_widget, slide_from_top=False, preset_texts=preset_texts)
+            else:
+                self.osk = OSKWidget(self, slide_from_top=False, preset_texts=preset_texts)
+            # Remember the default parent so we can dock/undock OSK for Companion.
+            self._osk_default_parent = self.osk.parent()
+            self.osk.hide()
+            
+            # Connect OSK to text fields in Camera, Companion, and Settings pages
+            self._connect_osk_to_fields()
+            
+            # Install event filter to hide OSK when clicking outside text fields
+            app = QApplication.instance()
+            if app:
+                app.installEventFilter(self)
+                # Also connect focus change signal
+                app.focusChanged.connect(self._on_focus_changed)
+        except Exception as e:
+            print(f"Error setting up OSK: {e}")
+            import traceback
+            traceback.print_exc()
+            self.osk = None  # Ensure osk is None if setup fails
+
+    def eventFilter(self, obj, event):
+        """Filter events to hide OSK when clicking outside text fields"""
+        # Currently using focus change handler instead of mouse events
+        # Mouse event handling was unreliable due to coordinate transformations
+        return super().eventFilter(obj, event)
+
+    def _on_focus_changed(self, old_widget, new_widget):
+        """Handle focus changes to hide OSK when appropriate"""
+        print(f"Focus changed: {old_widget} -> {new_widget}")
+        if not self.osk or not self.osk._is_visible:
+            print("OSK not visible or doesn't exist")
+            return
+
+        # If focus moved to OSK or its children, don't hide
+        if new_widget and (new_widget == self.osk or self.osk.isAncestorOf(new_widget)):
+            return
+
+        # If focus moved to a text field, don't hide
+        if new_widget and isinstance(new_widget, QLineEdit):
+            return
+
+        # If focus moved to a text edit or other input widget, don't hide
+        if new_widget and isinstance(new_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+            return
+
+        # If old widget was a text field and new widget is not input-related, hide OSK
+        if old_widget and isinstance(old_widget, QLineEdit) and new_widget:
+            # Check if new widget is a button, label, or other non-input widget
+            if isinstance(new_widget, (QPushButton, QLabel, QFrame, QWidget)):
+                print(f"Hiding OSK - focus moved from text field to {type(new_widget).__name__}")
+                self.osk.hide_keyboard()
+                return
+
+        # If focus moved to None or an unknown widget type, hide OSK
+        if new_widget is None or not hasattr(new_widget, 'setFocus'):
+            print("Hiding OSK - focus lost or moved to unknown widget")
+            self.osk.hide_keyboard()
+    
+    def _connect_osk_to_fields(self):
+        """Connect OSK to text input fields in settings pages"""
+        # Camera page fields
+        if hasattr(self.camera_page, 'edit_name_input'):
+            self._connect_field_to_osk(self.camera_page.edit_name_input)
+        if hasattr(self.camera_page, 'edit_ip_input'):
+            self._connect_field_to_osk(self.camera_page.edit_ip_input)
+        if hasattr(self.camera_page, 'edit_user_input'):
+            self._connect_field_to_osk(self.camera_page.edit_user_input)
+        if hasattr(self.camera_page, 'edit_pass_input'):
+            self._connect_field_to_osk(self.camera_page.edit_pass_input)
+        if hasattr(self.camera_page, 'easyip_search_input'):
+            self._connect_field_to_osk(self.camera_page.easyip_search_input)
+        
+        # Settings page fields
+        if hasattr(self.settings_page, 'atem_ip_input'):
+            self._connect_field_to_osk(self.settings_page.atem_ip_input)
+        if hasattr(self.settings_page, 'ip_input'):
+            self._connect_field_to_osk(self.settings_page.ip_input)
+        if hasattr(self.settings_page, 'subnet_input'):
+            self._connect_field_to_osk(self.settings_page.subnet_input)
+        if hasattr(self.settings_page, 'gateway_input'):
+            self._connect_field_to_osk(self.settings_page.gateway_input)
+        if hasattr(self.settings_page, 'backup_name_input'):
+            self._connect_field_to_osk(self.settings_page.backup_name_input)
+        
+        # Find all QLineEdit widgets in settings pages
+        for page in [self.camera_page, self.companion_page, self.settings_page]:
+            for widget in page.findChildren(QLineEdit):
+                if widget not in [getattr(self.camera_page, 'edit_name_input', None),
+                                 getattr(self.camera_page, 'edit_ip_input', None),
+                                 getattr(self.camera_page, 'edit_user_input', None),
+                                 getattr(self.camera_page, 'edit_pass_input', None),
+                                 getattr(self.camera_page, 'easyip_search_input', None)]:
+                    self._connect_field_to_osk(widget)
+
+        # Companion page (QWebEngineView) - show OSK when an HTML input is focused.
+        try:
+            web_view = getattr(self.companion_page, "web_view", None)
+            if web_view is not None:
+                self._connect_companion_webview_to_osk(web_view)
+        except Exception:
+            pass
+
+    def _connect_companion_webview_to_osk(self, web_view):
+        """Connect OSK to the Companion QWebEngineView (Option 1: always show on tap)."""
+        if web_view is None or not self.osk:
+            return
+        if hasattr(web_view, "_osk_connected"):
+            return
+
+        original_event = web_view.event
+
+        def wrapped_event(ev):
+            try:
+                # Only on Companion page
+                if self.page_stack.currentIndex() == 2 and ev.type() in (QEvent.Type.MouseButtonPress, QEvent.Type.TouchBegin):
+                    # Option 1: always show OSK on any tap in Companion.
+                    # Use a tiny delay so the page can update focus first.
+                    QTimer.singleShot(0, lambda: self._show_osk_for_companion(web_view))
+            except Exception:
+                pass
+            return original_event(ev)
+
+        web_view.event = wrapped_event
+        web_view._osk_connected = True
+
+    def _show_osk_for_companion(self, web_view):
+        """Show OSK targeting the Companion web view."""
+        if not self.osk or web_view is None:
+            return
+        # Companion should use bottom keyboard
+        self.osk.slide_from_top = False
+        if hasattr(self.osk, "set_top_offset"):
+            self.osk.set_top_offset(0)
+        # Target the QWebEngineView itself so OSK can inject text via runJavaScript().
+        target = web_view
+        # If we're on Companion page, the OSK should be docked into the page layout.
+        if self.page_stack.currentIndex() == 2:
+            self._dock_osk_to_companion()
+        self.osk.show_keyboard(target)
+
+    def _dock_osk_to_companion(self):
+        """Dock OSK into the Companion page bottom slot (always visible on Companion)."""
+        if not self.osk or not hasattr(self, "companion_page"):
+            return
+        slot = getattr(self.companion_page, "osk_slot", None)
+        if slot is None:
+            return
+
+        # Use a stable height; slot.height() can be 0 before layout runs.
+        try:
+            desired_h = int(getattr(self.osk, "_keyboard_height", 430))
+        except Exception:
+            desired_h = 430
+        desired_h = max(1, desired_h)
+        slot.setFixedHeight(desired_h)
+
+        # Ensure slot has a layout.
+        lay = slot.layout()
+        if lay is None:
+            lay = QVBoxLayout(slot)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+
+        # Reparent into slot if needed.
+        if self.osk.parent() is not slot:
+            self.osk.setParent(slot)
+            lay.addWidget(self.osk)
+
+        # Enable docked mode so OSK doesn't reposition itself.
+        if hasattr(self.osk, "set_docked"):
+            self.osk.set_docked(True, height=desired_h)
+        self.osk.show()
+        self.osk.raise_()
+
+    def _undock_osk_from_companion(self):
+        """Return OSK to its default overlay parent."""
+        if not self.osk:
+            return
+        # Disable docked mode first.
+        if hasattr(self.osk, "set_docked"):
+            self.osk.set_docked(False)
+
+        default_parent = getattr(self, "_osk_default_parent", None)
+        if default_parent is None:
+            default_parent = self.centralWidget() or self
+
+        # If currently inside Companion slot, remove from that layout to avoid stale layout items.
+        try:
+            slot = getattr(self.companion_page, "osk_slot", None)
+            if slot is not None and self.osk.parent() is slot and slot.layout() is not None:
+                slot.layout().removeWidget(self.osk)
+        except Exception:
+            pass
+
+        # Reparent back.
+        if self.osk.parent() is not default_parent:
+            self.osk.setParent(default_parent)
+        self.osk.hide()
+    
+    def _connect_field_to_osk(self, field: QLineEdit):
+        """Connect a text field to OSK"""
+        if field is None:
+            return
+
+        # Check if already connected
+        if hasattr(field, '_osk_connected'):
+            return
+
+        original_focus_in = field.focusInEvent
+        original_focus_out = field.focusOutEvent
+        
+        def focus_in_event(event):
+            original_focus_in(event)
+            # Only show OSK on Camera, Companion, or Settings pages
+            try:
+                current_page = self.page_stack.currentIndex()
+                allow_on_live = getattr(field, "_osk_allow_on_live", False)
+                if current_page in [1, 2, 3] or allow_on_live:  # Camera, Companion, Settings (and selected Live fields)
+                    # Show OSK for this field immediately
+                    if self.osk:
+                        # Live page should slide OSK from top so it doesn't cover bottom panel
+                        self.osk.slide_from_top = bool(allow_on_live)
+                        if allow_on_live:
+                            top_h = 0
+                            try:
+                                top_h = int(getattr(self, "nav_bar", None).height()) if getattr(self, "nav_bar", None) else 0
+                            except Exception:
+                                top_h = 0
+                            # Position under main menu, on top of preview
+                            if hasattr(self.osk, "set_top_offset"):
+                                self.osk.set_top_offset(top_h)
+                        self.osk.show_keyboard(field)
+            except Exception as e:
+                print(f"Error in focus_in_event: {e}")
+
+        def focus_out_event(event):
+            original_focus_out(event)
+            # Don't hide OSK on focus out - let focus_in handle showing for new field
+            # OSK will be hidden when clicking outside text fields via page change or Hide button
+        
+        field.focusInEvent = focus_in_event
+        field.focusOutEvent = focus_out_event
+        field._osk_connected = True  # Mark as connected
+
+    
+    def _on_page_changed(self, index: int):
+        """Handle page change - hide OSK if on Live page"""
+        if index == 0:  # Live/Preview page
+            if self.osk:
+                # Only hide if the currently targeted field is NOT explicitly allowed on Live page
+                target = getattr(self.osk, "_target_widget", None)
+                if not getattr(target, "_osk_allow_on_live", False):
+                    self.osk.hide_keyboard()
+                # Ensure OSK is not docked when leaving Companion
+                self._undock_osk_from_companion()
+        elif index == 2:  # Companion page
+            # Always show OSK docked at the bottom of Companion page.
+            self._dock_osk_to_companion()
+            # Target the web view by default
+            try:
+                self._show_osk_for_companion(getattr(self.companion_page, "web_view", None))
+            except Exception:
+                pass
+        else:
+            # Hide OSK when leaving Companion page if it was targeting the web view.
+            if self.osk and index != 2:
+                try:
+                    target = getattr(self.osk, "_target_widget", None)
+                    web_view = getattr(self.companion_page, "web_view", None)
+                    if target is not None and (target == web_view):
+                        self.osk.hide_keyboard()
+                except Exception:
+                    pass
+            # If we are leaving the Companion page, undock the OSK.
+            if index != 2:
+                self._undock_osk_from_companion()
     
     @pyqtSlot(int)
     def _on_nav_clicked(self, page_idx: int):
@@ -1687,19 +5274,36 @@ class MainWindow(QMainWindow):
     
     @pyqtSlot(str)
     def _on_companion_update_available(self, version: str):
-        """Handle companion update available signal"""
-        self.companion_update_btn.setText(f"⬆️ Companion Update")
-        self.companion_update_btn.setToolTip(f"Update Companion to v{version}")
-        self.companion_update_btn.show()
+        """Handle companion update available signal.
+
+        Update UI is shown in Settings → Companion (not in top nav).
+        """
+        try:
+            if hasattr(self, "settings_page") and self.settings_page:
+                self.settings_page._companion_update_version = version
+                # Refresh if the panel is visible
+                if getattr(self.settings_page, "_current_section", None) == 3:
+                    self.settings_page._refresh_companion_status_ui()
+        except Exception:
+            pass
     
     @pyqtSlot()
     def _on_companion_update_cleared(self):
         """Handle companion update completed/cleared"""
-        self.companion_update_btn.hide()
+        try:
+            if hasattr(self, "settings_page") and self.settings_page:
+                self.settings_page._companion_update_version = None
+                if getattr(self.settings_page, "_current_section", None) == 3:
+                    self.settings_page._refresh_companion_status_ui()
+        except Exception:
+            pass
     
     def _on_companion_update_clicked(self):
-        """Handle companion update button click"""
-        self.companion_page.update_companion()
+        """Deprecated: update now initiated from Settings → Companion."""
+        try:
+            self.companion_page.update_companion()
+        except Exception:
+            pass
     
     @pyqtSlot(int)
     def _on_camera_button_clicked(self, button_id: int):
@@ -2251,34 +5855,37 @@ class MainWindow(QMainWindow):
             margin: 0;
         """
         
-        if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
-            stream = self.camera_streams[self.current_camera_id]
-            if stream.is_connected:
-                self.connection_status.setText(f"CAM: <span style='color:{COLORS['success']}'>●</span> Connected")
-                self.connection_status.setStyleSheet(status_style)
-                self.connection_status.setToolTip("Camera connected")
+        # Camera connection status (only if widget exists)
+        if hasattr(self, 'connection_status') and self.connection_status is not None:
+            if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
+                stream = self.camera_streams[self.current_camera_id]
+                if stream.is_connected:
+                    self.connection_status.setText(f"CAM: <span style='color:{COLORS['success']}'>●</span> Connected")
+                    self.connection_status.setStyleSheet(status_style)
+                    self.connection_status.setToolTip("Camera connected")
+                else:
+                    self.connection_status.setText(f"CAM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
+                    self.connection_status.setStyleSheet(status_style)
+                    self.connection_status.setToolTip(f"Camera disconnected: {stream.error_message}")
             else:
-                self.connection_status.setText(f"CAM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
-                self.connection_status.setStyleSheet(status_style)
-                self.connection_status.setToolTip(f"Camera disconnected: {stream.error_message}")
-        else:
-            self.connection_status.setText(f"CAM: <span style='color:{COLORS['text_dark']}'>●</span> No Camera")
-            self.connection_status.setStyleSheet(status_style_dim)
-            self.connection_status.setToolTip("No camera selected")
+                self.connection_status.setText(f"CAM: <span style='color:{COLORS['text_dark']}'>●</span> No Camera")
+                self.connection_status.setStyleSheet(status_style_dim)
+                self.connection_status.setToolTip("No camera selected")
         
-        # ATEM connection status
-        if self.atem_controller.is_connected:
-            self.atem_status.setText(f"ATEM: <span style='color:{COLORS['success']}'>●</span> Connected")
-            self.atem_status.setStyleSheet(status_style)
-            self.atem_status.setToolTip("ATEM connected")
-        elif self.settings.atem.enabled:
-            self.atem_status.setText(f"ATEM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
-            self.atem_status.setStyleSheet(status_style)
-            self.atem_status.setToolTip("ATEM disconnected")
-        else:
-            self.atem_status.setText(f"ATEM: <span style='color:{COLORS['text_dark']}'>●</span> Not Configured")
-            self.atem_status.setStyleSheet(status_style_dim)
-            self.atem_status.setToolTip("ATEM not configured")
+        # ATEM connection status (only if widget exists)
+        if hasattr(self, 'atem_status') and self.atem_status is not None:
+            if self.atem_controller.is_connected:
+                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['success']}'>●</span> Connected")
+                self.atem_status.setStyleSheet(status_style)
+                self.atem_status.setToolTip("ATEM connected")
+            elif self.settings.atem.enabled:
+                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
+                self.atem_status.setStyleSheet(status_style)
+                self.atem_status.setToolTip("ATEM disconnected")
+            else:
+                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['text_dark']}'>●</span> Not Configured")
+                self.atem_status.setStyleSheet(status_style_dim)
+                self.atem_status.setToolTip("ATEM not configured")
     
     def _update_fps(self):
         """Update FPS display (error-handled)"""
@@ -2665,6 +6272,10 @@ class MainWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_F4:
             self._toggle_overlay("focus_assist")
         
+        # Ctrl+M - Toggle margin debug overlay
+        elif event.key() == Qt.Key.Key_M and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self._show_margin_debug_overlay()
+        
         # M - Toggle multiview
         elif event.key() == Qt.Key.Key_M:
             self.multiview_btn.setChecked(not self.multiview_btn.isChecked())
@@ -2672,6 +6283,19 @@ class MainWindow(QMainWindow):
         
         else:
             super().keyPressEvent(event)
+    
+    def eventFilter(self, obj, event):
+        """Event filter to maintain 16:9 aspect ratio for portrait preview container"""
+        if hasattr(self, 'preview_container_portrait') and obj == self.preview_container_portrait:
+            if event.type() == QEvent.Type.Resize:
+                # Calculate height for 16:9 aspect ratio
+                width = event.size().width()
+                if width > 0:
+                    height_16_9 = int(width * 9 / 16)
+                    # Set both min and max height to maintain aspect ratio
+                    obj.setMinimumHeight(height_16_9)
+                    obj.setMaximumHeight(height_16_9)
+        return super().eventFilter(obj, event)
     
     # --------------------------
     # System OSK Support (Pi OS on-screen keyboard)

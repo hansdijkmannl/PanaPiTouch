@@ -3,7 +3,7 @@ Shared UI Widgets
 
 Reusable widgets for touch-friendly interfaces.
 """
-from PyQt6.QtWidgets import QScrollArea, QPushButton, QLineEdit, QComboBox, QLabel
+from PyQt6.QtWidgets import QScrollArea, QPushButton, QLineEdit, QComboBox, QLabel, QRadioButton
 from PyQt6.QtCore import QEvent, Qt
 
 
@@ -31,7 +31,7 @@ class TouchScrollArea(QScrollArea):
         # Check widget type and all parent widgets
         current = widget
         while current:
-            if isinstance(current, (QPushButton, QLineEdit, QComboBox, QLabel)):
+            if isinstance(current, (QPushButton, QRadioButton, QLineEdit, QComboBox, QLabel)):
                 # Check if QLabel is clickable (has a link or is used as button)
                 if isinstance(current, QLabel):
                     # Only consider it interactive if it has a link or specific object name

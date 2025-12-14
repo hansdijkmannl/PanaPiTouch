@@ -16,9 +16,9 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit,
     QGroupBox, QFrame, QMessageBox, QComboBox,
     QGridLayout, QInputDialog, QStackedWidget, QSlider,
-    QSizePolicy
+    QSizePolicy, QRadioButton, QButtonGroup, QProgressBar
 )
-from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QEvent
+from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QEvent, QProcess, QUrl
 
 from ..config.settings import Settings
 from .widgets import TouchScrollArea
@@ -39,15 +39,31 @@ class StyledComboBox(QComboBox):
         """Style the dropdown view"""
         view = self.view()
         if view:
+            # Ensure the popup container + viewport also use dark background
+            view.setAutoFillBackground(True)
+            popup = view.window()
+            if popup:
+                popup.setStyleSheet("""
+                    QWidget, QFrame {
+                        background-color: #1a1a24 !important;
+                        border: 2px solid #2a2a38;
+                    }
+                """)
             view.setStyleSheet("""
                 QAbstractItemView {
                     background-color: #1a1a24 !important;
                     border: 2px solid #2a2a38;
                     selection-background-color: #FF9500;
                     color: #FFFFFF !important;
-                    padding: 4px;
+                    padding: 0px;
                     font-size: 16px;
                     outline: none;
+                }
+                QAbstractScrollArea, QAbstractScrollArea::viewport {
+                    background-color: #1a1a24 !important;
+                }
+                QWidget {
+                    background-color: #1a1a24 !important;
                 }
                 QAbstractItemView::item {
                     background-color: #1a1a24 !important;
@@ -77,9 +93,12 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         self.settings = settings
         self._current_section = 0
+        self.osk_preset_inputs = []  # Initialize list
+        self._companion_update_version = None
         self._setup_ui()
         self._load_settings()
         self._start_system_monitor()
+        self._start_companion_monitor()
     
     def _setup_ui(self):
         """Setup the settings page UI with sidebar"""
@@ -107,6 +126,8 @@ class SettingsPage(QWidget):
             ("🌐", "Network"),
             ("🎬", "ATEM"),
             ("💾", "Backup"),
+            ("🎛️", "Companion"),
+            ("⌨️", "Keyboard presets"),
             ("📊", "System"),
         ]
         
@@ -130,6 +151,8 @@ class SettingsPage(QWidget):
         self.content_stack.addWidget(self._create_network_panel())
         self.content_stack.addWidget(self._create_atem_panel())
         self.content_stack.addWidget(self._create_backup_panel())
+        self.content_stack.addWidget(self._create_companion_panel())
+        self.content_stack.addWidget(self._create_keyboard_presets_panel())
         self.content_stack.addWidget(self._create_system_panel())
         
         main_layout.addWidget(self.content_stack, 1)
@@ -169,9 +192,252 @@ class SettingsPage(QWidget):
         self._current_section = index
         self.content_stack.setCurrentIndex(index)
         
+        # If keyboard presets panel is shown, ensure settings are loaded
+        if index == 4:  # Keyboard presets is index 4 (after Companion)
+            self._load_osk_presets()
+        if index == 3:  # Companion panel
+            self._refresh_companion_status_ui()
+        
         # Update button states
         for i, btn in enumerate(self.sidebar_buttons):
             btn.setChecked(i == index)
+
+    # === Companion monitor (Option C) ===
+
+    def _start_companion_monitor(self):
+        """Background check for Companion update availability (Option C)."""
+        self._companion_timer = QTimer(self)
+        self._companion_timer.timeout.connect(self._check_companion_update_background)
+        self._companion_timer.start(10000)  # every 10s
+        QTimer.singleShot(500, self._check_companion_update_background)
+
+    def _check_companion_update_background(self):
+        """Check Companion update status in the background (Option C)."""
+        main_window = self.parent()
+        companion_page = getattr(main_window, "companion_page", None) if main_window else None
+
+        version = None
+        try:
+            if companion_page is not None and hasattr(companion_page, "get_update_version"):
+                version = companion_page.get_update_version()
+        except Exception:
+            version = None
+
+        # IMPORTANT: Don't overwrite a known update version with None.
+        # CompanionPage may temporarily report None while the page is reloading,
+        # which would make the Settings button "disappear" again.
+        if version:
+            if version != self._companion_update_version:
+                self._companion_update_version = version
+        # Refresh UI if panel is visible
+        if self._current_section == 3:
+            self._refresh_companion_status_ui()
+
+    def _refresh_companion_status_ui(self):
+        """Update Companion panel widgets based on latest background state."""
+        if not hasattr(self, "companion_status_label"):
+            return
+
+        if self._companion_update_version:
+            self.companion_status_label.setText(f"● Update available: v{self._companion_update_version}")
+            self.companion_status_label.setStyleSheet(self._get_status_style("info"))
+            self.companion_update_btn.setEnabled(True)
+            self.companion_update_btn.setText(f"Update Companion to v{self._companion_update_version}")
+        else:
+            self.companion_status_label.setText("● No update detected")
+            self.companion_status_label.setStyleSheet(self._get_status_style("success"))
+            self.companion_update_btn.setEnabled(False)
+            self.companion_update_btn.setText("Update Companion")
+
+    def _run_companion_update(self):
+        """Run Companion update via terminal command: sudo companion-update stable"""
+        # Prevent double-runs
+        if hasattr(self, "_companion_update_process") and self._companion_update_process:
+            try:
+                if self._companion_update_process.state() != QProcess.ProcessState.NotRunning:
+                    QMessageBox.information(self, "Update in Progress", "Companion update is already running.")
+                    return
+            except Exception:
+                pass
+
+        # Confirm update
+        if self._companion_update_version:
+            prompt = (
+                f"Update Companion to v{self._companion_update_version}?\n\n"
+                "This will run:\n"
+                "  sudo companion-update stable\n\n"
+                "And restart Companion."
+            )
+        else:
+            prompt = (
+                "Run Companion update?\n\n"
+                "This will run:\n"
+                "  sudo companion-update stable\n\n"
+                "And restart Companion."
+            )
+        reply = QMessageBox.question(
+            self,
+            "Update Companion",
+            prompt,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        # Run: sudo companion-update stable (non-interactive)
+        self._companion_update_process = QProcess(self)
+        self._companion_update_log = ""
+
+        def on_stdout():
+            try:
+                data = self._companion_update_process.readAllStandardOutput().data().decode(errors="ignore")
+                self._companion_update_log += data
+            except Exception:
+                pass
+
+        def on_stderr():
+            try:
+                data = self._companion_update_process.readAllStandardError().data().decode(errors="ignore")
+                self._companion_update_log += data
+            except Exception:
+                pass
+
+        def on_finished(exit_code, exit_status):
+            # Re-check after completion
+            self._companion_update_version = None
+            self._refresh_companion_status_ui()
+            QTimer.singleShot(4000, self._check_companion_update_background)
+
+            # Hide progress UI
+            try:
+                if hasattr(self, "companion_update_progress"):
+                    self.companion_update_progress.hide()
+            except Exception:
+                pass
+
+            # Re-enable update button (state will be corrected by refresh)
+            try:
+                self.companion_update_btn.setEnabled(True)
+            except Exception:
+                pass
+
+            # Refresh Companion page after update (delayed + retry), because the service restarts.
+            if exit_code == 0:
+                try:
+                    self._schedule_companion_webview_reload()
+                except Exception:
+                    pass
+
+            if exit_code == 0:
+                QMessageBox.information(self, "Update Complete", "Companion update completed successfully.")
+            else:
+                tail = (self._companion_update_log or "").strip()
+                if len(tail) > 2000:
+                    tail = tail[-2000:]
+                QMessageBox.warning(self, "Update Failed", f"Companion update failed (exit {exit_code}).\n\n{tail}")
+
+        self._companion_update_process.readyReadStandardOutput.connect(on_stdout)
+        self._companion_update_process.readyReadStandardError.connect(on_stderr)
+        self._companion_update_process.finished.connect(on_finished)
+
+        # Update UI while running
+        self.companion_status_label.setText("● Updating Companion…")
+        self.companion_status_label.setStyleSheet(self._get_status_style("info"))
+        self.companion_update_btn.setEnabled(False)
+        self.companion_update_btn.setText("Updating…")
+        # Indeterminate progress bar while command runs
+        if hasattr(self, "companion_update_progress"):
+            self.companion_update_progress.setRange(0, 0)  # busy indicator
+            self.companion_update_progress.show()
+
+        self._companion_update_process.start("sudo", ["companion-update", "stable"])
+
+    def _schedule_companion_webview_reload(self):
+        """Reload Companion web view after update with retries (service restart delay)."""
+        main_window = self.window()
+        companion_page = getattr(main_window, "companion_page", None)
+        web = getattr(companion_page, "web_view", None) if companion_page else None
+        if web is None:
+            return
+
+        # Reset attempt counter
+        self._companion_reload_attempt = 0
+
+        def attempt_reload():
+            self._companion_reload_attempt += 1
+            attempt = self._companion_reload_attempt
+
+            def on_load_finished(success: bool):
+                try:
+                    web.loadFinished.disconnect(on_load_finished)
+                except Exception:
+                    pass
+                if success:
+                    return
+                # Retry a few times with backoff
+                if attempt < 5:
+                    QTimer.singleShot(1500 * attempt, attempt_reload)
+
+            # Attach one-shot handler for this attempt
+            web.loadFinished.connect(on_load_finished)
+
+            # Ensure URL is correct, then reload
+            try:
+                url = getattr(companion_page, "companion_url", None) or getattr(self.settings, "companion_url", "http://localhost:8000")
+                web.setUrl(QUrl(url))
+            except Exception:
+                try:
+                    web.reload()
+                except Exception:
+                    pass
+
+        # Give Companion time to restart before first reload
+        QTimer.singleShot(6000, attempt_reload)
+
+    def _create_companion_panel(self) -> QWidget:
+        """Create Companion settings panel (Option B + Option C)."""
+        wrapper, layout = self._create_content_wrapper("Companion", "🎛️")
+
+        info_frame = self._create_info_card(
+            "Manage Bitfocus Companion.\n"
+            "Shows update availability and can run the update."
+        )
+        layout.addWidget(info_frame)
+
+        self.companion_status_label = QLabel("● Checking for updates…")
+        self.companion_status_label.setStyleSheet(self._get_status_style("info"))
+        layout.addWidget(self.companion_status_label)
+
+        # Progress bar (shown only while update runs)
+        self.companion_update_progress = QProgressBar()
+        self.companion_update_progress.setTextVisible(False)
+        self.companion_update_progress.setFixedHeight(16)
+        self.companion_update_progress.setStyleSheet("""
+            QProgressBar {
+                background-color: #1a1a24;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+            }
+            QProgressBar::chunk {
+                background-color: #FF9500;
+                border-radius: 8px;
+            }
+        """)
+        self.companion_update_progress.hide()
+        layout.addWidget(self.companion_update_progress)
+
+        self.companion_update_btn = QPushButton("Update Companion")
+        self.companion_update_btn.setStyleSheet(self._get_button_style(True))
+        self.companion_update_btn.clicked.connect(self._run_companion_update)
+        self.companion_update_btn.setEnabled(False)
+        layout.addWidget(self.companion_update_btn)
+
+        layout.addStretch()
+
+        # Initialize UI state
+        QTimer.singleShot(0, self._refresh_companion_status_ui)
+        return wrapper
     
     def _get_input_style(self):
         """Get consistent input field styling"""
@@ -440,12 +706,48 @@ class SettingsPage(QWidget):
         interface_label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ffffff;")
         interface_layout.addWidget(interface_label)
         
-        self.interface_combo = StyledComboBox()
-        self.interface_combo.addItems(["Ethernet (eth0)", "WiFi (wlan0)"])
-        self.interface_combo.setCurrentIndex(0)
-        self.interface_combo.setStyleSheet(self._get_input_style())
-        self.interface_combo.currentIndexChanged.connect(self._on_interface_changed)
-        interface_layout.addWidget(self.interface_combo)
+        # Radio buttons (match Camera Control radio look: orange only when selected)
+        self.interface_group = QButtonGroup(interface_frame)
+        self.interface_group.setExclusive(True)
+
+        radio_row = QHBoxLayout()
+        radio_row.setContentsMargins(0, 0, 0, 0)
+        radio_row.setSpacing(24)
+
+        radio_style = """
+            QRadioButton {
+                color: #ffffff;
+                font-size: 14px;
+                spacing: 10px;
+            }
+            QRadioButton::indicator {
+                width: 20px;
+                height: 20px;
+                border: 2px solid #2a2a38;
+                border-radius: 10px;
+                background-color: #0a0a0f;
+            }
+            QRadioButton::indicator:checked {
+                background-color: #FF9500;
+                border-color: #FF9500;
+            }
+        """
+
+        self.interface_eth_radio = QRadioButton("Ethernet (eth0)")
+        self.interface_eth_radio.setStyleSheet(radio_style)
+        self.interface_eth_radio.setChecked(True)
+        self.interface_eth_radio.toggled.connect(self._on_interface_changed)
+        self.interface_group.addButton(self.interface_eth_radio, 0)
+        radio_row.addWidget(self.interface_eth_radio)
+
+        self.interface_wlan_radio = QRadioButton("WiFi (wlan0)")
+        self.interface_wlan_radio.setStyleSheet(radio_style)
+        self.interface_wlan_radio.toggled.connect(self._on_interface_changed)
+        self.interface_group.addButton(self.interface_wlan_radio, 1)
+        radio_row.addWidget(self.interface_wlan_radio)
+
+        radio_row.addStretch()
+        interface_layout.addLayout(radio_row)
         
         layout.addWidget(interface_frame)
         
@@ -941,6 +1243,96 @@ class SettingsPage(QWidget):
         
         return wrapper
     
+    def _create_keyboard_presets_panel(self) -> QWidget:
+        """Create keyboard presets panel"""
+        wrapper, layout = self._create_content_wrapper("Keyboard Presets", "⌨️")
+        
+        # Info card
+        info_frame = self._create_info_card(
+            "Customize the four preset buttons that appear above the on-screen keyboard. "
+            "These buttons allow quick insertion of frequently used text."
+        )
+        layout.addWidget(info_frame)
+        
+        # Preset input fields
+        preset_frame = QFrame()
+        preset_frame.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        preset_layout = QVBoxLayout(preset_frame)
+        preset_layout.setContentsMargins(20, 16, 20, 16)
+        preset_layout.setSpacing(16)
+        
+        # Create 6 preset input fields in 2 columns × 3 rows (2×3)
+        self.osk_preset_inputs = []
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(16)
+        preset_layout.addLayout(grid)
+
+        for i in range(6):
+            row = i // 2  # 0..2
+            col = i % 2   # 0..1
+
+            cell = QWidget()
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(8)
+
+            preset_label = QLabel(f"Preset {i+1}")
+            preset_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff;")
+            cell_layout.addWidget(preset_label)
+
+            preset_input = QLineEdit()
+            preset_input.setPlaceholderText(f"Enter text for Preset {i+1}")
+            preset_input.setStyleSheet(self._get_input_style())
+            cell_layout.addWidget(preset_input)
+
+            self.osk_preset_inputs.append(preset_input)
+            grid.addWidget(cell, row, col)
+        
+        # Save button
+        save_btn = QPushButton("💾 Save Presets")
+        save_btn.setStyleSheet(self._get_button_style(True))
+        save_btn.clicked.connect(self._save_osk_presets)
+        preset_layout.addWidget(save_btn)
+        
+        layout.addWidget(preset_frame)
+        
+        layout.addStretch()
+        
+        # Load preset texts after creating inputs (use callLater to ensure QApplication exists)
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(100, self._load_osk_presets)
+        
+        return wrapper
+    
+    def _save_osk_presets(self):
+        """Save OSK preset texts and update OSK immediately"""
+        # Update settings
+        if not hasattr(self.settings, 'osk_presets'):
+            self.settings.osk_presets = ["", "", "", "", "", ""]
+        self.settings.osk_presets = [inp.text() for inp in self.osk_preset_inputs]
+        self.settings.save()
+        
+        # Update OSK widget if it exists in main window
+        main_window = self.parent()
+        if main_window and hasattr(main_window, 'osk') and main_window.osk:
+            # Update preset texts - this rebuilds the buttons
+            main_window.osk._preset_texts = self.settings.osk_presets.copy()
+            main_window.osk._build_preset_buttons()
+        
+        self.settings_changed.emit()
+        
+        # Show confirmation toast if available
+        if main_window and hasattr(main_window, 'toast'):
+            main_window.toast.show("Keyboard presets saved", duration=2000)
+    
     def _create_system_panel(self) -> QWidget:
         """Create system information panel"""
         wrapper, layout = self._create_content_wrapper("System Information", "📊")
@@ -1353,12 +1745,26 @@ class SettingsPage(QWidget):
             print(f"Error updating system info: {e}")
     
     # === Network methods ===
-    def _on_interface_changed(self, index):
+    def _get_selected_interface(self) -> tuple[str, str]:
+        """Return (interface_type_prefix, interface_name) e.g. ('eth','Ethernet')"""
+        # Prefer radios (new UI)
+        if hasattr(self, "interface_eth_radio") and hasattr(self, "interface_wlan_radio"):
+            if self.interface_wlan_radio.isChecked():
+                return "wlan", "WiFi"
+            return "eth", "Ethernet"
+
+        # Fallback for older UI if present
+        if hasattr(self, "interface_combo"):
+            return ("eth", "Ethernet") if self.interface_combo.currentIndex() == 0 else ("wlan", "WiFi")
+
+        return "eth", "Ethernet"
+
+    def _on_interface_changed(self, *args):
         self._load_current_network()
     
     def _load_current_network(self):
         try:
-            interface_type = "eth" if self.interface_combo.currentIndex() == 0 else "wlan"
+            interface_type, _ = self._get_selected_interface()
             
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
             interfaces = []
@@ -1420,7 +1826,7 @@ class SettingsPage(QWidget):
             QMessageBox.warning(self, "Error", "Please enter valid IP addresses")
             return
         
-        interface_name = "Ethernet" if self.interface_combo.currentIndex() == 0 else "WiFi"
+        interface_type, interface_name = self._get_selected_interface()
         reply = QMessageBox.question(self, "Apply Network Settings",
             f"Apply settings to {interface_name}?\n\nIP: {ip}\nSubnet: {subnet}\nGateway: {gateway}",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
@@ -1429,7 +1835,6 @@ class SettingsPage(QWidget):
             return
         
         try:
-            interface_type = "eth" if self.interface_combo.currentIndex() == 0 else "wlan"
             result = subprocess.run(['ip', 'link', 'show'], capture_output=True, text=True)
             interfaces = []
             for line in result.stdout.split('\n'):
@@ -1534,4 +1939,38 @@ class SettingsPage(QWidget):
     
     def _load_settings(self):
         self.atem_ip_input.setText(self.settings.atem.ip_address)
+        
+        # Load OSK preset texts (will be loaded when panel is accessed)
+        # Don't try to load here as osk_preset_inputs may not exist yet
         self._load_current_network()
+    
+    def _load_osk_presets(self):
+        """Load OSK preset texts into input fields"""
+        if not hasattr(self, 'osk_preset_inputs') or not self.osk_preset_inputs:
+            return
+
+        # Ensure settings has osk_presets attribute
+        if not hasattr(self.settings, 'osk_presets'):
+            self.settings.osk_presets = ["", "", "", "", "", ""]
+
+        # Load preset texts (no signal connection needed - Save button handles saving)
+        for i, preset_text in enumerate(self.settings.osk_presets):
+            if i < len(self.osk_preset_inputs):
+                # Just set the text - no auto-save, user clicks Save button
+                self.osk_preset_inputs[i].setText(preset_text)
+
+        # Connect keyboard preset fields to OSK if not already connected
+        self._connect_osk_to_preset_fields()
+
+    def _connect_osk_to_preset_fields(self):
+        """Connect keyboard preset input fields to OSK"""
+        if not hasattr(self, 'osk_preset_inputs') or not self.osk_preset_inputs:
+            return
+
+        # Get main window to connect OSK
+        main_window = self.parent()
+        if main_window and hasattr(main_window, '_connect_field_to_osk'):
+            for field in self.osk_preset_inputs:
+                if field:
+                    # Always try to connect - the _connect_field_to_osk method has its own guard
+                    main_window._connect_field_to_osk(field)
