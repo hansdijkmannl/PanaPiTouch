@@ -49,7 +49,7 @@ class NetworkFixDialog(QDialog):
         current_frame = QFrame()
         current_frame.setStyleSheet("""
             QFrame {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 8px;
             }
@@ -82,7 +82,7 @@ class NetworkFixDialog(QDialog):
         new_frame = QFrame()
         new_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 8px;
             }
@@ -105,7 +105,7 @@ class NetworkFixDialog(QDialog):
         self.new_ip_input.setFixedHeight(40)
         self.new_ip_input.setStyleSheet("""
             QLineEdit {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 6px;
                 padding: 8px 12px;
@@ -141,7 +141,7 @@ class NetworkFixDialog(QDialog):
         ])
         self.new_subnet_input.setStyleSheet("""
             QComboBox {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 6px;
                 padding: 8px 12px;
@@ -152,7 +152,7 @@ class NetworkFixDialog(QDialog):
                 border-color: #FF9500;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 selection-background-color: #FF9500;
                 color: #FFFFFF;
@@ -187,7 +187,7 @@ class NetworkFixDialog(QDialog):
                 height: 20px;
                 border: 2px solid #2a2a38;
                 border-radius: 4px;
-                background-color: #1a1a24;
+                background-color: #242430;
             }
             QCheckBox::indicator:checked {
                 background-color: #FF9500;
@@ -238,7 +238,7 @@ class NetworkFixDialog(QDialog):
                 background-color: #FF9500;
                 border: none;
                 border-radius: 8px;
-                color: #0a0a0f;
+                color: #121218;
                 font-size: 14px;
                 font-weight: 600;
             }

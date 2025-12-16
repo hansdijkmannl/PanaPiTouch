@@ -45,13 +45,13 @@ class StyledComboBox(QComboBox):
             if popup:
                 popup.setStyleSheet("""
                     QWidget, QFrame {
-                        background-color: #1a1a24 !important;
+                        background-color: #242430 !important;
                         border: 2px solid #2a2a38;
                     }
                 """)
             view.setStyleSheet("""
                 QAbstractItemView {
-                    background-color: #1a1a24 !important;
+                    background-color: #242430 !important;
                     border: 2px solid #2a2a38;
                     selection-background-color: #FF9500;
                     color: #FFFFFF !important;
@@ -60,13 +60,13 @@ class StyledComboBox(QComboBox):
                     outline: none;
                 }
                 QAbstractScrollArea, QAbstractScrollArea::viewport {
-                    background-color: #1a1a24 !important;
+                    background-color: #242430 !important;
                 }
                 QWidget {
-                    background-color: #1a1a24 !important;
+                    background-color: #242430 !important;
                 }
                 QAbstractItemView::item {
-                    background-color: #1a1a24 !important;
+                    background-color: #242430 !important;
                     min-height: 56px !important;
                     padding: 16px 20px;
                     border-radius: 4px;
@@ -77,7 +77,7 @@ class StyledComboBox(QComboBox):
                 }
                 QAbstractItemView::item:selected {
                     background-color: #FF9500 !important;
-                    color: #0a0a0f !important;
+                    color: #121218 !important;
                 }
             """)
 
@@ -111,7 +111,7 @@ class SettingsPage(QWidget):
         sidebar.setFixedWidth(160)
         sidebar.setStyleSheet("""
             QFrame {
-                background-color: #0a0a0f;
+                background-color: #121218;
                 border-right: 1px solid #2a2a38;
             }
         """)
@@ -145,7 +145,7 @@ class SettingsPage(QWidget):
         
         # === RIGHT CONTENT AREA ===
         self.content_stack = QStackedWidget()
-        self.content_stack.setStyleSheet("background-color: #0a0a0f;")
+        self.content_stack.setStyleSheet("background-color: #121218;")
         
         # Create content panels
         self.content_stack.addWidget(self._create_network_panel())
@@ -174,12 +174,12 @@ class SettingsPage(QWidget):
                 text-align: center;
             }
             QPushButton:hover {
-                background-color: #1a1a24;
+                background-color: #242430;
                 color: #ffffff;
             }
             QPushButton:checked {
                 background-color: #FF9500;
-                color: #0a0a0f;
+                color: #121218;
                 font-weight: 600;
             }
             QPushButton:pressed {
@@ -415,7 +415,7 @@ class SettingsPage(QWidget):
         self.companion_update_progress.setFixedHeight(16)
         self.companion_update_progress.setStyleSheet("""
             QProgressBar {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 8px;
             }
@@ -443,7 +443,7 @@ class SettingsPage(QWidget):
         """Get consistent input field styling"""
         return """
             QLineEdit, QComboBox {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
                 padding: 12px 14px;
@@ -462,7 +462,7 @@ class SettingsPage(QWidget):
                 width: 40px;
             }
             QComboBox QAbstractItemView {
-                background-color: #1a1a24 !important;
+                background-color: #242430 !important;
                 border: 2px solid #2a2a38;
                 selection-background-color: #FF9500;
                 color: #FFFFFF !important;
@@ -471,7 +471,7 @@ class SettingsPage(QWidget):
                 outline: none;
             }
             QComboBox QAbstractItemView::item {
-                background-color: #1a1a24 !important;
+                background-color: #242430 !important;
                 min-height: 56px !important;
                 padding: 16px 20px;
                 border-radius: 4px;
@@ -482,7 +482,7 @@ class SettingsPage(QWidget):
             }
             QComboBox QAbstractItemView::item:selected {
                 background-color: #FF9500 !important;
-                color: #0a0a0f !important;
+                color: #121218 !important;
             }
         """
     
@@ -494,7 +494,7 @@ class SettingsPage(QWidget):
                     background-color: #FF9500;
                     border: none;
                     border-radius: 8px;
-                    color: #0a0a0f;
+                    color: #121218;
                     font-size: 15px;
                     font-weight: 600;
                     padding: 14px 24px;
@@ -526,7 +526,7 @@ class SettingsPage(QWidget):
                 QPushButton:pressed {
                     background-color: #FF9500;
                     border-color: #FF9500;
-                    color: #0a0a0f;
+                    color: #121218;
                 }
             """
     
@@ -571,7 +571,7 @@ class SettingsPage(QWidget):
         header.setFixedHeight(70)
         header.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border-bottom: 1px solid #2a2a38;
             }
         """)
@@ -657,7 +657,7 @@ class SettingsPage(QWidget):
         mapping_frame = QFrame()
         mapping_frame.setStyleSheet("""
             QFrame {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -693,7 +693,7 @@ class SettingsPage(QWidget):
         interface_frame = QFrame()
         interface_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -725,7 +725,7 @@ class SettingsPage(QWidget):
                 height: 20px;
                 border: 2px solid #2a2a38;
                 border-radius: 10px;
-                background-color: #0a0a0f;
+                background-color: #121218;
             }
             QRadioButton::indicator:checked {
                 background-color: #FF9500;
@@ -840,7 +840,7 @@ class SettingsPage(QWidget):
         rgb_frame = QFrame()
         rgb_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -937,7 +937,7 @@ class SettingsPage(QWidget):
         frame = QFrame()
         frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1149,7 +1149,7 @@ class SettingsPage(QWidget):
         create_frame = QFrame()
         create_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1178,7 +1178,7 @@ class SettingsPage(QWidget):
         restore_frame = QFrame()
         restore_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1258,7 +1258,7 @@ class SettingsPage(QWidget):
         preset_frame = QFrame()
         preset_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1341,7 +1341,7 @@ class SettingsPage(QWidget):
         info_frame = QFrame()
         info_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1381,7 +1381,7 @@ class SettingsPage(QWidget):
         temp_frame = QFrame()
         temp_frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1454,7 +1454,7 @@ class SettingsPage(QWidget):
         frame = QFrame()
         frame.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }

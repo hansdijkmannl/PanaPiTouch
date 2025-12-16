@@ -96,7 +96,7 @@ class PreviewWidget(QWidget):
         self.preview_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.preview_label.setStyleSheet("""
             QLabel {
-                background-color: #0a0a0f;
+                background-color: #121218;
                 border: 4px solid #2a2a38;
                 border-radius: 4px;
             }
@@ -248,7 +248,7 @@ class PreviewWidget(QWidget):
             if state == TallyState.PROGRAM:
                 self.preview_label.setStyleSheet("""
                     QLabel {
-                        background-color: #0a0a0f;
+                        background-color: #121218;
                         border: 4px solid #ff3333;
                         border-radius: 4px;
                     }
@@ -256,7 +256,7 @@ class PreviewWidget(QWidget):
             elif state == TallyState.PREVIEW:
                 self.preview_label.setStyleSheet("""
                     QLabel {
-                        background-color: #0a0a0f;
+                        background-color: #121218;
                         border: 4px solid #33cc33;
                         border-radius: 4px;
                     }
@@ -264,7 +264,7 @@ class PreviewWidget(QWidget):
             else:
                 self.preview_label.setStyleSheet("""
                     QLabel {
-                        background-color: #0a0a0f;
+                        background-color: #121218;
                         border: 4px solid #2a2a38;
                         border-radius: 4px;
                     }

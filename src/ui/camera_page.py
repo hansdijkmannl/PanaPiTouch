@@ -73,7 +73,7 @@ class DiscoveredCameraCard(QFrame):
     def _setup_ui(self):
         self.setStyleSheet("""
             QFrame {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
             }
@@ -91,7 +91,7 @@ class DiscoveredCameraCard(QFrame):
         self._thumbnail_label.setFixedSize(80, 45)
         self._thumbnail_label.setStyleSheet("""
             QLabel {
-                background-color: #0a0a0f;
+                background-color: #121218;
                 border: 1px solid #2a2a38;
                 border-radius: 4px;
             }
@@ -227,7 +227,7 @@ class DiscoveredCameraCard(QFrame):
                 background-color: #FF9500;
                 border: none;
                 border-radius: 6px;
-                color: #0a0a0f;
+                color: #121218;
                 font-size: 12px;
                 font-weight: 600;
                 padding: 0px;
@@ -357,7 +357,7 @@ class CameraListItem(QFrame):
         self.thumbnail_label.setFixedSize(120, 68)  # 16:9 aspect ratio
         self.thumbnail_label.setStyleSheet("""
             QLabel {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 6px;
             }
@@ -385,7 +385,7 @@ class CameraListItem(QFrame):
             atem_badge.setStyleSheet("""
                 QLabel {
                     background-color: #FF9500;
-                    color: #0a0a0f;
+                    color: #121218;
                     font-size: 10px;
                     font-weight: 600;
                     padding: 2px 8px;
@@ -423,7 +423,7 @@ class CameraListItem(QFrame):
                 background-color: #FF9500;
                 border: none;
                 border-radius: 6px;
-                color: #0a0a0f;
+                color: #121218;
                 font-size: 13px;
                 font-weight: 600;
                 padding: 0px;
@@ -435,7 +435,7 @@ class CameraListItem(QFrame):
         
         self.setStyleSheet("""
             CameraListItem {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 10px;
                 padding: 0px;
@@ -449,7 +449,7 @@ class CameraListItem(QFrame):
     def _update_thumbnail_image(self, frame=None):
         """Update thumbnail with camera frame or 'No Connection' message"""
         pixmap = QPixmap(120, 68)
-        pixmap.fill(QColor("#1a1a24"))
+        pixmap.fill(QColor("#242430"))
         
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -457,7 +457,7 @@ class CameraListItem(QFrame):
         # Draw gradient background
         gradient = QLinearGradient(0, 0, 120, 68)
         gradient.setColorAt(0, QColor("#2a2a38"))
-        gradient.setColorAt(1, QColor("#1a1a24"))
+        gradient.setColorAt(1, QColor("#242430"))
         painter.fillRect(0, 0, 120, 68, gradient)
         
         if frame is not None and self.connection_status == "online":
@@ -603,7 +603,7 @@ class CameraPage(QWidget):
         submenu.setFixedHeight(60)
         submenu.setStyleSheet("""
             QFrame {
-                background-color: #0a0a0f;
+                background-color: #121218;
                 border-bottom: 1px solid #2a2a38;
             }
         """)
@@ -676,7 +676,7 @@ class CameraPage(QWidget):
 
         # Content stack
         self.content_stack = QStackedWidget()
-        self.content_stack.setStyleSheet("background-color: #0a0a0f;")
+        self.content_stack.setStyleSheet("background-color: #121218;")
         self.content_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         self.content_stack.setMinimumWidth(0)
         self.content_stack.addWidget(self._create_configured_content())
@@ -687,7 +687,7 @@ class CameraPage(QWidget):
         self.bottom_sheet = QFrame()
         self.bottom_sheet.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border-top: 1px solid #2a2a38;
             }
         """)
@@ -707,7 +707,7 @@ class CameraPage(QWidget):
         header.setFixedHeight(56)
         header.setStyleSheet("""
             QFrame {
-                background-color: #0a0a0f;
+                background-color: #121218;
                 border-bottom: 1px solid #2a2a38;
             }
         """)
@@ -804,12 +804,12 @@ class CameraPage(QWidget):
                 text-align: center;
             }
             QPushButton:hover {
-                background-color: #1a1a24;
+                background-color: #242430;
                 color: #ffffff;
             }
             QPushButton:checked {
                 background-color: #FF9500;
-                color: #0a0a0f;
+                color: #121218;
                 font-weight: 600;
             }
             QPushButton:pressed {
@@ -990,7 +990,7 @@ class CameraPage(QWidget):
         self.easyip_search_input.setFixedHeight(44)
         self.easyip_search_input.setStyleSheet("""
             QLineEdit {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
                 padding: 8px 12px;
@@ -1014,7 +1014,7 @@ class CameraPage(QWidget):
                 background-color: #FF9500;
                 border: 2px solid #FF9500;
                 border-radius: 8px;
-                color: #0a0a0f;
+                color: #121218;
                 font-size: 14px;
                 font-weight: 600;
                 padding: 8px 12px;
@@ -1069,7 +1069,7 @@ class CameraPage(QWidget):
                 border: 1px solid #2a2a38;
                 border-radius: 4px;
                 text-align: center;
-                background-color: #1a1a24;
+                background-color: #242430;
                 height: 24px;
             }
             QProgressBar::chunk {
@@ -1085,7 +1085,7 @@ class CameraPage(QWidget):
         camera_scroll.setWidgetResizable(True)
         camera_scroll.setStyleSheet("""
             QScrollArea {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 8px;
             }
@@ -1395,7 +1395,7 @@ class CameraPage(QWidget):
         label_style = "color: #ffffff; font-size: 13px; font-weight: 500; border: none;"
         input_style = """
             QLineEdit {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
                 padding: 10px 14px;
@@ -1409,7 +1409,7 @@ class CameraPage(QWidget):
         """
         spin_style = """
             QSpinBox {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
                 padding: 10px 14px;
@@ -1423,7 +1423,7 @@ class CameraPage(QWidget):
         """
         combo_style = """
             QComboBox {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 2px solid #2a2a38;
                 border-radius: 8px;
                 padding: 10px 14px;
@@ -1522,7 +1522,7 @@ class CameraPage(QWidget):
             QPushButton:pressed {
                 background-color: #FF9500;
                 border-color: #FF9500;
-                color: #0a0a0f;
+                color: #121218;
             }
         """)
         cancel_btn.clicked.connect(self._cancel_inline_edit)
@@ -1535,7 +1535,7 @@ class CameraPage(QWidget):
                 background-color: #FF9500;
                 border: none;
                 border-radius: 8px;
-                color: #0a0a0f;
+                color: #121218;
                 font-size: 14px;
                 font-weight: 600;
             }
@@ -1686,7 +1686,7 @@ class CameraPage(QWidget):
         panel = QFrame()
         panel.setStyleSheet("""
             QFrame {
-                background-color: #12121a;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
@@ -1720,7 +1720,7 @@ class CameraPage(QWidget):
                 border: 1px solid #2a2a38;
                 border-radius: 4px;
                 text-align: center;
-                background-color: #1a1a24;
+                background-color: #242430;
                 height: 24px;
                 font-size: 12px;
             }
@@ -1738,7 +1738,7 @@ class CameraPage(QWidget):
         self.sort_combo.setFixedHeight(24)
         self.sort_combo.setStyleSheet("""
             QComboBox {
-                background-color: #1a1a24;
+                background-color: #242430;
                 border: 1px solid #2a2a38;
                 border-radius: 4px;
                 padding: 0px 8px;
