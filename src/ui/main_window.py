@@ -3249,7 +3249,7 @@ class MainWindow(QMainWindow):
             scroll.setWidget(widget)
             return scroll
         
-        # Create 8×6 grid (48 presets) in a panel
+        # Create 6×8 grid (48 presets) in a panel - better fit for screen width
         presets_frame = QFrame()
         presets_frame.setStyleSheet(f"""
             QFrame {{
@@ -3261,24 +3261,24 @@ class MainWindow(QMainWindow):
         presets_frame_layout = QVBoxLayout(presets_frame)
         presets_frame_layout.setContentsMargins(12, 12, 12, 12)
         presets_frame_layout.setSpacing(0)
-        
+
         presets_grid = QGridLayout()
-        presets_grid.setSpacing(6)
-        presets_grid.setVerticalSpacing(8)
-        
+        presets_grid.setSpacing(4)  # Reduced spacing
+        presets_grid.setVerticalSpacing(6)
+
         # Prevent columns from stretching
-        for col in range(8):
+        for col in range(6):
             presets_grid.setColumnStretch(col, 0)
-        
+
         # Store preset buttons for potential refresh
         preset_buttons = []
         for preset_num in range(1, 49):  # Presets 1-48
-            row = (preset_num - 1) // 8  # 6 rows (0-5)
-            col = (preset_num - 1) % 8   # 8 columns (0-7)
+            row = (preset_num - 1) // 6  # 8 rows (0-7)
+            col = (preset_num - 1) % 6   # 6 columns (0-5)
             
             # Create container widget with label above and button below
             container = QWidget()
-            container.setFixedWidth(80)
+            container.setFixedWidth(85)  # Slightly wider for 6-column layout
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(2)
