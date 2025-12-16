@@ -652,28 +652,73 @@ class SettingsPage(QWidget):
 
         # Add camera selection for each configured camera
         for camera in self.settings.cameras:
-            camera_row = QHBoxLayout()
-            camera_row.setSpacing(12)
+            # Camera section
+            camera_group = QGroupBox(f"📹 {camera.name}")
+            camera_group.setStyleSheet("""
+                QGroupBox {
+                    font-size: 13px;
+                    font-weight: bold;
+                    color: #ffffff;
+                    border: 2px solid #2a2a38;
+                    border-radius: 6px;
+                    margin-top: 6px;
+                    padding-top: 8px;
+                }
+                QGroupBox::title {
+                    subcontrol-origin: margin;
+                    left: 8px;
+                    padding: 0 4px 0 4px;
+                }
+            """)
 
-            # Checkbox
-            checkbox = QCheckBox(f"📹 {camera.name}")
-            checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
-            checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
-            self.multi_camera_checkboxes[camera.id] = checkbox
-            camera_row.addWidget(checkbox)
+            camera_layout = QVBoxLayout(camera_group)
+            camera_layout.setSpacing(8)
 
-            # Layout combo
-            layout_combo = QComboBox()
-            layout_combo.addItems(["4×3 (12 presets)", "1×8 (8 presets)", "4×2 (8 presets)"])
+            # Enable checkbox
+            enable_layout = QHBoxLayout()
+            enable_checkbox = QCheckBox("Include in Multi-Camera View")
+            enable_checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
+            enable_checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
+            self.multi_camera_checkboxes[camera.id] = enable_checkbox
+            enable_layout.addWidget(enable_checkbox)
+            enable_layout.addStretch()
+            camera_layout.addLayout(enable_layout)
+
+            # Layout selection with radio buttons and visual previews
+            layout_label = QLabel("Preset Layout:")
+            layout_label.setStyleSheet("color: #b0b0b0; font-size: 12px; font-weight: 500;")
+            camera_layout.addWidget(layout_label)
+
+            # Radio button group for layout selection
+            layout_group = QButtonGroup(camera_group)
+            self.multi_camera_layout_combos[camera.id] = layout_group
+
             current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
-            layout_combo.setCurrentText(current_layout)
-            layout_combo.setEnabled(checkbox.isChecked())
-            layout_combo.currentTextChanged.connect(lambda text, cam_id=camera.id: self._on_multi_camera_layout_change(cam_id, text))
-            self.multi_camera_layout_combos[camera.id] = layout_combo
-            camera_row.addWidget(layout_combo)
 
-            camera_row.addStretch()
-            cameras_layout.addLayout(camera_row)
+            # Layout options
+            layouts = [
+                ("4×3 Grid", "4×3 (12 presets)", self._create_layout_preview_4x3()),
+                ("1×8 Strip", "1×8 (8 presets)", self._create_layout_preview_1x8()),
+                ("4×2 Grid", "4×2 (8 presets)", self._create_layout_preview_4x2())
+            ]
+
+            for layout_name, layout_value, preview_widget in layouts:
+                option_layout = QHBoxLayout()
+                option_layout.setSpacing(8)
+
+                radio_btn = QRadioButton(layout_name)
+                radio_btn.setChecked(layout_value == current_layout)
+                radio_btn.setEnabled(enable_checkbox.isChecked())
+                layout_group.addButton(radio_btn)
+                radio_btn.clicked.connect(lambda checked, cam_id=camera.id, val=layout_value: self._on_multi_camera_layout_change(cam_id, val))
+
+                option_layout.addWidget(radio_btn)
+                option_layout.addWidget(preview_widget)
+                option_layout.addStretch()
+
+                camera_layout.addLayout(option_layout)
+
+            cameras_layout.addWidget(camera_group)
 
         multi_layout.addWidget(cameras_frame)
 
@@ -748,7 +793,7 @@ class SettingsPage(QWidget):
         self._update_multi_camera_preview()
 
     def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
-        """Handle layout combo change"""
+        """Handle layout radio button change"""
         self._update_multi_camera_preview()
 
     def _update_multi_camera_preview(self):
@@ -760,8 +805,19 @@ class SettingsPage(QWidget):
             if checkbox.isChecked():
                 camera = self.settings.get_camera(camera_id)
                 if camera:
-                    layout_combo = self.multi_camera_layout_combos[camera_id]
-                    layout_text = layout_combo.currentText()
+                    layout_group = self.multi_camera_layout_combos[camera_id]
+
+                    # Find checked radio button
+                    layout_text = "4×3 (12 presets)"  # Default
+                    for button in layout_group.buttons():
+                        if button.isChecked():
+                            if "4×3" in button.text():
+                                layout_text = "4×3 (12 presets)"
+                            elif "1×8" in button.text():
+                                layout_text = "1×8 (8 presets)"
+                            elif "4×2" in button.text():
+                                layout_text = "4×2 (8 presets)"
+                            break
 
                     if "12 presets" in layout_text:
                         preset_count = 12
@@ -789,8 +845,20 @@ class SettingsPage(QWidget):
 
         for camera_id, checkbox in self.multi_camera_checkboxes.items():
             if checkbox.isChecked():
-                layout_combo = self.multi_camera_layout_combos[camera_id]
-                layout_text = layout_combo.currentText()
+                layout_group = self.multi_camera_layout_combos[camera_id]
+
+                # Find checked radio button
+                layout_text = "4×3 (12 presets)"  # Default
+                for button in layout_group.buttons():
+                    if button.isChecked():
+                        # Map button text back to layout value
+                        if "4×3" in button.text():
+                            layout_text = "4×3 (12 presets)"
+                        elif "1×8" in button.text():
+                            layout_text = "1×8 (8 presets)"
+                        elif "4×2" in button.text():
+                            layout_text = "4×2 (8 presets)"
+                        break
 
                 if "12 presets" in layout_text:
                     preset_count = 12
@@ -837,14 +905,68 @@ class SettingsPage(QWidget):
         """)
         msg.exec()
 
+    def _create_layout_preview_4x3(self):
+        """Create visual preview for 4×3 layout"""
+        preview = QWidget()
+        preview.setFixedSize(60, 45)
+        layout = QGridLayout(preview)
+        layout.setSpacing(1)
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        for i in range(12):
+            dot = QLabel("●")
+            dot.setStyleSheet("color: #3498db; font-size: 6px;")
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            row = i // 4
+            col = i % 4
+            layout.addWidget(dot, row, col)
+
+        return preview
+
+    def _create_layout_preview_1x8(self):
+        """Create visual preview for 1×8 layout"""
+        preview = QWidget()
+        preview.setFixedSize(60, 15)
+        layout = QHBoxLayout(preview)
+        layout.setSpacing(1)
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        for i in range(8):
+            dot = QLabel("●")
+            dot.setStyleSheet("color: #3498db; font-size: 6px;")
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(dot)
+
+        return preview
+
+    def _create_layout_preview_4x2(self):
+        """Create visual preview for 4×2 layout"""
+        preview = QWidget()
+        preview.setFixedSize(60, 30)
+        layout = QGridLayout(preview)
+        layout.setSpacing(1)
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        for i in range(8):
+            dot = QLabel("●")
+            dot.setStyleSheet("color: #3498db; font-size: 6px;")
+            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            row = i // 4
+            col = i % 4
+            layout.addWidget(dot, row, col)
+
+        return preview
+
     def _reset_multi_camera_config(self):
         """Reset multi-camera configuration to default"""
         for checkbox in self.multi_camera_checkboxes.values():
             checkbox.setChecked(False)
 
-        for combo in self.multi_camera_layout_combos.values():
-            combo.setCurrentText("4×3 (12 presets)")
-            combo.setEnabled(False)
+        # Reset radio button groups
+        for group in self.multi_camera_layout_combos.values():
+            # Find and check the first button (4x3)
+            if group.buttons():
+                group.buttons()[0].setChecked(True)
 
         self.settings.multi_camera_presets = {}
         self.settings.save()

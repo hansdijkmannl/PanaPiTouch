@@ -1803,79 +1803,72 @@ class MainWindow(QMainWindow):
             layout.addStretch()
 
         else:
-            # Create sections for each configured camera
-            for cam_config in configured_cameras:
+            # Create 2-column grid layout for cameras
+            cameras_grid = QGridLayout()
+            cameras_grid.setSpacing(8)
+            cameras_grid.setVerticalSpacing(8)
+
+            # Arrange cameras in 2 columns
+            for i, cam_config in enumerate(configured_cameras):
                 camera = cam_config['camera']
                 layout_type = cam_config['layout']
                 preset_count = cam_config['preset_count']
 
-                # Camera header
-                header_frame = QFrame()
-                header_frame.setStyleSheet(f"""
-                    QFrame {{
-                        background-color: {COLORS['surface_light']};
-                        border: 1px solid {COLORS['border']};
-                        border-radius: 6px;
-                    }}
-                """)
-                header_layout = QHBoxLayout(header_frame)
-                header_layout.setContentsMargins(12, 8, 12, 8)
+                row = i // 2  # 2 cameras per row
+                col = i % 2   # Left or right column
 
-                camera_label = QLabel(f"📹 {camera.name}")
-                camera_label.setStyleSheet(f"""
-                    color: {COLORS['secondary']};
-                    font-size: 14px;
-                    font-weight: 600;
-                """)
-                header_layout.addWidget(camera_label)
-
-                header_layout.addStretch()
-
-                layout_type_label = QLabel(layout_type)
-                layout_type_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
-                header_layout.addWidget(layout_type_label)
-
-                layout.addWidget(header_frame)
-
-                # Preset grid for this camera - always 2 columns except 1x8
-                grid_frame = QFrame()
-                grid_frame.setStyleSheet(f"""
+                # Camera module container
+                camera_frame = QFrame()
+                camera_frame.setStyleSheet(f"""
                     QFrame {{
                         background-color: {COLORS['surface']};
                         border: 1px solid {COLORS['border']};
                         border-radius: 8px;
                     }}
                 """)
-                grid_layout = QVBoxLayout(grid_frame)
-                grid_layout.setContentsMargins(12, 8, 12, 8)  # Tighter margins
+                camera_layout = QVBoxLayout(camera_frame)
+                camera_layout.setContentsMargins(8, 8, 8, 8)
+                camera_layout.setSpacing(4)
 
-                # Calculate grid dimensions - always 2 columns except 1x8
-                if "1×8" in layout_type:
-                    rows, cols = 1, 8  # 1 row, 8 columns for 1x8
-                else:
-                    # For all other layouts, use 2 columns
-                    cols = 2
-                    rows = (preset_count + 1) // 2  # Calculate rows needed for 2 columns
+                # Camera header
+                camera_label = QLabel(f"📹 {camera.name}")
+                camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                camera_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {COLORS['secondary']};
+                        font-size: 13px;
+                        font-weight: 600;
+                        padding: 4px 0;
+                    }}
+                """)
+                camera_layout.addWidget(camera_label)
 
-                # Create grid layout
+                # Preset grid for this camera
                 preset_grid = QGridLayout()
-                preset_grid.setSpacing(4)
-                preset_grid.setVerticalSpacing(4)  # Tighter vertical spacing
+                preset_grid.setSpacing(3)
+                preset_grid.setVerticalSpacing(3)
 
-                # Create preset buttons (1 to preset_count)
-                for preset_num in range(1, min(preset_count, 12) + 1):  # Max 12 presets per camera
-                    row = (preset_num - 1) // cols
-                    col = (preset_num - 1) % cols
+                # Calculate grid dimensions based on layout type
+                if "4×3" in layout_type:
+                    grid_rows, grid_cols = 3, 4  # 4 columns, 3 rows
+                elif "1×8" in layout_type:
+                    grid_rows, grid_cols = 1, 8  # 1 row, 8 columns
+                elif "4×2" in layout_type:
+                    grid_rows, grid_cols = 2, 4  # 4 columns, 2 rows
+                else:
+                    grid_rows, grid_cols = 3, 4  # Default to 4x3
+
+                # Create preset buttons
+                for preset_num in range(1, min(preset_count, 12) + 1):
+                    p_row = (preset_num - 1) // grid_cols
+                    p_col = (preset_num - 1) % grid_cols
 
                     # Create preset button
                     preset_btn = PresetButton(preset_num, camera.id, self)
-                    preset_grid.addWidget(preset_btn, row, col)
+                    preset_grid.addWidget(preset_btn, p_row, p_col)
 
-                grid_layout.addLayout(preset_grid)
-                layout.addWidget(grid_frame)
-
-                # Minimal spacing between camera sections
-                layout.addSpacing(4)
+                camera_layout.addLayout(preset_grid)
+                cameras_grid.addWidget(camera_frame, row, col)
 
         scroll.setWidget(widget)
         return scroll
