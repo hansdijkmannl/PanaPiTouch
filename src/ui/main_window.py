@@ -1755,21 +1755,24 @@ class MainWindow(QMainWindow):
             self.bottom_panel_stack.setCurrentIndex(3)
 
     def _create_multi_camera_presets_panel(self) -> QWidget:
-        """Create Multi-Camera Presets panel with dynamic grid layouts"""
+        """Create Multi-Camera Presets panel mimicking the main presets page look"""
         scroll = TouchScrollArea()
         scroll.setWidgetResizable(True)
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)  # Tighter margins
-        layout.setSpacing(6)  # Much tighter spacing between sections
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
-        # Get configured cameras
+        # Get configured cameras and calculate preset distribution
         configured_cameras = []
+        total_enabled_cameras = 0
+
         for cam_id, config in self.settings.multi_camera_presets.items():
             if config.get('enabled', False):
                 camera = self.settings.get_camera(int(cam_id))
                 if camera:
+                    total_enabled_cameras += 1
                     configured_cameras.append({
                         'camera': camera,
                         'layout': config.get('layout', '4×3 (12 presets)'),
@@ -1803,112 +1806,170 @@ class MainWindow(QMainWindow):
             layout.addStretch()
 
         else:
-            # Create 2-column grid layout for cameras
-            cameras_grid = QGridLayout()
-            cameras_grid.setSpacing(8)
-            cameras_grid.setVerticalSpacing(8)
+            # Calculate presets per camera (distribute 48 slots evenly)
+            presets_per_camera = 48 // total_enabled_cameras if total_enabled_cameras > 0 else 0
 
-            # Arrange cameras in 2 columns
-            for i, cam_config in enumerate(configured_cameras):
+            # Create header showing camera distribution
+            header_text = f"Multi-Camera Presets: {total_enabled_cameras} cameras × {presets_per_camera} presets each"
+            header_label = QLabel(header_text)
+            header_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {COLORS['secondary']};
+                    font-size: 14px;
+                    font-weight: 600;
+                    padding: 8px;
+                    background-color: {COLORS['surface_light']};
+                    border-radius: 6px;
+                }}
+            """)
+            layout.addWidget(header_label)
+
+            # Create the main 8×6 grid (48 presets) - same as single camera presets
+            presets_frame = QFrame()
+            presets_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {COLORS['surface']};
+                    border: 1px solid {COLORS['border']};
+                    border-radius: 10px;
+                }}
+            """)
+            presets_frame_layout = QVBoxLayout(presets_frame)
+            presets_frame_layout.setContentsMargins(12, 12, 12, 12)
+            presets_frame_layout.setSpacing(0)
+
+            presets_grid = QGridLayout()
+            presets_grid.setSpacing(6)
+            presets_grid.setVerticalSpacing(8)
+
+            # Prevent columns from stretching
+            for col in range(8):
+                presets_grid.setColumnStretch(col, 0)
+
+            # Distribute presets across cameras
+            preset_counter = 0
+            for cam_config in configured_cameras:
                 camera = cam_config['camera']
-                layout_type = cam_config['layout']
-                preset_count = cam_config['preset_count']
+                camera_id = camera.id
+                presets_for_this_camera = min(presets_per_camera, 48 - preset_counter)
 
-                row = i // 2  # 2 cameras per row
-                col = i % 2   # Left or right column
+                # Create presets for this camera
+                for i in range(presets_for_this_camera):
+                    if preset_counter >= 48:
+                        break
 
-                # Camera module container
-                camera_frame = QFrame()
-                camera_frame.setMinimumSize(180, 140)  # Ensure minimum size for content
-                camera_frame.setStyleSheet(f"""
-                    QFrame {{
-                        background-color: {COLORS['surface']};
-                        border: 1px solid {COLORS['border']};
-                        border-radius: 8px;
-                    }}
-                """)
-                camera_layout = QVBoxLayout(camera_frame)
-                camera_layout.setContentsMargins(6, 6, 6, 6)
-                camera_layout.setSpacing(2)
+                    row = preset_counter // 8
+                    col = preset_counter % 8
 
-                # Camera header
-                camera_label = QLabel(f"📹 {camera.name}")
-                camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                camera_label.setStyleSheet(f"""
+                    # Create preset button with camera-specific styling
+                    preset_btn = self._create_multi_camera_preset_button(preset_counter + 1, camera_id, camera.name)
+                    presets_grid.addWidget(preset_btn, row, col)
+
+                    preset_counter += 1
+
+                # Fill remaining slots with empty buttons if needed
+                while preset_counter < 48 and preset_counter < (len(configured_cameras) * presets_per_camera):
+                    row = preset_counter // 8
+                    col = preset_counter % 8
+
+                    empty_btn = self._create_empty_preset_button()
+                    presets_grid.addWidget(empty_btn, row, col)
+                    preset_counter += 1
+
+            presets_frame_layout.addLayout(presets_grid)
+            layout.addWidget(presets_frame)
+
+            # Add camera legend
+            legend_layout = QHBoxLayout()
+            legend_layout.setSpacing(12)
+
+            for cam_config in configured_cameras:
+                camera = cam_config['camera']
+                legend_item = QLabel(f"📹 {camera.name}")
+                legend_item.setStyleSheet(f"""
                     QLabel {{
                         color: {COLORS['secondary']};
-                        font-size: 13px;
-                        font-weight: 600;
-                        padding: 4px 0;
+                        font-size: 12px;
+                        font-weight: 500;
+                        padding: 4px 8px;
+                        background-color: {COLORS['surface']};
+                        border: 1px solid {COLORS['border']};
+                        border-radius: 4px;
                     }}
                 """)
-                camera_layout.addWidget(camera_label)
+                legend_layout.addWidget(legend_item)
 
-                # Preset grid for this camera
-                preset_grid = QGridLayout()
-                preset_grid.setSpacing(3)
-                preset_grid.setVerticalSpacing(3)
-
-                # Calculate grid dimensions based on layout type
-                if "4×3" in layout_type:
-                    grid_rows, grid_cols = 3, 4  # 4 columns, 3 rows
-                elif "1×8" in layout_type:
-                    grid_rows, grid_cols = 1, 8  # 1 row, 8 columns
-                elif "4×2" in layout_type:
-                    grid_rows, grid_cols = 2, 4  # 4 columns, 2 rows
-                else:
-                    grid_rows, grid_cols = 3, 4  # Default to 4x3
-
-                # Create preset buttons - smaller for multi-camera view
-                for preset_num in range(1, min(preset_count, 12) + 1):
-                    p_row = (preset_num - 1) // grid_cols
-                    p_col = (preset_num - 1) % grid_cols
-
-                    # Create smaller preset button for multi-camera view
-                    preset_btn = self._create_small_preset_button(preset_num, camera.id)
-                    preset_grid.addWidget(preset_btn, p_row, p_col)
-
-                camera_layout.addLayout(preset_grid)
-                cameras_grid.addWidget(camera_frame, row, col)
-
-            # Add the cameras grid to the main layout
-            layout.addLayout(cameras_grid)
+            legend_layout.addStretch()
+            layout.addLayout(legend_layout)
 
         scroll.setWidget(widget)
         return scroll
 
-    def _create_small_preset_button(self, preset_num: int, camera_id: int) -> QPushButton:
-        """Create a smaller preset button for multi-camera view"""
+    def _create_multi_camera_preset_button(self, preset_num: int, camera_id: int, camera_name: str) -> QPushButton:
+        """Create a preset button for multi-camera view with camera identification"""
         btn = QPushButton(str(preset_num))
-        btn.setFixedSize(32, 32)  # Much smaller than normal preset buttons
-        btn.setObjectName("smallPresetButton")
+        btn.setFixedSize(80, 80)  # Same size as regular preset buttons
+        btn.setObjectName("multiCameraPresetButton")
 
-        # Style for small preset buttons
+        # Create camera-specific color (cycle through colors for different cameras)
+        camera_colors = [
+            COLORS['primary'],      # Blue
+            '#e74c3c',              # Red
+            '#27ae60',              # Green
+            '#f39c12',              # Orange
+            '#9b59b6',              # Purple
+            '#1abc9c',              # Teal
+        ]
+        camera_color = camera_colors[(camera_id - 1) % len(camera_colors)]
+
+        # Style for multi-camera preset buttons
         btn.setStyleSheet(f"""
-            QPushButton#smallPresetButton {{
+            QPushButton#multiCameraPresetButton {{
                 background-color: {COLORS['surface']};
-                border: 2px solid {COLORS['tally_off']};
-                border-radius: 6px;
+                border: 3px solid {camera_color};
+                border-radius: 10px;
                 color: {COLORS['text']};
-                font-size: 12px;
+                font-size: 16px;
                 font-weight: 600;
-                text-align: center;
             }}
-            QPushButton#smallPresetButton:hover {{
+            QPushButton#multiCameraPresetButton:hover {{
                 background-color: {COLORS['surface_hover']};
                 border-color: {COLORS['primary']};
             }}
-            QPushButton#smallPresetButton:pressed {{
-                background-color: {COLORS['primary']};
-                border-color: {COLORS['primary']};
+            QPushButton#multiCameraPresetButton:pressed {{
+                background-color: {camera_color};
+                border-color: {camera_color};
                 color: {COLORS['background']};
             }}
         """)
 
-        # Connect to preset recall
-        btn.clicked.connect(lambda: self._send_camera_command(f"R{preset_num:02d}", endpoint="aw_ptz") or
+        # Set tooltip showing camera info
+        btn.setToolTip(f"Preset {preset_num} - {camera_name}")
+
+        # Connect to preset recall for specific camera
+        btn.clicked.connect(lambda: self._send_camera_command(f"R{preset_num:02d}", endpoint="aw_ptz", camera_id=camera_id) or
                            (hasattr(self, 'toast') and self.toast and
-                            self.toast.show_message(f"Recalled Preset {preset_num}", duration=1500)))
+                            self.toast.show_message(f"Recalled {camera_name} Preset {preset_num}", duration=1500)))
+
+        return btn
+
+    def _create_empty_preset_button(self) -> QPushButton:
+        """Create an empty/disabled preset button for unused slots"""
+        btn = QPushButton("")
+        btn.setFixedSize(80, 80)
+        btn.setObjectName("emptyPresetButton")
+        btn.setEnabled(False)
+
+        # Style for empty preset buttons
+        btn.setStyleSheet(f"""
+            QPushButton#emptyPresetButton {{
+                background-color: {COLORS['surface']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 10px;
+                color: {COLORS['text_dim']};
+                font-size: 16px;
+                font-weight: 400;
+            }}
+        """)
 
         return btn
 

@@ -786,57 +786,71 @@ class SettingsPage(QWidget):
 
     def _on_multi_camera_toggle(self, camera_id: int, state: int):
         """Handle camera checkbox toggle"""
-        enabled = state == 2  # Qt.CheckState.Checked.value
-        if camera_id in self.multi_camera_layout_combos:
-            self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
-        self._update_multi_camera_preview()
+        try:
+            enabled = state == 2  # Qt.CheckState.Checked.value
+            if hasattr(self, 'multi_camera_layout_combos') and camera_id in self.multi_camera_layout_combos:
+                self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
+            self._update_multi_camera_preview()
+        except Exception as e:
+            print(f"Error in camera toggle: {e}")
+            # Don't crash, just continue
 
     def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
         """Handle layout radio button change"""
-        self._update_multi_camera_preview()
+        try:
+            self._update_multi_camera_preview()
+        except Exception as e:
+            print(f"Error in layout change: {e}")
+            # Don't crash, just continue
 
     def _update_multi_camera_preview(self):
         """Update the preview of current multi-camera configuration"""
-        selected_cameras = []
-        total_presets = 0
+        try:
+            if not hasattr(self, 'multi_camera_checkboxes') or not hasattr(self, 'multi_camera_preview_label'):
+                return  # UI not initialized yet
 
-        for camera_id, checkbox in self.multi_camera_checkboxes.items():
-            if checkbox.isChecked():
-                camera = self.settings.get_camera(camera_id)
-                if camera:
-                    layout_group = self.multi_camera_layout_combos[camera_id]
+            selected_cameras = []
+            total_presets = 0
 
-                    # Find checked radio button
-                    layout_text = "4×3 (12 presets)"  # Default
-                    for button in layout_group.buttons():
-                        if button.isChecked():
-                            if "4×3" in button.text():
-                                layout_text = "4×3 (12 presets)"
-                            elif "1×8" in button.text():
-                                layout_text = "1×8 (8 presets)"
-                            elif "4×2" in button.text():
-                                layout_text = "4×2 (8 presets)"
-                            break
+            for camera_id, checkbox in self.multi_camera_checkboxes.items():
+                if checkbox.isChecked():
+                    camera = self.settings.get_camera(camera_id)
+                    if camera:
+                        layout_group = self.multi_camera_layout_combos.get(camera_id)
+                        if layout_group:
+                            # Find checked radio button
+                            layout_text = "4×3 (12 presets)"  # Default
+                            for button in layout_group.buttons():
+                                if button.isChecked():
+                                    if "12" in button.text():
+                                        layout_text = "4×3 (12 presets)"
+                                    elif "8" in button.text():
+                                        layout_text = "1×8 (8 presets)" if "1×8" in layout_text else "4×2 (8 presets)"
+                                    break
 
-                    if "12 presets" in layout_text:
-                        preset_count = 12
-                    elif "8 presets" in layout_text:
-                        preset_count = 8
-                    else:
-                        preset_count = 8
+                            if "12 presets" in layout_text:
+                                preset_count = 12
+                            elif "8 presets" in layout_text:
+                                preset_count = 8
+                            else:
+                                preset_count = 8
 
-                    selected_cameras.append(f"{camera.name}: {layout_text}")
-                    total_presets += preset_count
+                            selected_cameras.append(f"{camera.name}: {layout_text}")
+                            total_presets += preset_count
 
-        if selected_cameras:
-            preview_text = f"Selected ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
-            preview_text += f"\n\nTotal: {total_presets}/48 presets"
-            if total_presets > 48:
-                preview_text += " ⚠️ Over limit!"
-        else:
-            preview_text = "No cameras selected"
+            if selected_cameras:
+                preview_text = f"Selected ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
+                preview_text += f"\n\nTotal: {total_presets}/48 presets"
+                if total_presets > 48:
+                    preview_text += " ⚠️ Over limit!"
+            else:
+                preview_text = "No cameras selected"
 
-        self.multi_camera_preview_label.setText(preview_text)
+            self.multi_camera_preview_label.setText(preview_text)
+        except Exception as e:
+            print(f"Error updating preview: {e}")
+            if hasattr(self, 'multi_camera_preview_label'):
+                self.multi_camera_preview_label.setText("Error loading preview")
 
     def _save_multi_camera_config(self):
         """Save the current multi-camera configuration"""
@@ -850,12 +864,13 @@ class SettingsPage(QWidget):
                 layout_text = "4×3 (12 presets)"  # Default
                 for button in layout_group.buttons():
                     if button.isChecked():
-                        # Map button text back to layout value
-                        if "4×3" in button.text():
+                        # Map button index to layout value (first button = 12, second = 8, third = 8)
+                        button_index = layout_group.buttons().index(button)
+                        if button_index == 0:  # First button (12)
                             layout_text = "4×3 (12 presets)"
-                        elif "1×8" in button.text():
+                        elif button_index == 1:  # Second button (8) - default to 1x8
                             layout_text = "1×8 (8 presets)"
-                        elif "4×2" in button.text():
+                        elif button_index == 2:  # Third button (8) - use 4x2
                             layout_text = "4×2 (8 presets)"
                         break
 
