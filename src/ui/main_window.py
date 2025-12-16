@@ -133,12 +133,12 @@ class PresetButton(QPushButton):
                     self.setMinimumSize(80, 80)
                     self.setMaximumSize(80, 80)
                     self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-                    # Set text color to white for visibility over thumbnail
+                    # Canon-style: saved presets have blue border (secondary color)
                     self.setStyleSheet(f"""
                         QPushButton {{
                             background-color: transparent;
-                            border: 3px solid {COLORS['tally_off']};
-                            border-radius: 10px;
+                            border: 2px solid {COLORS['secondary']};
+                            border-radius: 8px;
                             color: white;
                             font-size: 14px;
                             font-weight: 700;
@@ -146,17 +146,19 @@ class PresetButton(QPushButton):
                             padding: 0px;
                         }}
                         QPushButton:hover {{
-                            border-color: {COLORS['border_light']};
+                            border-color: {COLORS['primary']};
+                            border-width: 3px;
                         }}
                         QPushButton:pressed {{
                             border-color: {COLORS['primary']};
+                            background-color: rgba(255, 149, 0, 0.3);
                         }}
                     """)
                     return
             except Exception as e:
                 logger.error(f"Error loading thumbnail for preset {self.preset_num}: {e}")
         
-        # No thumbnail - use default style
+        # No thumbnail - use Canon-inspired empty preset style
         self.has_thumbnail = False
         self.setIcon(QIcon())  # Clear icon
         # Ensure button stays square 80x80px - enforce size
@@ -167,19 +169,21 @@ class PresetButton(QPushButton):
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['surface']};
-                border: 3px solid {COLORS['tally_off']};
-                border-radius: 10px;
-                color: {COLORS['text']};
-                font-size: 16px;
-                font-weight: 600;
+                border: 2px solid {COLORS['border']};
+                border-radius: 8px;
+                color: {COLORS['text_dim']};
+                font-size: 14px;
+                font-weight: 500;
             }}
             QPushButton:hover {{
                 background-color: {COLORS['surface_hover']};
-                border-color: {COLORS['border_light']};
+                border-color: {COLORS['primary']};
+                color: {COLORS['text']};
             }}
             QPushButton:pressed {{
                 background-color: {COLORS['primary']};
                 border-color: {COLORS['primary']};
+                color: {COLORS['background']};
             }}
         """)
     
@@ -2323,40 +2327,72 @@ class MainWindow(QMainWindow):
         return container
     
     def _create_separator(self) -> QFrame:
-        """Create a horizontal separator line"""
+        """Create a Canon-style horizontal separator line"""
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator.setFixedHeight(1)
         separator.setStyleSheet(f"""
             QFrame {{
-                color: {COLORS['border']};
                 background-color: {COLORS['border']};
-                max-height: 1px;
+                border: none;
             }}
         """)
         return separator
+
+    def _create_section_header(self, title: str) -> QLabel:
+        """Create a Canon-style section header label"""
+        label = QLabel(title.upper())
+        label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['text']};
+                font-size: 13px;
+                font-weight: bold;
+                background-color: {COLORS['surface_light']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 4px;
+                padding: 6px 12px;
+            }}
+        """)
+        return label
     
     def _create_two_column_layout(self) -> tuple:
-        """Create a two-column layout container"""
+        """Create a Canon-style two-column layout container"""
         container = QWidget()
         main_layout = QVBoxLayout(container)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        main_layout.setSpacing(16)
+        main_layout.setContentsMargins(16, 16, 16, 16)
+        main_layout.setSpacing(12)
         
         columns_widget = QWidget()
         columns_layout = QHBoxLayout(columns_widget)
         columns_layout.setContentsMargins(0, 0, 0, 0)
-        columns_layout.setSpacing(20)
+        columns_layout.setSpacing(16)
         
-        left_column = QWidget()
+        # Left column with Canon-style panel
+        left_column = QFrame()
+        left_column.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
         left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(16)
+        left_layout.setContentsMargins(12, 12, 12, 12)
+        left_layout.setSpacing(12)
         
-        right_column = QWidget()
+        # Right column with Canon-style panel
+        right_column = QFrame()
+        right_column.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
         right_layout = QVBoxLayout(right_column)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(16)
+        right_layout.setContentsMargins(12, 12, 12, 12)
+        right_layout.setSpacing(12)
         
         columns_layout.addWidget(left_column, stretch=1)
         columns_layout.addWidget(right_column, stretch=1)
@@ -3014,14 +3050,14 @@ class MainWindow(QMainWindow):
         return scroll
     
     def _create_presets_panel(self) -> QWidget:
-        """Create Presets panel with 48-button grid (8×6) - matching Companion module"""
+        """Create Presets panel with 48-button grid (8×6) - Canon RC-IP100 inspired"""
         scroll = TouchScrollArea()
         scroll.setWidgetResizable(True)
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         
         # Get current camera ID (or use first camera if none selected)
         camera_id = self.current_camera_id
@@ -3029,21 +3065,91 @@ class MainWindow(QMainWindow):
             camera_id = self.settings.cameras[0].id
         
         if camera_id is None:
-            # No cameras configured
+            # No cameras configured - Canon-style empty state
+            empty_frame = QFrame()
+            empty_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {COLORS['surface']};
+                    border: 2px dashed {COLORS['border']};
+                    border-radius: 12px;
+                }}
+            """)
+            empty_layout = QVBoxLayout(empty_frame)
+            empty_layout.setContentsMargins(40, 60, 40, 60)
+            
             no_cameras_label = QLabel("No cameras configured")
             no_cameras_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_cameras_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 16px;")
-            layout.addWidget(no_cameras_label)
+            no_cameras_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 18px; font-weight: 500;")
+            empty_layout.addWidget(no_cameras_label)
+            
+            hint_label = QLabel("Add cameras in the Cameras menu to use presets")
+            hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            hint_label.setStyleSheet(f"color: {COLORS['text_dark']}; font-size: 14px;")
+            empty_layout.addWidget(hint_label)
+            
+            layout.addWidget(empty_frame)
             layout.addStretch()
             scroll.setWidget(widget)
             return scroll
         
-        # Create 8×6 grid (48 presets)
-        presets_grid = QGridLayout()
-        presets_grid.setSpacing(6)  # Reduced horizontal spacing
-        presets_grid.setVerticalSpacing(8)  # Reduced vertical spacing for tighter layout
+        # Canon-style header with camera name
+        camera = self.settings.get_camera(camera_id)
+        camera_name = camera.name if camera else f"Camera {camera_id}"
         
-        # Prevent columns from stretching - set all column stretch to 0
+        header_frame = QFrame()
+        header_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        header_layout = QHBoxLayout(header_frame)
+        header_layout.setContentsMargins(16, 10, 16, 10)
+        
+        presets_title = QLabel("PRESETS")
+        presets_title.setStyleSheet(f"""
+            color: {COLORS['text']};
+            font-size: 14px;
+            font-weight: bold;
+        """)
+        header_layout.addWidget(presets_title)
+        
+        # Camera indicator (Canon-style blue text)
+        camera_label = QLabel(f"📹 {camera_name}")
+        camera_label.setStyleSheet(f"""
+            color: {COLORS['secondary']};
+            font-size: 13px;
+            font-weight: 600;
+        """)
+        header_layout.addStretch()
+        header_layout.addWidget(camera_label)
+        
+        layout.addWidget(header_frame)
+        
+        # Instructions hint
+        hint_label = QLabel("Tap to recall • Long press to save/rename/delete")
+        hint_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; padding: 4px 0;")
+        layout.addWidget(hint_label)
+        
+        # Create 8×6 grid (48 presets) in a panel
+        presets_frame = QFrame()
+        presets_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 10px;
+            }}
+        """)
+        presets_frame_layout = QVBoxLayout(presets_frame)
+        presets_frame_layout.setContentsMargins(12, 12, 12, 12)
+        presets_frame_layout.setSpacing(0)
+        
+        presets_grid = QGridLayout()
+        presets_grid.setSpacing(6)
+        presets_grid.setVerticalSpacing(8)
+        
+        # Prevent columns from stretching
         for col in range(8):
             presets_grid.setColumnStretch(col, 0)
         
@@ -3055,30 +3161,44 @@ class MainWindow(QMainWindow):
             
             # Create container widget with label above and button below
             container = QWidget()
-            container.setFixedWidth(80)  # Fixed width to match button size
+            container.setFixedWidth(80)
             container_layout = QVBoxLayout(container)
             container_layout.setContentsMargins(0, 0, 0, 0)
-            container_layout.setSpacing(4)
+            container_layout.setSpacing(2)
             
-            # Label above button
+            # Label above button (smaller, dimmer for empty presets)
             preset_btn = PresetButton(preset_num, camera_id, self)
             name_label = QLabel()
             name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            name_label.setStyleSheet(f"""
-                QLabel {{
-                    color: {COLORS['text']};
-                    font-size: 14px;
-                    font-weight: 600;
-                    padding: 0px;
-                    margin: 0px;
-                    border: none;
-                    border-top: none;
-                }}
-            """)
+            
+            # Use different styling based on whether preset has content
+            if preset_btn.has_thumbnail:
+                name_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {COLORS['text']};
+                        font-size: 12px;
+                        font-weight: 600;
+                        padding: 0px;
+                        margin: 0px;
+                        border: none;
+                    }}
+                """)
+            else:
+                name_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {COLORS['text_dim']};
+                        font-size: 11px;
+                        font-weight: 500;
+                        padding: 0px;
+                        margin: 0px;
+                        border: none;
+                    }}
+                """)
+            
             # Set label text (use preset name if available, otherwise preset number)
             display_name = preset_btn.preset_name if preset_btn.preset_name else str(preset_num)
             name_label.setText(display_name)
-            preset_btn._name_label = name_label  # Store reference for updates
+            preset_btn._name_label = name_label
             
             container_layout.addWidget(name_label)
             container_layout.addWidget(preset_btn)
@@ -3087,7 +3207,8 @@ class MainWindow(QMainWindow):
             preset_buttons.append(preset_btn)
             presets_grid.addWidget(container, row, col)
         
-        layout.addLayout(presets_grid)
+        presets_frame_layout.addLayout(presets_grid)
+        layout.addWidget(presets_frame)
         layout.addStretch()
         
         scroll.setWidget(widget)
@@ -4910,7 +5031,7 @@ class MainWindow(QMainWindow):
         return bar_scroll
     
     def _rebuild_camera_buttons(self):
-        """Rebuild camera buttons - horizontal in bottom bar"""
+        """Rebuild camera buttons - Canon RC-IP100 inspired horizontal bar"""
         # Clear existing camera buttons
         for btn in self.camera_buttons.values():
             self.camera_button_group.removeButton(btn)
@@ -4927,14 +5048,38 @@ class MainWindow(QMainWindow):
             btn.setObjectName("cameraButton")
             btn.setCheckable(True)
             btn.setProperty("tallyState", "off")
-            btn.setFixedSize(88, 80)
+            btn.setFixedSize(100, 72)  # Slightly wider for better touch
             btn.setToolTip(f"{camera.name}\n{camera.ip_address}")
+            
+            # Canon-style camera button with improved styling
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {COLORS['surface']};
+                    border: 2px solid {COLORS['border']};
+                    border-radius: 8px;
+                    color: {COLORS['text']};
+                    font-size: 12px;
+                    font-weight: 600;
+                    padding: 4px;
+                }}
+                QPushButton:hover {{
+                    background-color: {COLORS['surface_hover']};
+                    border-color: {COLORS['secondary']};
+                }}
+                QPushButton:checked {{
+                    background-color: {COLORS['primary']};
+                    border-color: {COLORS['primary']};
+                    color: {COLORS['background']};
+                }}
+                QPushButton:pressed {{
+                    background-color: {COLORS['primary_dark']};
+                }}
+            """)
             
             self.camera_button_group.addButton(btn, i)
             self.camera_buttons[i] = btn
             
             # If 10 or fewer cameras, use stretch to spread them out
-            # If more than 10, they'll naturally overflow and scroll
             if num_cameras <= 10:
                 self.camera_buttons_layout.addWidget(btn, stretch=1)
             else:
