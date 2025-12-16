@@ -13,6 +13,8 @@ from .styles import COLORS
 
 class OSKWidget(QWidget):
     """On-Screen Keyboard widget with slide animation"""
+    # Keep a sane default height. The Cameras bottom-sheet will shrink/scroll as needed
+    # so the OSK stays fully visible instead of being clipped by the window.
     DEFAULT_HEIGHT = 430
     
     # Signal emitted when a key is pressed
@@ -32,7 +34,9 @@ class OSKWidget(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.slide_from_top = slide_from_top
         self._top_offset_px = 0  # used when slide_from_top=True (e.g. below main menu)
-        self._docked = False  # when True, OSK is managed by a layout (e.g. Companion page)
+        self._docked = False  # when True, OSK is managed by a layout (e.g. Companion/Cameras page)
+        # When docked, some pages (Companion) want the OSK panel to remain visible even when "hidden".
+        self._keep_visible_when_docked = True
         self._keyboard_height = self.DEFAULT_HEIGHT
         self._target_widget = None
         self._is_visible = False
@@ -640,9 +644,17 @@ class OSKWidget(QWidget):
         except Exception:
             self._top_offset_px = 0
 
-    def set_docked(self, docked: bool, height: int = None):
-        """Enable/disable docked mode (layout-managed sizing)."""
+    def set_docked(self, docked: bool, height: int = None, keep_visible: bool = True):
+        """Enable/disable docked mode (layout-managed sizing).
+
+        Args:
+            docked: When True, the OSK is placed inside a layout slot.
+            height: Fixed height to use while docked.
+            keep_visible: If True, hide_keyboard() will keep the panel visible (Companion behavior).
+                          If False, hide_keyboard() will actually hide (Cameras/Settings behavior).
+        """
         self._docked = bool(docked)
+        self._keep_visible_when_docked = bool(keep_visible)
         if height is not None:
             try:
                 self._keyboard_height = max(1, int(height))
@@ -650,8 +662,17 @@ class OSKWidget(QWidget):
                 self._keyboard_height = self.DEFAULT_HEIGHT
         if self._docked:
             # Layout should size width; we fix height and remain opaque panel.
+            # Clear any fixed width that may have been set in undocked mode (prevents layout expanding).
+            try:
+                self.setMinimumWidth(0)
+                self.setMaximumWidth(16777215)
+            except Exception:
+                pass
             self.setFixedHeight(int(getattr(self, "_keyboard_height", self.DEFAULT_HEIGHT)))
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            # IMPORTANT: in docked mode we must not force the parent layout wider
+            # than the window (some styles compute large minimumSizeHint). Using
+            # Ignored allows the OSK to shrink to available width.
+            self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         else:
             # Undocked: allow show_keyboard() to control geometry again.
             # Keep fixed height behavior from show_keyboard; don't force a size policy here.
@@ -670,8 +691,12 @@ class OSKWidget(QWidget):
         self._is_visible = False
         self._target_widget = None
         if self._docked:
-            # Keep showing the docked panel; just "detach" from any target.
-            self.show()
+            if self._keep_visible_when_docked:
+                # Keep showing the docked panel; just "detach" from any target.
+                self.show()
+                return
+            # Docked but not persistent: actually hide.
+            self.hide()
             return
         self.hide()
 

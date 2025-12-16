@@ -5027,25 +5027,39 @@ class MainWindow(QMainWindow):
         if new_widget and (new_widget == self.osk or self.osk.isAncestorOf(new_widget)):
             return
 
-        # If focus moved to a text field, don't hide
-        if new_widget and isinstance(new_widget, QLineEdit):
+        # If focus moved to an input field, don't hide
+        if new_widget and isinstance(new_widget, (QLineEdit, QSpinBox, QComboBox)):
             return
 
         # If focus moved to a text edit or other input widget, don't hide
-        if new_widget and isinstance(new_widget, (QLineEdit, QTextEdit, QPlainTextEdit)):
+        if new_widget and isinstance(new_widget, (QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QComboBox)):
             return
 
         # If old widget was a text field and new widget is not input-related, hide OSK
-        if old_widget and isinstance(old_widget, QLineEdit) and new_widget:
+        if old_widget and isinstance(old_widget, (QLineEdit, QSpinBox, QComboBox)) and new_widget:
             # Check if new widget is a button, label, or other non-input widget
             if isinstance(new_widget, (QPushButton, QLabel, QFrame, QWidget)):
                 print(f"Hiding OSK - focus moved from text field to {type(new_widget).__name__}")
+                # If OSK is docked on Cameras page, undock so layout returns to normal.
+                try:
+                    slot = getattr(self.camera_page, "osk_slot", None)
+                    if slot is not None and self.osk.parent() is slot:
+                        self._undock_osk_from_camera_page()
+                except Exception:
+                    pass
                 self.osk.hide_keyboard()
                 return
 
         # If focus moved to None or an unknown widget type, hide OSK
         if new_widget is None or not hasattr(new_widget, 'setFocus'):
             print("Hiding OSK - focus lost or moved to unknown widget")
+            # If OSK is docked on Cameras page, undock so layout returns to normal.
+            try:
+                slot = getattr(self.camera_page, "osk_slot", None)
+                if slot is not None and self.osk.parent() is slot:
+                    self._undock_osk_from_camera_page()
+            except Exception:
+                pass
             self.osk.hide_keyboard()
     
     def _connect_osk_to_fields(self):
@@ -5055,6 +5069,9 @@ class MainWindow(QMainWindow):
             self._connect_field_to_osk(self.camera_page.edit_name_input)
         if hasattr(self.camera_page, 'edit_ip_input'):
             self._connect_field_to_osk(self.camera_page.edit_ip_input)
+        if hasattr(self.camera_page, 'edit_port_input'):
+            # Port is a QSpinBox, but we still want the OSK to target it.
+            self._connect_field_to_osk(self.camera_page.edit_port_input)
         if hasattr(self.camera_page, 'edit_user_input'):
             self._connect_field_to_osk(self.camera_page.edit_user_input)
         if hasattr(self.camera_page, 'edit_pass_input'):
@@ -5140,9 +5157,9 @@ class MainWindow(QMainWindow):
 
         # Use a stable height; slot.height() can be 0 before layout runs.
         try:
-            desired_h = int(getattr(self.osk, "_keyboard_height", 430))
+            desired_h = int(getattr(self.osk, "_keyboard_height", OSKWidget.DEFAULT_HEIGHT))
         except Exception:
-            desired_h = 430
+            desired_h = OSKWidget.DEFAULT_HEIGHT
         desired_h = max(1, desired_h)
         slot.setFixedHeight(desired_h)
 
@@ -5160,7 +5177,7 @@ class MainWindow(QMainWindow):
 
         # Enable docked mode so OSK doesn't reposition itself.
         if hasattr(self.osk, "set_docked"):
-            self.osk.set_docked(True, height=desired_h)
+            self.osk.set_docked(True, height=desired_h, keep_visible=True)
         self.osk.show()
         self.osk.raise_()
 
@@ -5185,6 +5202,67 @@ class MainWindow(QMainWindow):
             pass
 
         # Reparent back.
+        if self.osk.parent() is not default_parent:
+            self.osk.setParent(default_parent)
+        self.osk.hide()
+
+    def _dock_osk_to_camera_page(self):
+        """Dock OSK into the Cameras page slot so it doesn't cover the bottom sheet."""
+        if not self.osk or not hasattr(self, "camera_page"):
+            return
+        slot = getattr(self.camera_page, "osk_slot", None)
+        if slot is None:
+            return
+
+        # Use a stable height; slot.height() can be 0 before layout runs.
+        try:
+            desired_h = int(getattr(self.osk, "_keyboard_height", OSKWidget.DEFAULT_HEIGHT))
+        except Exception:
+            desired_h = OSKWidget.DEFAULT_HEIGHT
+        desired_h = max(1, desired_h)
+        slot.setFixedHeight(desired_h)
+        # If the edit panel is open, clamp its height so the OSK remains fully visible.
+        try:
+            if hasattr(self.camera_page, "adjust_bottom_sheet_for_osk"):
+                self.camera_page.adjust_bottom_sheet_for_osk()
+        except Exception:
+            pass
+
+        lay = slot.layout()
+        if lay is None:
+            lay = QVBoxLayout(slot)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(0)
+
+        if self.osk.parent() is not slot:
+            self.osk.setParent(slot)
+            lay.addWidget(self.osk)
+
+        if hasattr(self.osk, "set_docked"):
+            # Cameras: docked for layout, but NOT persistent (should hide on focus loss).
+            self.osk.set_docked(True, height=desired_h, keep_visible=False)
+        self.osk.show()
+        self.osk.raise_()
+
+    def _undock_osk_from_camera_page(self):
+        """Return OSK to its default overlay parent from the Cameras page."""
+        if not self.osk:
+            return
+        if hasattr(self.osk, "set_docked"):
+            self.osk.set_docked(False)
+
+        default_parent = getattr(self, "_osk_default_parent", None)
+        if default_parent is None:
+            default_parent = self.centralWidget() or self
+
+        try:
+            slot = getattr(self.camera_page, "osk_slot", None)
+            if slot is not None and self.osk.parent() is slot and slot.layout() is not None:
+                slot.layout().removeWidget(self.osk)
+                slot.setFixedHeight(0)
+        except Exception:
+            pass
+
         if self.osk.parent() is not default_parent:
             self.osk.setParent(default_parent)
         self.osk.hide()
@@ -5221,6 +5299,11 @@ class MainWindow(QMainWindow):
                             # Position under main menu, on top of preview
                             if hasattr(self.osk, "set_top_offset"):
                                 self.osk.set_top_offset(top_h)
+                        elif current_page == 1:
+                            # Cameras page: dock OSK below the bottom sheet
+                            self._dock_osk_to_camera_page()
+                            if hasattr(self.osk, "set_top_offset"):
+                                self.osk.set_top_offset(0)
                         self.osk.show_keyboard(field)
             except Exception as e:
                 print(f"Error in focus_in_event: {e}")
@@ -5245,6 +5328,8 @@ class MainWindow(QMainWindow):
                     self.osk.hide_keyboard()
                 # Ensure OSK is not docked when leaving Companion
                 self._undock_osk_from_companion()
+                # Ensure OSK is not docked when leaving Cameras
+                self._undock_osk_from_camera_page()
         elif index == 2:  # Companion page
             # Always show OSK docked at the bottom of Companion page.
             self._dock_osk_to_companion()
@@ -5266,6 +5351,9 @@ class MainWindow(QMainWindow):
             # If we are leaving the Companion page, undock the OSK.
             if index != 2:
                 self._undock_osk_from_companion()
+            # If we are leaving the Cameras page, undock the OSK.
+            if index != 1:
+                self._undock_osk_from_camera_page()
     
     @pyqtSlot(int)
     def _on_nav_clicked(self, page_idx: int):

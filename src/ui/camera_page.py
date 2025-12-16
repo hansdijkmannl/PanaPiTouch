@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
     QGroupBox, QListWidget, QListWidgetItem,
     QMessageBox, QFrame, QApplication, QProgressBar,
-    QComboBox, QStackedWidget, QDialog
+    QComboBox, QStackedWidget, QDialog, QSizePolicy, QButtonGroup
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
@@ -373,6 +373,10 @@ class CameraListItem(QFrame):
         name_row = QHBoxLayout()
         name_label = QLabel(f"<b>{self.camera.name}</b>")
         name_label.setStyleSheet("font-size: 15px; font-weight: 600;")
+        # Prevent long names from forcing the whole row/page wider than the window.
+        name_label.setWordWrap(False)
+        name_label.setMinimumWidth(0)
+        name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         name_row.addWidget(name_label)
         
         # ATEM input badge
@@ -396,11 +400,17 @@ class CameraListItem(QFrame):
         # IP address only
         ip_label = QLabel(self.camera.ip_address)
         ip_label.setStyleSheet("color: #888898; font-size: 13px;")
+        ip_label.setWordWrap(False)
+        ip_label.setMinimumWidth(0)
+        ip_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         info_layout.addWidget(ip_label)
         
         # Connection status text
         self.status_label = QLabel("Status: Unknown")
         self.status_label.setStyleSheet("color: #888898; font-size: 11px;")
+        self.status_label.setWordWrap(False)
+        self.status_label.setMinimumWidth(0)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         info_layout.addWidget(self.status_label)
         
         layout.addLayout(info_layout, stretch=1)
@@ -564,6 +574,8 @@ class CameraPage(QWidget):
         self._thumbnail_timer.timeout.connect(self._update_all_thumbnails)
         self._test_worker = None
         self._form_has_changes = False
+        self._bottom_sheet_height = 460
+        self._bottom_sheet_anim = None
         
         self._setup_ui()
         self._load_settings()
@@ -581,49 +593,54 @@ class CameraPage(QWidget):
             QTimer.singleShot(10, self._update_badge_position)
     
     def _setup_ui(self):
-        """Setup the camera page UI with sidebar navigation"""
-        main_layout = QHBoxLayout(self)
+        """Setup the camera page UI with top submenu + content"""
+        main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
-        # Sidebar
-        sidebar = QFrame()
-        sidebar.setFixedWidth(160)
-        sidebar.setStyleSheet("""
+
+        # Top horizontal submenu (under MainWindow top menu)
+        submenu = QFrame()
+        submenu.setFixedHeight(60)
+        submenu.setStyleSheet("""
             QFrame {
                 background-color: #0a0a0f;
-                border-right: 1px solid #2a2a38;
+                border-bottom: 1px solid #2a2a38;
             }
         """)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(8, 16, 8, 16)
-        sidebar_layout.setSpacing(8)
-        
+        submenu_layout = QHBoxLayout(submenu)
+        submenu_layout.setContentsMargins(20, 0, 20, 0)
+        submenu_layout.setSpacing(0)
+
+        submenu_layout.addStretch()
+
+        buttons_container = QWidget()
+        buttons_container.setStyleSheet("background: transparent;")
+        buttons_layout = QHBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(0)
+
         self.sidebar_buttons = []
-        self.configured_badge = None  # Badge for Configured button
-        self.configured_button_wrapper = None  # Wrapper for Configured button
-        self.configured_button = None  # Configured button reference
-        sections = [
-            ("📋", "Configured"),
-            ("🌐", "Discover"),
-        ]
-        for idx, (icon, name) in enumerate(sections):
-            # Create wrapper widget for Configured button to hold badge
-            if idx == 0:  # Configured button
-                wrapper = QFrame()
-                wrapper.setStyleSheet("background-color: transparent;")
-                wrapper_layout = QVBoxLayout(wrapper)
-                wrapper_layout.setContentsMargins(0, 0, 0, 0)
-                wrapper_layout.setSpacing(0)
-                
-                btn = QPushButton(f"{icon}\n{name}")
-                btn.setCheckable(True)
-                btn.setMinimumHeight(80)
-                btn.setStyleSheet(self._get_sidebar_button_style())
-                btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
-                wrapper_layout.addWidget(btn)
-                
-                # Create badge label positioned absolutely on the button
+        self.configured_badge = None
+        self.configured_button = None
+
+        self.submenu_button_group = QButtonGroup(self)
+        self.submenu_button_group.setExclusive(True)
+
+        sections = [("📋 Configured", 0), ("🌐 Discover", 1)]
+        for text, idx in sections:
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setFixedHeight(60)
+            btn.setMinimumWidth(170)
+            btn.setStyleSheet(self._get_sidebar_button_style())
+            btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
+            self.submenu_button_group.addButton(btn, idx)
+            self.sidebar_buttons.append(btn)
+            buttons_layout.addWidget(btn)
+
+            if idx == 0:
+                self.configured_button = btn
+                # Badge inside the Configured button
                 badge = QLabel("0", btn)
                 badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 badge.setStyleSheet("""
@@ -638,35 +655,138 @@ class CameraPage(QWidget):
                     }
                 """)
                 badge.setFixedSize(24, 20)
-                badge.hide()  # Hide if count is 0
-                badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)  # Don't block button clicks
+                badge.hide()
+                badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
                 self.configured_badge = badge
-                self.configured_button_wrapper = wrapper
-                self.configured_button = btn  # Store button reference
-                
-                sidebar_layout.addWidget(wrapper)
-                self.sidebar_buttons.append(btn)
-                
-                # Update badge position after widget is shown
                 QTimer.singleShot(100, self._update_badge_position)
-            else:
-                btn = QPushButton(f"{icon}\n{name}")
-                btn.setCheckable(True)
-                btn.setMinimumHeight(80)
-                btn.setStyleSheet(self._get_sidebar_button_style())
-                btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
-                sidebar_layout.addWidget(btn)
-                self.sidebar_buttons.append(btn)
-        
-        sidebar_layout.addStretch()
-        main_layout.addWidget(sidebar)
-        
+
+        submenu_layout.addWidget(buttons_container)
+        submenu_layout.addStretch()
+
+        main_layout.addWidget(submenu)
+
+        # Right side: content + bottom sheet + OSK slot (like Live bottom panel)
+        right = QWidget()
+        # Prevent the page from "growing" wider than the app when the bottom sheet / OSK appears.
+        right.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        right.setMinimumWidth(0)
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
         # Content stack
         self.content_stack = QStackedWidget()
         self.content_stack.setStyleSheet("background-color: #0a0a0f;")
+        self.content_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        self.content_stack.setMinimumWidth(0)
         self.content_stack.addWidget(self._create_configured_content())
         self.content_stack.addWidget(self._create_easyip_tools_content())
-        main_layout.addWidget(self.content_stack, 1)
+        right_layout.addWidget(self.content_stack, 1)
+
+        # Bottom sheet container (shared across tabs)
+        self.bottom_sheet = QFrame()
+        self.bottom_sheet.setStyleSheet("""
+            QFrame {
+                background-color: #12121a;
+                border-top: 1px solid #2a2a38;
+            }
+        """)
+        # Horizontal clamp: don't let minimumSizeHint force wider-than-window layouts.
+        self.bottom_sheet.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.bottom_sheet.setMinimumWidth(0)
+        self.bottom_sheet.setMaximumHeight(0)
+        self.bottom_sheet.setMinimumHeight(0)
+        self.bottom_sheet.setVisible(False)
+
+        sheet_layout = QVBoxLayout(self.bottom_sheet)
+        sheet_layout.setContentsMargins(0, 0, 0, 0)
+        sheet_layout.setSpacing(0)
+
+        # Header row (title + close)
+        header = QFrame()
+        header.setFixedHeight(56)
+        header.setStyleSheet("""
+            QFrame {
+                background-color: #0a0a0f;
+                border-bottom: 1px solid #2a2a38;
+            }
+        """)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(20, 0, 20, 0)
+        header_layout.setSpacing(12)
+
+        self.bottom_sheet_title = QLabel("Panel")
+        self.bottom_sheet_title.setStyleSheet("color: #ffffff; font-size: 16px; font-weight: 600;")
+        header_layout.addWidget(self.bottom_sheet_title)
+        header_layout.addStretch()
+
+        close_btn = QPushButton("✕")
+        close_btn.setFixedSize(44, 44)
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                color: #ffffff;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            QPushButton:hover { border-color: #FF9500; color: #FF9500; }
+            QPushButton:pressed { border-color: #CC7700; color: #CC7700; }
+        """)
+        close_btn.clicked.connect(self._close_bottom_sheet)
+        header_layout.addWidget(close_btn)
+
+        sheet_layout.addWidget(header)
+
+        # Body stack
+        self.bottom_sheet_stack = QStackedWidget()
+        self.bottom_sheet_stack.setStyleSheet("QStackedWidget { background: transparent; }")
+        sheet_layout.addWidget(self.bottom_sheet_stack, 1)
+
+        # Panel 0: Edit camera form
+        self.edit_form_panel = self._create_edit_form_panel()
+        self.edit_form_panel.setStyleSheet("QFrame { background: transparent; border: none; }")
+        # Make the edit form scrollable so we can shrink the bottom sheet when the OSK is visible
+        # (prevents the OSK from being clipped off-screen).
+        self.edit_form_scroll = TouchScrollArea()
+        self.edit_form_scroll.setWidgetResizable(True)
+        self.edit_form_scroll.setStyleSheet("""
+            QScrollArea { border: none; background: transparent; }
+            QScrollArea > QWidget { background: transparent; }
+        """)
+        _edit_wrapper = QWidget()
+        _edit_wrapper.setStyleSheet("background: transparent;")
+        _ew_layout = QVBoxLayout(_edit_wrapper)
+        _ew_layout.setContentsMargins(0, 0, 0, 0)
+        _ew_layout.setSpacing(0)
+        _ew_layout.addWidget(self.edit_form_panel)
+        self.edit_form_scroll.setWidget(_edit_wrapper)
+        self.bottom_sheet_stack.addWidget(self.edit_form_scroll)
+
+        # Panel 1: Discover details (placeholder)
+        discover_details = QWidget()
+        dd_layout = QVBoxLayout(discover_details)
+        dd_layout.setContentsMargins(20, 16, 20, 20)
+        dd_layout.setSpacing(12)
+        dd_label = QLabel("Select a discovered camera to see actions here.")
+        dd_label.setStyleSheet("color: #888898; font-size: 13px;")
+        dd_layout.addWidget(dd_label)
+        dd_layout.addStretch()
+        self.bottom_sheet_stack.addWidget(discover_details)
+
+        right_layout.addWidget(self.bottom_sheet, 0)
+
+        # OSK slot (docked keyboard) - keeps bottom sheet visible when typing.
+        self.osk_slot = QFrame()
+        self.osk_slot.setStyleSheet("background-color: transparent; border: none;")
+        # Horizontal clamp (same reasoning as bottom_sheet).
+        self.osk_slot.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.osk_slot.setMinimumWidth(0)
+        self.osk_slot.setFixedHeight(0)
+        right_layout.addWidget(self.osk_slot, 0)
+
+        main_layout.addWidget(right, 1)
         
         # Default selection
         self._on_section_clicked(0)
@@ -680,7 +800,7 @@ class CameraPage(QWidget):
                 color: #888898;
                 font-size: 13px;
                 font-weight: 500;
-                padding: 12px 8px;
+                padding: 0px 16px;
                 text-align: center;
             }
             QPushButton:hover {
@@ -700,10 +820,10 @@ class CameraPage(QWidget):
     def _update_badge_position(self):
         """Update badge position on Configured button"""
         if self.configured_badge and self.configured_button:
-            # Position badge at top-right of button, 15px from right edge
             btn_width = self.configured_button.width()
             if btn_width > 0:
-                badge_x = btn_width - 43  # 28 (original) + 15 (move left)
+                # Top-right corner inside the horizontal button
+                badge_x = btn_width - 36
                 badge_y = 8
                 self.configured_badge.move(badge_x, badge_y)
                 self.configured_badge.raise_()  # Ensure badge is on top
@@ -725,27 +845,127 @@ class CameraPage(QWidget):
         for i, btn in enumerate(getattr(self, 'sidebar_buttons', [])):
             btn.setChecked(i == index)
         
-        # Hide edit form when switching away from Configured page
-        if index != 0 and hasattr(self, 'edit_form_panel'):
-            self.edit_form_panel.hide()
-            self._editing_camera_id = None
+        # Close bottom sheet when switching sections (like Live)
+        self._close_bottom_sheet()
+        self._editing_camera_id = None
 
     def _create_configured_content(self) -> QWidget:
-        """Configured cameras with inline edit column"""
+        """Configured cameras list (edit opens bottom sheet)"""
         wrapper = QWidget()
-        layout = QHBoxLayout(wrapper)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
+        layout = QVBoxLayout(wrapper)
+        # Make configured list panel app-wide (no extra outer left/right inset).
+        # The panel itself already has its own internal padding.
+        layout.setContentsMargins(0, 20, 0, 20)
+        layout.setSpacing(12)
         
-        # Left: Camera list
-        left_panel = self._create_camera_list_panel(compact=True)
-        layout.addWidget(left_panel, stretch=1)
-        
-        # Right: Edit form panel (initially hidden)
-        self.edit_form_panel = self._create_edit_form_panel()
-        layout.addWidget(self.edit_form_panel, stretch=1)
+        panel = self._create_camera_list_panel(compact=True)
+        layout.addWidget(panel, 1)
         
         return wrapper
+
+    def _open_bottom_sheet(self, title: str, panel_index: int = 0):
+        """Open the shared bottom sheet (slide up)."""
+        if not hasattr(self, "bottom_sheet") or self.bottom_sheet is None:
+            return
+        try:
+            self.bottom_sheet_title.setText(title)
+            self.bottom_sheet_stack.setCurrentIndex(panel_index)
+            self.bottom_sheet.setVisible(True)
+
+            if self._bottom_sheet_anim is not None:
+                try:
+                    self._bottom_sheet_anim.stop()
+                except Exception:
+                    pass
+
+            start_h = int(self.bottom_sheet.maximumHeight())
+            end_h = int(min(self._bottom_sheet_height, self._max_bottom_sheet_height()))
+            self._bottom_sheet_anim = QPropertyAnimation(self.bottom_sheet, b"maximumHeight")
+            self._bottom_sheet_anim.setDuration(220)
+            self._bottom_sheet_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._bottom_sheet_anim.setStartValue(start_h)
+            self._bottom_sheet_anim.setEndValue(end_h)
+            self._bottom_sheet_anim.start()
+
+            self.bottom_sheet.setMinimumHeight(end_h)
+        except Exception as e:
+            print(f"Error opening bottom sheet: {e}")
+            try:
+                self.bottom_sheet.setVisible(True)
+                end_h = int(min(self._bottom_sheet_height, self._max_bottom_sheet_height()))
+                self.bottom_sheet.setMaximumHeight(end_h)
+                self.bottom_sheet.setMinimumHeight(end_h)
+            except Exception:
+                pass
+
+    def _close_bottom_sheet(self):
+        """Close the shared bottom sheet (slide down)."""
+        if not hasattr(self, "bottom_sheet") or self.bottom_sheet is None:
+            return
+        try:
+            if self._bottom_sheet_anim is not None:
+                try:
+                    self._bottom_sheet_anim.stop()
+                except Exception:
+                    pass
+
+            start_h = int(self.bottom_sheet.maximumHeight())
+            self._bottom_sheet_anim = QPropertyAnimation(self.bottom_sheet, b"maximumHeight")
+            self._bottom_sheet_anim.setDuration(180)
+            self._bottom_sheet_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            self._bottom_sheet_anim.setStartValue(start_h)
+            self._bottom_sheet_anim.setEndValue(0)
+
+            def _after():
+                try:
+                    self.bottom_sheet.setVisible(False)
+                    self.bottom_sheet.setMinimumHeight(0)
+                except Exception:
+                    pass
+
+            self._bottom_sheet_anim.finished.connect(_after)
+            self._bottom_sheet_anim.start()
+            self.bottom_sheet.setMinimumHeight(0)
+        except Exception as e:
+            print(f"Error closing bottom sheet: {e}")
+            try:
+                self.bottom_sheet.setVisible(False)
+                self.bottom_sheet.setMaximumHeight(0)
+                self.bottom_sheet.setMinimumHeight(0)
+            except Exception:
+                pass
+
+    def _max_bottom_sheet_height(self) -> int:
+        """Compute the maximum bottom-sheet height while keeping the docked OSK fully visible."""
+        try:
+            # 'right' container height (bottom_sheet + osk_slot live inside it)
+            parent = self.bottom_sheet.parentWidget() if hasattr(self, "bottom_sheet") else None
+            available = int(parent.height()) if parent is not None else int(self.height())
+        except Exception:
+            available = int(self.height())
+
+        try:
+            osk_h = int(self.osk_slot.height()) if hasattr(self, "osk_slot") and self.osk_slot is not None else 0
+        except Exception:
+            osk_h = 0
+
+        # Leave no fixed requirement for content_stack (it can shrink); just ensure fixed regions fit.
+        return max(0, available - osk_h)
+
+    def adjust_bottom_sheet_for_osk(self):
+        """Clamp the open bottom-sheet height after OSK docking changes."""
+        try:
+            if not hasattr(self, "bottom_sheet") or self.bottom_sheet is None:
+                return
+            if not self.bottom_sheet.isVisible():
+                return
+            max_h = int(self._max_bottom_sheet_height())
+            cur = int(self.bottom_sheet.maximumHeight())
+            new_h = min(cur if cur > 0 else int(self._bottom_sheet_height), max_h)
+            self.bottom_sheet.setMaximumHeight(new_h)
+            self.bottom_sheet.setMinimumHeight(new_h)
+        except Exception:
+            pass
     
     def _create_easyip_tools_content(self) -> QWidget:
         """Discover page - Main screen with camera list, Identify, and Network Settings"""
@@ -1163,35 +1383,17 @@ class CameraPage(QWidget):
             self.easyip_empty_label.hide()
     
     def _create_edit_form_panel(self) -> QWidget:
-        """Create edit form panel for inline editing"""
+        """Create edit form panel for bottom sheet (2-column layout)."""
         panel = QFrame()
-        panel.setStyleSheet("""
-            QFrame {
-                background-color: #12121a;
-                border: 1px solid #2a2a38;
-                border-radius: 12px;
-            }
-        """)
-        panel.hide()  # Hidden until edit is clicked
-        
+        # Panel itself is inside the bottom sheet; keep it transparent to avoid double borders.
+        panel.setStyleSheet("QFrame { background: transparent; border: none; }")
+
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
-        
-        # Header
-        header = QLabel("Edit Camera")
-        header.setStyleSheet("font-size: 18px; font-weight: 600; color: #ffffff; border: none;")
-        layout.addWidget(header)
-        
-        # Form fields (reuse same style as add form)
-        # Name
-        name_layout = QVBoxLayout()
-        name_layout.setSpacing(6)
-        name_label = QLabel("Camera Name:")
-        name_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        name_layout.addWidget(name_label)
-        self.edit_name_input = QLineEdit()
-        self.edit_name_input.setStyleSheet("""
+        layout.setContentsMargins(20, 16, 20, 20)
+        layout.setSpacing(14)
+
+        label_style = "color: #ffffff; font-size: 13px; font-weight: 500; border: none;"
+        input_style = """
             QLineEdit {
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
@@ -1204,31 +1406,8 @@ class CameraPage(QWidget):
             QLineEdit:focus {
                 border-color: #FF9500;
             }
-        """)
-        name_layout.addWidget(self.edit_name_input)
-        layout.addLayout(name_layout)
-        
-        # IP Address
-        ip_layout = QVBoxLayout()
-        ip_layout.setSpacing(6)
-        ip_label = QLabel("IP Address:")
-        ip_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        ip_layout.addWidget(ip_label)
-        self.edit_ip_input = QLineEdit()
-        self.edit_ip_input.setStyleSheet(self.edit_name_input.styleSheet())
-        ip_layout.addWidget(self.edit_ip_input)
-        layout.addLayout(ip_layout)
-        
-        # Port
-        port_layout = QVBoxLayout()
-        port_layout.setSpacing(6)
-        port_label = QLabel("Port:")
-        port_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        port_layout.addWidget(port_label)
-        self.edit_port_input = QSpinBox()
-        self.edit_port_input.setRange(1, 65535)
-        self.edit_port_input.setValue(80)
-        self.edit_port_input.setStyleSheet("""
+        """
+        spin_style = """
             QSpinBox {
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
@@ -1241,46 +1420,8 @@ class CameraPage(QWidget):
             QSpinBox:focus {
                 border-color: #FF9500;
             }
-        """)
-        port_layout.addWidget(self.edit_port_input)
-        layout.addLayout(port_layout)
-        
-        # Username
-        user_layout = QVBoxLayout()
-        user_layout.setSpacing(6)
-        user_label = QLabel("Username:")
-        user_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        user_layout.addWidget(user_label)
-        self.edit_user_input = QLineEdit()
-        self.edit_user_input.setStyleSheet(self.edit_name_input.styleSheet())
-        self.edit_user_input.setText("admin")
-        user_layout.addWidget(self.edit_user_input)
-        layout.addLayout(user_layout)
-        
-        # Password
-        pass_layout = QVBoxLayout()
-        pass_layout.setSpacing(6)
-        pass_label = QLabel("Password:")
-        pass_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        pass_layout.addWidget(pass_label)
-        self.edit_pass_input = QLineEdit()
-        self.edit_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.edit_pass_input.setStyleSheet(self.edit_name_input.styleSheet())
-        self.edit_pass_input.setText("12345")
-        pass_layout.addWidget(self.edit_pass_input)
-        layout.addLayout(pass_layout)
-        
-        # ATEM Input
-        atem_layout = QVBoxLayout()
-        atem_layout.setSpacing(6)
-        atem_label = QLabel("ATEM Input:")
-        atem_label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: 500; border: none;")
-        atem_layout.addWidget(atem_label)
-        self.edit_atem_combo = QComboBox()
-        self.edit_atem_combo.addItem("No ATEM mapping", 0)
-        for i in range(1, 21):
-            self.edit_atem_combo.addItem(f"Input {i}", i)
-        self.edit_atem_combo.setStyleSheet("""
+        """
+        combo_style = """
             QComboBox {
                 background-color: #1a1a24;
                 border: 2px solid #2a2a38;
@@ -1293,13 +1434,73 @@ class CameraPage(QWidget):
             QComboBox:focus {
                 border-color: #FF9500;
             }
-        """)
-        atem_layout.addWidget(self.edit_atem_combo)
-        layout.addLayout(atem_layout)
+        """
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(10)
+        grid.setColumnStretch(1, 1)
+
+        # Row 0: Name
+        name_label = QLabel("Name")
+        name_label.setStyleSheet(label_style)
+        self.edit_name_input = QLineEdit()
+        self.edit_name_input.setStyleSheet(input_style)
+        grid.addWidget(name_label, 0, 0)
+        grid.addWidget(self.edit_name_input, 0, 1)
+
+        # Row 1: IP
+        ip_label = QLabel("IP")
+        ip_label.setStyleSheet(label_style)
+        self.edit_ip_input = QLineEdit()
+        self.edit_ip_input.setStyleSheet(input_style)
+        grid.addWidget(ip_label, 1, 0)
+        grid.addWidget(self.edit_ip_input, 1, 1)
+
+        # Row 2: Port
+        port_label = QLabel("Port")
+        port_label.setStyleSheet(label_style)
+        self.edit_port_input = QSpinBox()
+        self.edit_port_input.setRange(1, 65535)
+        self.edit_port_input.setValue(80)
+        self.edit_port_input.setStyleSheet(spin_style)
+        grid.addWidget(port_label, 2, 0)
+        grid.addWidget(self.edit_port_input, 2, 1)
+
+        # Row 3: Username
+        user_label = QLabel("User")
+        user_label.setStyleSheet(label_style)
+        self.edit_user_input = QLineEdit()
+        self.edit_user_input.setStyleSheet(input_style)
+        self.edit_user_input.setText("admin")
+        grid.addWidget(user_label, 3, 0)
+        grid.addWidget(self.edit_user_input, 3, 1)
+
+        # Row 4: Password
+        pass_label = QLabel("Pass")
+        pass_label.setStyleSheet(label_style)
+        self.edit_pass_input = QLineEdit()
+        self.edit_pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.edit_pass_input.setStyleSheet(input_style)
+        self.edit_pass_input.setText("12345")
+        grid.addWidget(pass_label, 4, 0)
+        grid.addWidget(self.edit_pass_input, 4, 1)
+
+        # Row 5: ATEM
+        atem_label = QLabel("ATEM")
+        atem_label.setStyleSheet(label_style)
+        self.edit_atem_combo = QComboBox()
+        self.edit_atem_combo.addItem("No ATEM mapping", 0)
+        for i in range(1, 21):
+            self.edit_atem_combo.addItem(f"Input {i}", i)
+        self.edit_atem_combo.setStyleSheet(combo_style)
+        grid.addWidget(atem_label, 5, 0)
+        grid.addWidget(self.edit_atem_combo, 5, 1)
+
+        layout.addLayout(grid)
+        layout.addStretch(1)
         
-        layout.addStretch()
-        
-        # Buttons
+        # Buttons + save progress
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
         
@@ -1327,9 +1528,9 @@ class CameraPage(QWidget):
         cancel_btn.clicked.connect(self._cancel_inline_edit)
         btn_layout.addWidget(cancel_btn)
         
-        save_btn = QPushButton("Save Changes")
-        save_btn.setFixedHeight(48)
-        save_btn.setStyleSheet("""
+        self.edit_save_btn = QPushButton("Save Changes")
+        self.edit_save_btn.setFixedHeight(48)
+        self.edit_save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #FF9500;
                 border: none;
@@ -1345,8 +1546,34 @@ class CameraPage(QWidget):
                 background-color: #CC7700;
             }
         """)
-        save_btn.clicked.connect(self._save_inline_edit)
-        btn_layout.addWidget(save_btn)
+        self.edit_save_btn.clicked.connect(self._save_inline_edit)
+
+        # Small indeterminate progress bar shown while saving (keeps UI clean).
+        self.edit_save_progress = QProgressBar()
+        self.edit_save_progress.setRange(0, 0)
+        self.edit_save_progress.setFixedHeight(6)
+        self.edit_save_progress.setTextVisible(False)
+        self.edit_save_progress.setVisible(False)
+        self.edit_save_progress.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 3px;
+                background-color: #2a2a38;
+            }
+            QProgressBar::chunk {
+                background-color: #FF9500;
+                border-radius: 3px;
+            }
+        """)
+
+        save_container = QWidget()
+        save_container.setStyleSheet("background: transparent;")
+        save_container_layout = QVBoxLayout(save_container)
+        save_container_layout.setContentsMargins(0, 0, 0, 0)
+        save_container_layout.setSpacing(6)
+        save_container_layout.addWidget(self.edit_save_btn)
+        save_container_layout.addWidget(self.edit_save_progress)
+        btn_layout.addWidget(save_container)
         
         layout.addLayout(btn_layout)
         
@@ -1354,9 +1581,21 @@ class CameraPage(QWidget):
     
     def _cancel_inline_edit(self):
         """Cancel inline editing"""
-        if hasattr(self, 'edit_form_panel'):
-            self.edit_form_panel.hide()
-            self._editing_camera_id = None
+        self._editing_camera_id = None
+        self._close_bottom_sheet()
+
+    def _show_toast(self, message: str, duration: int = 1800, error: bool = False):
+        """Show an in-app toast via MainWindow if available (non-blocking)."""
+        try:
+            w = self
+            while w is not None:
+                toast = getattr(w, "toast", None)
+                if toast is not None and hasattr(toast, "show_message"):
+                    toast.show_message(message, duration=duration, error=error)
+                    return
+                w = w.parent()
+        except Exception:
+            pass
     
     def _save_inline_edit(self):
         """Save changes from inline edit form"""
@@ -1374,32 +1613,69 @@ class CameraPage(QWidget):
         password = self.edit_pass_input.text().strip()
         
         if not name or not ip:
-            QMessageBox.warning(self, "Error", "Name and IP address are required")
+            self._show_toast("Name and IP address are required", duration=2200, error=True)
             return
-        
-        # Update camera
-        camera.name = name
-        camera.ip_address = ip
-        camera.port = port
-        camera.username = username
-        camera.password = password
-        
-        self.settings.update_camera(camera)
-        
-        # Update ATEM mapping
+
+        # Begin saving UI (button progress) and defer the blocking save to next tick
+        # so Qt can repaint.
+        self._set_inline_save_in_progress(True)
         atem_input = self.edit_atem_combo.currentData()
-        if atem_input and atem_input > 0:
-            self.settings.atem.input_mapping[str(camera.id)] = atem_input
-        elif str(camera.id) in self.settings.atem.input_mapping:
-            del self.settings.atem.input_mapping[str(camera.id)]
-        
-        self.settings.save()
-        self._refresh_camera_list()
-        self.edit_form_panel.hide()
-        self._editing_camera_id = None
-        self.settings_changed.emit()
-        
-        QMessageBox.information(self, "Success", f"Camera '{name}' updated successfully!")
+        QTimer.singleShot(0, lambda: self._do_save_inline_edit(
+            name=name,
+            ip=ip,
+            port=port,
+            username=username,
+            password=password,
+            atem_input=atem_input,
+        ))
+        return
+
+    def _set_inline_save_in_progress(self, in_progress: bool):
+        try:
+            btn = getattr(self, "edit_save_btn", None)
+            pb = getattr(self, "edit_save_progress", None)
+            if btn is not None:
+                btn.setEnabled(not in_progress)
+                btn.setText("Saving..." if in_progress else "Save Changes")
+            if pb is not None:
+                pb.setVisible(bool(in_progress))
+        except Exception:
+            pass
+
+    def _do_save_inline_edit(self, *, name: str, ip: str, port: int, username: str, password: str, atem_input: int):
+        """Perform the actual save (may be slow), with error handling."""
+        try:
+            camera = self.settings.get_camera(self._editing_camera_id)
+            if not camera:
+                raise RuntimeError("Camera not found")
+
+            # Update camera
+            camera.name = name
+            camera.ip_address = ip
+            camera.port = port
+            camera.username = username
+            camera.password = password
+
+            self.settings.update_camera(camera)
+
+            # Update ATEM mapping
+            if atem_input and atem_input > 0:
+                self.settings.atem.input_mapping[str(camera.id)] = atem_input
+            elif str(camera.id) in self.settings.atem.input_mapping:
+                del self.settings.atem.input_mapping[str(camera.id)]
+
+            self.settings.save()
+
+            # Close panel immediately after success
+            self._editing_camera_id = None
+            self.settings_changed.emit()
+            self._close_bottom_sheet()
+            QTimer.singleShot(0, self._refresh_camera_list)
+            self._show_toast(f"Saved: {name}", duration=1800, error=False)
+        except Exception as e:
+            self._show_toast(f"Save failed: {e}", duration=2600, error=True)
+        finally:
+            self._set_inline_save_in_progress(False)
     
     def _create_camera_list_panel(self, compact: bool = False) -> QWidget:
         """Create camera list panel with search and bulk operations.
@@ -1778,8 +2054,8 @@ class CameraPage(QWidget):
         self._editing_camera_id = camera_id
         
         # Switch to Configured page if not already there
-        if self.content_stack.currentIndex() != 1:
-            self._on_section_clicked(1)
+        if self.content_stack.currentIndex() != 0:
+            self._on_section_clicked(0)
         
         # Populate edit form
         if hasattr(self, 'edit_form_panel'):
@@ -1795,8 +2071,8 @@ class CameraPage(QWidget):
             if index >= 0:
                 self.edit_atem_combo.setCurrentIndex(index)
             
-            # Show the edit form panel
-            self.edit_form_panel.show()
+            # Show bottom sheet
+            self._open_bottom_sheet("Edit Camera", panel_index=0)
     
     def _cancel_edit(self):
         """Cancel camera edit"""
