@@ -1785,7 +1785,187 @@ class MainWindow(QMainWindow):
             if hasattr(self, "toast") and self.toast:
                 self.toast.show_message("Camera command failed", duration=2000, error=True)
             return False
-    
+
+    def _query_camera_setting(self, command: str, endpoint: str = "aw_cam") -> str:
+        """
+        Query a camera setting via CGI command.
+
+        Args:
+            command: Query command (e.g., "QSH", "QGA", etc.)
+            endpoint: CGI endpoint ("aw_cam" or "aw_ptz")
+
+        Returns:
+            Response string, or empty string on failure
+        """
+        if self.current_camera_id is None:
+            return ""
+
+        camera = self.settings.get_camera(self.current_camera_id)
+        if not camera:
+            return ""
+
+        import requests
+        try:
+            url = f"http://{camera.ip_address}/cgi-bin/{endpoint}?cmd={command}&res=1"
+            response = requests.get(url, auth=(camera.username, camera.password), timeout=2.0)
+            if response.status_code == 200:
+                return response.text.strip()
+            else:
+                logger.warning(f"Camera query failed: {command} (status {response.status_code})")
+                return ""
+        except Exception as e:
+            logger.error(f"Camera query error: {e}")
+            return ""
+
+    def _sync_camera_exposure_settings(self):
+        """Sync exposure panel controls with current camera settings"""
+        try:
+            # For now, just query and show current camera settings in toast
+            # TODO: Store control references during panel creation for direct UI updates
+
+            # Query shutter speed (QSH)
+            shutter_response = self._query_camera_setting("QSH")
+            if shutter_response and shutter_response.startswith("qsh:"):
+                try:
+                    shutter_val = int(shutter_response.split(":")[1])
+                    logger.debug(f"Camera shutter: {shutter_val}")
+                except (ValueError, IndexError):
+                    pass
+
+            # Query gain (QGA)
+            gain_response = self._query_camera_setting("QGA")
+            if gain_response and gain_response.startswith("qga:"):
+                try:
+                    gain_val = int(gain_response.split(":")[1])
+                    logger.debug(f"Camera gain: {gain_val}dB")
+                except (ValueError, IndexError):
+                    pass
+
+            # Query iris (QIR)
+            iris_response = self._query_camera_setting("QIR")
+            if iris_response and iris_response.startswith("qir:"):
+                try:
+                    iris_val = int(iris_response.split(":")[1])
+                    logger.debug(f"Camera iris: {iris_val}")
+                except (ValueError, IndexError):
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error syncing exposure settings: {e}")
+
+    def _sync_camera_color_settings(self):
+        """Sync color panel controls with current camera settings"""
+        try:
+            # Query white balance mode (QWB)
+            wb_response = self._query_camera_setting("QWB")
+            if wb_response and wb_response.startswith("qwb:"):
+                try:
+                    wb_mode = int(wb_response.split(":")[1])
+                    wb_mapping = {0: "Auto", 1: "Indoor", 2: "Outdoor", 3: "OnePush", 4: "Manual"}
+                    wb_name = wb_mapping.get(wb_mode, f"Mode {wb_mode}")
+                    logger.debug(f"Camera WB mode: {wb_name}")
+                except (ValueError, IndexError):
+                    pass
+
+            # Query red gain (QRG) - only if manual WB
+            rg_response = self._query_camera_setting("QRG")
+            if rg_response and rg_response.startswith("qrg:"):
+                try:
+                    rg_val = int(rg_response.split(":")[1])
+                    logger.debug(f"Camera red gain: {rg_val}")
+                except (ValueError, IndexError):
+                    pass
+
+            # Query blue gain (QBG)
+            bg_response = self._query_camera_setting("QBG")
+            if bg_response and bg_response.startswith("qbg:"):
+                try:
+                    bg_val = int(bg_response.split(":")[1])
+                    logger.debug(f"Camera blue gain: {bg_val}")
+                except (ValueError, IndexError):
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error syncing color settings: {e}")
+
+    def _sync_camera_image_settings(self):
+        """Sync image panel controls with current camera settings"""
+        try:
+            # Query gamma (QGM)
+            gamma_response = self._query_camera_setting("QGM")
+            if gamma_response and gamma_response.startswith("qgm:"):
+                try:
+                    gamma_val = int(gamma_response.split(":")[1])
+                    gamma_modes = ["Normal", "Cinema", "Still", "ITU-R", "Extended"]
+                    gamma_name = gamma_modes[gamma_val] if gamma_val < len(gamma_modes) else f"Mode {gamma_val}"
+                    logger.debug(f"Camera gamma: {gamma_name}")
+                except (ValueError, IndexError):
+                    pass
+
+            # Query detail level (QDT)
+            detail_response = self._query_camera_setting("QDT")
+            if detail_response and detail_response.startswith("qdt:"):
+                try:
+                    detail_val = int(detail_response.split(":")[1])
+                    logger.debug(f"Camera detail level: {detail_val}")
+                except (ValueError, IndexError):
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error syncing image settings: {e}")
+
+    def _sync_camera_operations_settings(self):
+        """Sync operations panel controls with current camera settings"""
+        try:
+            # Query power status (QPW)
+            power_response = self._query_camera_setting("QPW")
+            if power_response and power_response.startswith("qpw:"):
+                try:
+                    power_val = int(power_response.split(":")[1])
+                    # 0=standby, 1=on, 2=powering on/off
+                    power_states = {0: "Standby", 1: "ON", 2: "Powering"}
+                    power_name = power_states.get(power_val, f"State {power_val}")
+                    logger.debug(f"Camera power: {power_name}")
+                except (ValueError, IndexError):
+                    pass
+
+        except Exception as e:
+            logger.warning(f"Error syncing operations settings: {e}")
+
+    def _sync_camera_controls_with_current_camera(self):
+        """Sync all camera control panels with current camera settings"""
+        if self.current_camera_id is None:
+            return
+
+        try:
+            # Show sync feedback
+            if hasattr(self, 'toast'):
+                self.toast.show_message("Syncing camera settings...", duration=1000)
+
+            # Sync each panel based on what's currently visible
+            current_category = getattr(self, 'camera_control_stack', None)
+            if current_category:
+                current_index = current_category.currentIndex()
+                if current_index == 0:  # Exposure
+                    self._sync_camera_exposure_settings()
+                elif current_index == 1:  # Color
+                    self._sync_camera_color_settings()
+                elif current_index == 2:  # Image
+                    self._sync_camera_image_settings()
+                elif current_index == 3:  # Operations
+                    self._sync_camera_operations_settings()
+
+            # Also sync other panels that might be visible
+            self._sync_camera_exposure_settings()
+            self._sync_camera_color_settings()
+            self._sync_camera_image_settings()
+            self._sync_camera_operations_settings()
+
+        except Exception as e:
+            logger.warning(f"Error syncing camera controls: {e}")
+            if hasattr(self, 'toast'):
+                self.toast.show_message("Failed to sync camera settings", duration=2000, error=True)
+
     def _capture_preset_thumbnail(self, camera_id: int, preset_num: int) -> bool:
         """
         Capture current camera frame as preset thumbnail.
@@ -5628,7 +5808,13 @@ class MainWindow(QMainWindow):
                 self._update_preview_tally()
             except Exception as e:
                 logger.warning(f"Error updating preview tally: {e}")
-            
+
+            # Sync camera control panels with current camera settings
+            try:
+                self._sync_camera_controls_with_current_camera()
+            except Exception as e:
+                logger.warning(f"Error syncing camera controls: {e}")
+
             # Show visual feedback
             try:
                 if hasattr(self, 'toast'):
