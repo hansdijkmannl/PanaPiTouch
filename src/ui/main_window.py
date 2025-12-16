@@ -1744,6 +1744,16 @@ class MainWindow(QMainWindow):
         right_layout.addStretch()
         return widget
     
+    def _refresh_multi_camera_presets_panel(self):
+        """Refresh the multi-camera presets panel after settings change"""
+        # Recreate the panel and replace it in the stack
+        new_panel = self._create_multi_camera_presets_panel()
+        current_index = self.bottom_panel_stack.currentIndex()
+        self.bottom_panel_stack.removeWidget(self.bottom_panel_stack.widget(3))  # Remove current multi-cam panel
+        self.bottom_panel_stack.insertWidget(3, new_panel)
+        if current_index == 3:  # If multi-cam was active, keep it active
+            self.bottom_panel_stack.setCurrentIndex(3)
+
     def _create_multi_camera_presets_panel(self) -> QWidget:
         """Create Multi-Camera Presets panel with dynamic grid layouts"""
         scroll = TouchScrollArea()
@@ -1751,8 +1761,8 @@ class MainWindow(QMainWindow):
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(12, 12, 12, 12)  # Tighter margins
+        layout.setSpacing(6)  # Much tighter spacing between sections
 
         # Get configured cameras
         configured_cameras = []
@@ -1827,7 +1837,7 @@ class MainWindow(QMainWindow):
 
                 layout.addWidget(header_frame)
 
-                # Preset grid for this camera
+                # Preset grid for this camera - always 2 columns except 1x8
                 grid_frame = QFrame()
                 grid_frame.setStyleSheet(f"""
                     QFrame {{
@@ -1837,22 +1847,20 @@ class MainWindow(QMainWindow):
                     }}
                 """)
                 grid_layout = QVBoxLayout(grid_frame)
-                grid_layout.setContentsMargins(12, 12, 12, 12)
+                grid_layout.setContentsMargins(12, 8, 12, 8)  # Tighter margins
 
-                # Calculate grid dimensions
-                if "4×3" in layout_type:
-                    rows, cols = 3, 4  # 4 columns, 3 rows
-                elif "1×8" in layout_type:
-                    rows, cols = 1, 8  # 1 row, 8 columns
-                elif "4×2" in layout_type:
-                    rows, cols = 2, 4  # 4 columns, 2 rows
+                # Calculate grid dimensions - always 2 columns except 1x8
+                if "1×8" in layout_type:
+                    rows, cols = 1, 8  # 1 row, 8 columns for 1x8
                 else:
-                    rows, cols = 3, 4  # Default to 4x3
+                    # For all other layouts, use 2 columns
+                    cols = 2
+                    rows = (preset_count + 1) // 2  # Calculate rows needed for 2 columns
 
                 # Create grid layout
                 preset_grid = QGridLayout()
                 preset_grid.setSpacing(4)
-                preset_grid.setVerticalSpacing(6)
+                preset_grid.setVerticalSpacing(4)  # Tighter vertical spacing
 
                 # Create preset buttons (1 to preset_count)
                 for preset_num in range(1, min(preset_count, 12) + 1):  # Max 12 presets per camera
@@ -1866,8 +1874,8 @@ class MainWindow(QMainWindow):
                 grid_layout.addLayout(preset_grid)
                 layout.addWidget(grid_frame)
 
-                # Add some spacing between camera sections
-                layout.addSpacing(8)
+                # Minimal spacing between camera sections
+                layout.addSpacing(4)
 
         scroll.setWidget(widget)
         return scroll

@@ -808,6 +808,11 @@ class SettingsPage(QWidget):
         self.settings.multi_camera_presets = config
         self.settings.save()
 
+        # Refresh multi-camera panel in main window
+        main_window = self.parent()
+        if main_window and hasattr(main_window, '_refresh_multi_camera_presets_panel'):
+            main_window._refresh_multi_camera_presets_panel()
+
         # Show success message
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Icon.Information)
