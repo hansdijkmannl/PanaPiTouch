@@ -1174,6 +1174,19 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 0, 20, 0)
         layout.setSpacing(0)
         
+        # Camera name label on the left (Canon-style blue accent)
+        self.bottom_menu_camera_label = QLabel("📹 No Camera")
+        self.bottom_menu_camera_label.setStyleSheet(f"""
+            QLabel {{
+                color: {COLORS['secondary']};
+                font-size: 14px;
+                font-weight: 600;
+                padding: 0 16px;
+            }}
+        """)
+        self.bottom_menu_camera_label.setMinimumWidth(160)
+        layout.addWidget(self.bottom_menu_camera_label)
+        
         # Add stretch to center buttons
         layout.addStretch()
         
@@ -1212,8 +1225,14 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(menu_buttons_container)
         
-        # Add stretch after buttons to keep them centered
+        # Add stretch after buttons to balance layout
         layout.addStretch()
+        
+        # Empty spacer on right to balance with camera label
+        right_spacer = QWidget()
+        right_spacer.setMinimumWidth(160)
+        right_spacer.setStyleSheet("background: transparent;")
+        layout.addWidget(right_spacer)
         
         return menu_bar
     
@@ -3091,46 +3110,6 @@ class MainWindow(QMainWindow):
             layout.addStretch()
             scroll.setWidget(widget)
             return scroll
-        
-        # Canon-style header with camera name
-        camera = self.settings.get_camera(camera_id)
-        camera_name = camera.name if camera else f"Camera {camera_id}"
-        
-        header_frame = QFrame()
-        header_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {COLORS['surface']};
-                border: 1px solid {COLORS['border']};
-                border-radius: 8px;
-            }}
-        """)
-        header_layout = QHBoxLayout(header_frame)
-        header_layout.setContentsMargins(16, 10, 16, 10)
-        
-        presets_title = QLabel("PRESETS")
-        presets_title.setStyleSheet(f"""
-            color: {COLORS['text']};
-            font-size: 14px;
-            font-weight: bold;
-        """)
-        header_layout.addWidget(presets_title)
-        
-        # Camera indicator (Canon-style blue text)
-        camera_label = QLabel(f"📹 {camera_name}")
-        camera_label.setStyleSheet(f"""
-            color: {COLORS['secondary']};
-            font-size: 13px;
-            font-weight: 600;
-        """)
-        header_layout.addStretch()
-        header_layout.addWidget(camera_label)
-        
-        layout.addWidget(header_frame)
-        
-        # Instructions hint
-        hint_label = QLabel("Tap to recall • Long press to save/rename/delete")
-        hint_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 11px; padding: 4px 0;")
-        layout.addWidget(hint_label)
         
         # Create 8×6 grid (48 presets) in a panel
         presets_frame = QFrame()
@@ -6118,6 +6097,13 @@ class MainWindow(QMainWindow):
     
     def _update_camera_selection_ui(self, camera_id: int):
         """Update UI to reflect selected camera"""
+        # Update bottom menu camera label (Canon-style blue accent)
+        camera = self.settings.get_camera(camera_id)
+        if camera and hasattr(self, 'bottom_menu_camera_label'):
+            self.bottom_menu_camera_label.setText(f"📹 {camera.name}")
+        elif hasattr(self, 'bottom_menu_camera_label'):
+            self.bottom_menu_camera_label.setText("📹 No Camera")
+        
         # Uncheck all buttons first and ensure transparent background
         for btn in self.camera_buttons.values():
             btn.setChecked(False)
