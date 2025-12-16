@@ -1819,6 +1819,7 @@ class MainWindow(QMainWindow):
 
                 # Camera module container
                 camera_frame = QFrame()
+                camera_frame.setMinimumSize(180, 140)  # Ensure minimum size for content
                 camera_frame.setStyleSheet(f"""
                     QFrame {{
                         background-color: {COLORS['surface']};
@@ -1827,8 +1828,8 @@ class MainWindow(QMainWindow):
                     }}
                 """)
                 camera_layout = QVBoxLayout(camera_frame)
-                camera_layout.setContentsMargins(8, 8, 8, 8)
-                camera_layout.setSpacing(4)
+                camera_layout.setContentsMargins(6, 6, 6, 6)
+                camera_layout.setSpacing(2)
 
                 # Camera header
                 camera_label = QLabel(f"📹 {camera.name}")
@@ -1858,13 +1859,13 @@ class MainWindow(QMainWindow):
                 else:
                     grid_rows, grid_cols = 3, 4  # Default to 4x3
 
-                # Create preset buttons
+                # Create preset buttons - smaller for multi-camera view
                 for preset_num in range(1, min(preset_count, 12) + 1):
                     p_row = (preset_num - 1) // grid_cols
                     p_col = (preset_num - 1) % grid_cols
 
-                    # Create preset button
-                    preset_btn = PresetButton(preset_num, camera.id, self)
+                    # Create smaller preset button for multi-camera view
+                    preset_btn = self._create_small_preset_button(preset_num, camera.id)
                     preset_grid.addWidget(preset_btn, p_row, p_col)
 
                 camera_layout.addLayout(preset_grid)
@@ -1872,6 +1873,41 @@ class MainWindow(QMainWindow):
 
         scroll.setWidget(widget)
         return scroll
+
+    def _create_small_preset_button(self, preset_num: int, camera_id: int) -> QPushButton:
+        """Create a smaller preset button for multi-camera view"""
+        btn = QPushButton(str(preset_num))
+        btn.setFixedSize(32, 32)  # Much smaller than normal preset buttons
+        btn.setObjectName("smallPresetButton")
+
+        # Style for small preset buttons
+        btn.setStyleSheet(f"""
+            QPushButton#smallPresetButton {{
+                background-color: {COLORS['surface']};
+                border: 2px solid {COLORS['tally_off']};
+                border-radius: 6px;
+                color: {COLORS['text']};
+                font-size: 12px;
+                font-weight: 600;
+                text-align: center;
+            }}
+            QPushButton#smallPresetButton:hover {{
+                background-color: {COLORS['surface_hover']};
+                border-color: {COLORS['primary']};
+            }}
+            QPushButton#smallPresetButton:pressed {{
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
+                color: {COLORS['background']};
+            }}
+        """)
+
+        # Connect to preset recall
+        btn.clicked.connect(lambda: self._send_camera_command(f"R{preset_num:02d}", endpoint="aw_ptz") or
+                           (hasattr(self, 'toast') and self.toast and
+                            self.toast.show_message(f"Recalled Preset {preset_num}", duration=1500)))
+
+        return btn
 
     def _create_multiview_panel_content(self) -> QWidget:
         """Create multiview panel content (for portrait bottom panel)"""

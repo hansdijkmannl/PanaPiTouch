@@ -684,10 +684,13 @@ class SettingsPage(QWidget):
             enable_layout.addStretch()
             camera_layout.addLayout(enable_layout)
 
-            # Layout selection with radio buttons and visual previews
-            layout_label = QLabel("Preset Layout:")
+            # Layout selection - horizontal radio buttons
+            layout_row = QHBoxLayout()
+            layout_row.setSpacing(12)
+
+            layout_label = QLabel("Presets:")
             layout_label.setStyleSheet("color: #b0b0b0; font-size: 12px; font-weight: 500;")
-            camera_layout.addWidget(layout_label)
+            layout_row.addWidget(layout_label)
 
             # Radio button group for layout selection
             layout_group = QButtonGroup(camera_group)
@@ -695,28 +698,24 @@ class SettingsPage(QWidget):
 
             current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
 
-            # Layout options
+            # Layout options - just numbers now
             layouts = [
-                ("4×3 Grid", "4×3 (12 presets)", self._create_layout_preview_4x3()),
-                ("1×8 Strip", "1×8 (8 presets)", self._create_layout_preview_1x8()),
-                ("4×2 Grid", "4×2 (8 presets)", self._create_layout_preview_4x2())
+                ("12", "4×3 (12 presets)"),
+                ("8", "1×8 (8 presets)"),
+                ("8", "4×2 (8 presets)")
             ]
 
-            for layout_name, layout_value, preview_widget in layouts:
-                option_layout = QHBoxLayout()
-                option_layout.setSpacing(8)
-
+            for layout_name, layout_value in layouts:
                 radio_btn = QRadioButton(layout_name)
                 radio_btn.setChecked(layout_value == current_layout)
                 radio_btn.setEnabled(enable_checkbox.isChecked())
                 layout_group.addButton(radio_btn)
                 radio_btn.clicked.connect(lambda checked, cam_id=camera.id, val=layout_value: self._on_multi_camera_layout_change(cam_id, val))
 
-                option_layout.addWidget(radio_btn)
-                option_layout.addWidget(preview_widget)
-                option_layout.addStretch()
+                layout_row.addWidget(radio_btn)
 
-                camera_layout.addLayout(option_layout)
+            layout_row.addStretch()
+            camera_layout.addLayout(layout_row)
 
             cameras_layout.addWidget(camera_group)
 
