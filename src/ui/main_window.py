@@ -407,10 +407,8 @@ class MainWindow(QMainWindow):
         # Delay ensures UI is fully set up before starting demo
         QTimer.singleShot(500, self._start_demo_on_init)
         
-        # Switch to first camera after delay (gives services time to start)
-        if self.settings.cameras:
-            # Longer delay to ensure services are fully initialized
-            QTimer.singleShot(3000, lambda: self._switch_from_demo_to_camera(self.settings.cameras[0].id))
+        # Stay in demo mode - don't automatically switch to camera
+        # Comment out auto-switch to camera: QTimer.singleShot(3000, lambda: self._switch_from_demo_to_camera(self.settings.cameras[0].id))
     
     def _setup_window(self):
         """Setup window properties"""
