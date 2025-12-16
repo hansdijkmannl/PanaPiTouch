@@ -1168,10 +1168,10 @@ class MainWindow(QMainWindow):
                 border-top: 1px solid {COLORS['border']};
             }}
         """)
-        menu_bar.setFixedHeight(60)  # Reduced height - less padding
-        
+        menu_bar.setFixedHeight(50)  # More compact height
+
         layout = QHBoxLayout(menu_bar)
-        layout.setContentsMargins(20, 0, 20, 0)
+        layout.setContentsMargins(15, 0, 15, 0)
         layout.setSpacing(0)
         
         # Camera name label on the left (Canon-style blue accent)
@@ -1203,20 +1203,20 @@ class MainWindow(QMainWindow):
         self.bottom_menu_button_group = QButtonGroup(self)
         self.bottom_menu_button_group.setExclusive(True)
         
-        # Menu buttons: Presets, Camera Control, Guides, Multiview
+        # Menu buttons: Presets, Camera Control, Guides, Multi-Cam
         menu_buttons = [
             ("🎮 Presets", 0),
             ("⚙️ Camera Control", 1),
             ("📐 Guides", 2),
-            ("📺 Multiview", 3),
+            ("🎬 Multi-Cam", 3),
         ]
         
         for text, panel_idx in menu_buttons:
             btn = QPushButton(text)
             btn.setObjectName("navButton")  # Use same style as top menu
             btn.setCheckable(True)
-            btn.setFixedHeight(60)  # Match menu bar height - reduced padding
-            btn.setMinimumWidth(150)
+            btn.setFixedHeight(50)  # Reduced height for better fit
+            btn.setMinimumWidth(120)  # Reduced width for more buttons
             
             self.bottom_menu_button_group.addButton(btn, panel_idx)
             menu_buttons_layout.addWidget(btn)
@@ -1274,9 +1274,9 @@ class MainWindow(QMainWindow):
         guides_panel = self._create_frame_guides_panel_content()
         self.bottom_panel_stack.addWidget(guides_panel)
         
-        # Panel 3: Multiview
-        multiview_panel = self._create_multiview_panel_content()
-        self.bottom_panel_stack.addWidget(multiview_panel)
+        # Panel 3: Multi-Camera Presets
+        multi_camera_panel = self._create_multi_camera_presets_panel()
+        self.bottom_panel_stack.addWidget(multi_camera_panel)
         
         layout.addWidget(self.bottom_panel_stack)
         

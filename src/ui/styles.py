@@ -150,7 +150,7 @@ QPushButton#navButton {{
     border-bottom: 3px solid transparent;
     padding: 0px;
     margin: 0px;
-    font-size: 16px;
+    font-size: 14px;
     font-weight: 600;
 }}
 
