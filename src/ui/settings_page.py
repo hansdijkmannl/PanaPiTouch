@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit,
     QGroupBox, QFrame, QMessageBox, QComboBox,
     QGridLayout, QInputDialog, QStackedWidget, QSlider,
-    QSizePolicy, QRadioButton, QButtonGroup, QProgressBar
+    QSizePolicy, QRadioButton, QButtonGroup, QProgressBar, QCheckBox
 )
 from PyQt6.QtCore import pyqtSignal, QTimer, Qt, QEvent, QProcess, QUrl
 
@@ -125,6 +125,7 @@ class SettingsPage(QWidget):
         sections = [
             ("🌐", "Network"),
             ("🎬", "ATEM"),
+            ("📷", "Camera Control"),
             ("💾", "Backup"),
             ("🎛️", "Companion"),
             ("⌨️", "Keyboard presets"),
@@ -150,6 +151,7 @@ class SettingsPage(QWidget):
         # Create content panels
         self.content_stack.addWidget(self._create_network_panel())
         self.content_stack.addWidget(self._create_atem_panel())
+        self.content_stack.addWidget(self._create_camera_control_panel())
         self.content_stack.addWidget(self._create_backup_panel())
         self.content_stack.addWidget(self._create_companion_panel())
         self.content_stack.addWidget(self._create_keyboard_presets_panel())
@@ -599,7 +601,250 @@ class SettingsPage(QWidget):
         wrapper_layout.addWidget(scroll)
         
         return wrapper, content_layout
-    
+
+    def _create_camera_control_panel(self) -> QWidget:
+        """Create Camera Control settings panel with Multi-Cam configuration"""
+        wrapper, layout = self._create_content_wrapper("Camera Control", "📷")
+
+        # Multi-Camera Presets section
+        multi_cam_group = QGroupBox("Multi-Camera Presets")
+        multi_cam_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 14px;
+                font-weight: bold;
+                color: #ffffff;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                margin-top: 8px;
+                padding-top: 12px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 8px 0 8px;
+            }
+        """)
+
+        multi_layout = QVBoxLayout(multi_cam_group)
+
+        # Instructions
+        instructions = QLabel("Configure which cameras to include in the multi-camera preset view. Each camera can have a different grid layout.")
+        instructions.setStyleSheet("color: #b0b0b0; font-size: 12px; padding: 8px 0;")
+        instructions.setWordWrap(True)
+        multi_layout.addWidget(instructions)
+
+        # Camera selection area
+        cameras_frame = QFrame()
+        cameras_frame.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a22;
+                border: 1px solid #2a2a38;
+                border-radius: 6px;
+            }
+        """)
+        cameras_layout = QVBoxLayout(cameras_frame)
+        cameras_layout.setContentsMargins(12, 12, 12, 12)
+        cameras_layout.setSpacing(8)
+
+        # Store references for later use
+        self.multi_camera_checkboxes = {}
+        self.multi_camera_layout_combos = {}
+
+        # Add camera selection for each configured camera
+        for camera in self.settings.cameras:
+            camera_row = QHBoxLayout()
+            camera_row.setSpacing(12)
+
+            # Checkbox
+            checkbox = QCheckBox(f"📹 {camera.name}")
+            checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
+            checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
+            self.multi_camera_checkboxes[camera.id] = checkbox
+            camera_row.addWidget(checkbox)
+
+            # Layout combo
+            layout_combo = QComboBox()
+            layout_combo.addItems(["4×3 (12 presets)", "1×8 (8 presets)", "4×2 (8 presets)"])
+            current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
+            layout_combo.setCurrentText(current_layout)
+            layout_combo.setEnabled(checkbox.isChecked())
+            layout_combo.currentTextChanged.connect(lambda text, cam_id=camera.id: self._on_multi_camera_layout_change(cam_id, text))
+            self.multi_camera_layout_combos[camera.id] = layout_combo
+            camera_row.addWidget(layout_combo)
+
+            camera_row.addStretch()
+            cameras_layout.addLayout(camera_row)
+
+        multi_layout.addWidget(cameras_frame)
+
+        # Preview and actions
+        actions_layout = QHBoxLayout()
+        actions_layout.setSpacing(12)
+
+        # Preview label
+        self.multi_camera_preview_label = QLabel("No cameras selected")
+        self.multi_camera_preview_label.setStyleSheet("color: #ffffff; font-size: 12px;")
+        self.multi_camera_preview_label.setWordWrap(True)
+        actions_layout.addWidget(self.multi_camera_preview_label)
+
+        actions_layout.addStretch()
+
+        # Action buttons
+        button_layout = QVBoxLayout()
+        button_layout.setSpacing(8)
+
+        save_btn = QPushButton("💾 Save")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: #121218;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        save_btn.clicked.connect(self._save_multi_camera_config)
+        button_layout.addWidget(save_btn)
+
+        reset_btn = QPushButton("🔄 Reset")
+        reset_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2a38;
+                color: #ffffff;
+                border: 1px solid #404040;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #404040;
+            }
+        """)
+        reset_btn.clicked.connect(self._reset_multi_camera_config)
+        button_layout.addWidget(reset_btn)
+
+        actions_layout.addLayout(button_layout)
+        multi_layout.addLayout(actions_layout)
+
+        layout.addWidget(multi_cam_group)
+        layout.addStretch()
+
+        # Update preview initially
+        self._update_multi_camera_preview()
+
+        return wrapper
+
+    def _on_multi_camera_toggle(self, camera_id: int, state: int):
+        """Handle camera checkbox toggle"""
+        enabled = state == 2  # Qt.CheckState.Checked.value
+        if camera_id in self.multi_camera_layout_combos:
+            self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
+        self._update_multi_camera_preview()
+
+    def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
+        """Handle layout combo change"""
+        self._update_multi_camera_preview()
+
+    def _update_multi_camera_preview(self):
+        """Update the preview of current multi-camera configuration"""
+        selected_cameras = []
+        total_presets = 0
+
+        for camera_id, checkbox in self.multi_camera_checkboxes.items():
+            if checkbox.isChecked():
+                camera = self.settings.get_camera(camera_id)
+                if camera:
+                    layout_combo = self.multi_camera_layout_combos[camera_id]
+                    layout_text = layout_combo.currentText()
+
+                    if "12 presets" in layout_text:
+                        preset_count = 12
+                    elif "8 presets" in layout_text:
+                        preset_count = 8
+                    else:
+                        preset_count = 8
+
+                    selected_cameras.append(f"{camera.name}: {layout_text}")
+                    total_presets += preset_count
+
+        if selected_cameras:
+            preview_text = f"Selected ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
+            preview_text += f"\n\nTotal: {total_presets}/48 presets"
+            if total_presets > 48:
+                preview_text += " ⚠️ Over limit!"
+        else:
+            preview_text = "No cameras selected"
+
+        self.multi_camera_preview_label.setText(preview_text)
+
+    def _save_multi_camera_config(self):
+        """Save the current multi-camera configuration"""
+        config = {}
+
+        for camera_id, checkbox in self.multi_camera_checkboxes.items():
+            if checkbox.isChecked():
+                layout_combo = self.multi_camera_layout_combos[camera_id]
+                layout_text = layout_combo.currentText()
+
+                if "12 presets" in layout_text:
+                    preset_count = 12
+                elif "8 presets" in layout_text:
+                    preset_count = 8
+                else:
+                    preset_count = 8
+
+                config[str(camera_id)] = {
+                    'enabled': True,
+                    'layout': layout_text,
+                    'preset_count': preset_count
+                }
+
+        self.settings.multi_camera_presets = config
+        self.settings.save()
+
+        # Show success message
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Information)
+        msg.setWindowTitle("Configuration Saved")
+        msg.setText("Multi-camera configuration has been saved successfully!")
+        msg.setStyleSheet("""
+            QMessageBox {
+                background-color: #1a1a22;
+                color: #ffffff;
+            }
+            QMessageBox QLabel {
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #3498db;
+                color: #121218;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: 600;
+            }
+        """)
+        msg.exec()
+
+    def _reset_multi_camera_config(self):
+        """Reset multi-camera configuration to default"""
+        for checkbox in self.multi_camera_checkboxes.values():
+            checkbox.setChecked(False)
+
+        for combo in self.multi_camera_layout_combos.values():
+            combo.setCurrentText("4×3 (12 presets)")
+            combo.setEnabled(False)
+
+        self.settings.multi_camera_presets = {}
+        self.settings.save()
+        self._update_multi_camera_preview()
+
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
         wrapper, layout = self._create_content_wrapper("ATEM Switcher", "🎬")
