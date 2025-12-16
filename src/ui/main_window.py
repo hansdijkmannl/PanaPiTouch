@@ -1871,6 +1871,9 @@ class MainWindow(QMainWindow):
                 camera_layout.addLayout(preset_grid)
                 cameras_grid.addWidget(camera_frame, row, col)
 
+            # Add the cameras grid to the main layout
+            layout.addLayout(cameras_grid)
+
         scroll.setWidget(widget)
         return scroll
 

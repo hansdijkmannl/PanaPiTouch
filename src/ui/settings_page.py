@@ -958,18 +958,25 @@ class SettingsPage(QWidget):
 
     def _reset_multi_camera_config(self):
         """Reset multi-camera configuration to default"""
-        for checkbox in self.multi_camera_checkboxes.values():
-            checkbox.setChecked(False)
+        try:
+            for checkbox in self.multi_camera_checkboxes.values():
+                checkbox.setChecked(False)
 
-        # Reset radio button groups
-        for group in self.multi_camera_layout_combos.values():
-            # Find and check the first button (4x3)
-            if group.buttons():
-                group.buttons()[0].setChecked(True)
+            # Reset radio button groups - be more careful about button access
+            for group in self.multi_camera_layout_combos.values():
+                buttons = group.buttons()
+                if buttons and len(buttons) > 0:
+                    # Check the first button (should be "12" presets - 4x3)
+                    buttons[0].setChecked(True)
 
-        self.settings.multi_camera_presets = {}
-        self.settings.save()
-        self._update_multi_camera_preview()
+            self.settings.multi_camera_presets = {}
+            self.settings.save()
+            self._update_multi_camera_preview()
+        except Exception as e:
+            print(f"Error in reset: {e}")
+            # Fallback - just clear settings
+            self.settings.multi_camera_presets = {}
+            self.settings.save()
 
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
