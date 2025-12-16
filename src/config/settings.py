@@ -4,7 +4,7 @@ Configuration management for PanaPiTouch
 import os
 import yaml
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pathlib import Path
 
 
@@ -62,6 +62,8 @@ class Settings:
     preview_height: int = 1080
     # OSK preset texts (6 customizable preset buttons)
     osk_presets: List[str] = field(default_factory=lambda: ["", "", "", "", "", ""])
+    # Multi-camera preset view configuration
+    multi_camera_presets: Dict = field(default_factory=dict)  # {'camera_id': {'enabled': bool, 'layout': str, 'preset_count': int}}
     
     _config_path: str = field(default="", repr=False)
     
@@ -107,6 +109,7 @@ class Settings:
                     preview_width=data.get('preview_width', 1920),
                     preview_height=data.get('preview_height', 1080),
                     osk_presets=data.get('osk_presets', ["", "", "", "", "", ""]),
+                    multi_camera_presets=data.get('multi_camera_presets', {}),
                 )
                 settings._config_path = str(config_path)
                 return settings
@@ -151,6 +154,7 @@ class Settings:
             'preview_width': self.preview_width,
             'preview_height': self.preview_height,
             'osk_presets': self.osk_presets,
+            'multi_camera_presets': self.multi_camera_presets,
         }
         
         with open(config_path, 'w') as f:

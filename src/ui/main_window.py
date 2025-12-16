@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QLabel, QFrame, QSizePolicy,
     QButtonGroup, QSpacerItem, QSlider, QMenu, QDialog, QComboBox,
     QApplication, QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox,
-    QDoubleSpinBox, QGroupBox, QRadioButton, QInputDialog
+    QDoubleSpinBox, QGroupBox, QRadioButton, QInputDialog, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSlot, QSize, QEvent, QRect, QPoint
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QPixmap, QIcon, QImage, QCursor
@@ -1176,15 +1176,18 @@ class MainWindow(QMainWindow):
         
         # Camera name label on the left (Canon-style blue accent)
         self.bottom_menu_camera_label = QLabel("📹 No Camera")
+        self.bottom_menu_camera_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)  # Left align, vertically center
+        self.bottom_menu_camera_label.setWordWrap(True)  # Allow word wrapping if needed
         self.bottom_menu_camera_label.setStyleSheet(f"""
             QLabel {{
                 color: {COLORS['secondary']};
-                font-size: 14px;
                 font-weight: 600;
-                padding: 0 16px;
+                padding: 0 8px;
             }}
         """)
-        self.bottom_menu_camera_label.setMinimumWidth(160)
+        self.bottom_menu_camera_label.setMinimumWidth(80)  # Half width to prevent overflow
+        self.bottom_menu_camera_label.setMaximumWidth(80)  # Fixed width to prevent expansion
+        self.bottom_menu_camera_label.setMinimumHeight(30)  # Minimum height for word wrapping
         layout.addWidget(self.bottom_menu_camera_label)
         
         # Add stretch to center buttons
@@ -1200,12 +1203,13 @@ class MainWindow(QMainWindow):
         self.bottom_menu_button_group = QButtonGroup(self)
         self.bottom_menu_button_group.setExclusive(True)
         
-        # Menu buttons: PTZ, Grid, Guides, Multiview, Camera Control
+        # Menu buttons: Presets, Camera Control, Guides, Multiview, Multi-Cam
         menu_buttons = [
             ("🎮 Presets", 0),
             ("⚙️ Camera Control", 1),
             ("📐 Guides", 2),
             ("📺 Multiview", 3),
+            ("🎬 Multi-Cam", 4),
         ]
         
         for text, panel_idx in menu_buttons:
@@ -1230,7 +1234,7 @@ class MainWindow(QMainWindow):
         
         # Empty spacer on right to balance with camera label
         right_spacer = QWidget()
-        right_spacer.setMinimumWidth(160)
+        right_spacer.setMinimumWidth(80)  # Half width to match camera label
         right_spacer.setStyleSheet("background: transparent;")
         layout.addWidget(right_spacer)
         
@@ -1274,6 +1278,10 @@ class MainWindow(QMainWindow):
         # Panel 3: Multiview
         multiview_panel = self._create_multiview_panel_content()
         self.bottom_panel_stack.addWidget(multiview_panel)
+
+        # Panel 4: Multi-Camera Presets
+        multi_camera_panel = self._create_multi_camera_presets_panel()
+        self.bottom_panel_stack.addWidget(multi_camera_panel)
         
         layout.addWidget(self.bottom_panel_stack)
         
@@ -1741,6 +1749,134 @@ class MainWindow(QMainWindow):
         right_layout.addStretch()
         return widget
     
+    def _create_multi_camera_presets_panel(self) -> QWidget:
+        """Create Multi-Camera Presets panel with dynamic grid layouts"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # Get configured cameras
+        configured_cameras = []
+        for cam_id, config in self.settings.multi_camera_presets.items():
+            if config.get('enabled', False):
+                camera = self.settings.get_camera(int(cam_id))
+                if camera:
+                    configured_cameras.append({
+                        'camera': camera,
+                        'layout': config.get('layout', '4×3 (12 presets)'),
+                        'preset_count': config.get('preset_count', 12)
+                    })
+
+        if not configured_cameras:
+            # No cameras configured - show setup message
+            empty_frame = QFrame()
+            empty_frame.setStyleSheet(f"""
+                QFrame {{
+                    background-color: {COLORS['surface']};
+                    border: 2px dashed {COLORS['border']};
+                    border-radius: 12px;
+                }}
+            """)
+            empty_layout = QVBoxLayout(empty_frame)
+            empty_layout.setContentsMargins(40, 60, 40, 60)
+
+            no_config_label = QLabel("No Multi-Camera Configuration")
+            no_config_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_config_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 18px; font-weight: 500;")
+            empty_layout.addWidget(no_config_label)
+
+            setup_label = QLabel("Configure cameras in Settings → Camera Control → Multi-Cam")
+            setup_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            setup_label.setStyleSheet(f"color: {COLORS['text_dark']}; font-size: 14px;")
+            empty_layout.addWidget(setup_label)
+
+            layout.addWidget(empty_frame)
+            layout.addStretch()
+
+        else:
+            # Create sections for each configured camera
+            for cam_config in configured_cameras:
+                camera = cam_config['camera']
+                layout_type = cam_config['layout']
+                preset_count = cam_config['preset_count']
+
+                # Camera header
+                header_frame = QFrame()
+                header_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: {COLORS['surface_light']};
+                        border: 1px solid {COLORS['border']};
+                        border-radius: 6px;
+                    }}
+                """)
+                header_layout = QHBoxLayout(header_frame)
+                header_layout.setContentsMargins(12, 8, 12, 8)
+
+                camera_label = QLabel(f"📹 {camera.name}")
+                camera_label.setStyleSheet(f"""
+                    color: {COLORS['secondary']};
+                    font-size: 14px;
+                    font-weight: 600;
+                """)
+                header_layout.addWidget(camera_label)
+
+                header_layout.addStretch()
+
+                layout_type_label = QLabel(layout_type)
+                layout_type_label.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px;")
+                header_layout.addWidget(layout_type_label)
+
+                layout.addWidget(header_frame)
+
+                # Preset grid for this camera
+                grid_frame = QFrame()
+                grid_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: {COLORS['surface']};
+                        border: 1px solid {COLORS['border']};
+                        border-radius: 8px;
+                    }}
+                """)
+                grid_layout = QVBoxLayout(grid_frame)
+                grid_layout.setContentsMargins(12, 12, 12, 12)
+
+                # Calculate grid dimensions
+                if "4×3" in layout_type:
+                    rows, cols = 3, 4  # 4 columns, 3 rows
+                elif "1×8" in layout_type:
+                    rows, cols = 1, 8  # 1 row, 8 columns
+                elif "4×2" in layout_type:
+                    rows, cols = 2, 4  # 4 columns, 2 rows
+                else:
+                    rows, cols = 3, 4  # Default to 4x3
+
+                # Create grid layout
+                preset_grid = QGridLayout()
+                preset_grid.setSpacing(4)
+                preset_grid.setVerticalSpacing(6)
+
+                # Create preset buttons (1 to preset_count)
+                for preset_num in range(1, min(preset_count, 12) + 1):  # Max 12 presets per camera
+                    row = (preset_num - 1) // cols
+                    col = (preset_num - 1) % cols
+
+                    # Create preset button
+                    preset_btn = PresetButton(preset_num, camera.id, self)
+                    preset_grid.addWidget(preset_btn, row, col)
+
+                grid_layout.addLayout(preset_grid)
+                layout.addWidget(grid_frame)
+
+                # Add some spacing between camera sections
+                layout.addSpacing(8)
+
+        scroll.setWidget(widget)
+        return scroll
+
     def _create_multiview_panel_content(self) -> QWidget:
         """Create multiview panel content (for portrait bottom panel)"""
         widget = QWidget()
@@ -2099,12 +2235,13 @@ class MainWindow(QMainWindow):
         self.camera_control_category_group = QButtonGroup(self)
         self.camera_control_category_group.setExclusive(True)
         
-        # Category buttons: Exposure, Color, Image, Operations (Presets moved to bottom menu)
+        # Category buttons: Exposure, Color, Image, Operations, Multi-Cam
         category_buttons = [
             ("Exposure", 0),
             ("Color", 1),
             ("Image", 2),
             ("Operations", 3),
+            ("🎬 Multi-Cam", 4),
         ]
         
         for text, cat_idx in category_buttons:
@@ -2136,6 +2273,7 @@ class MainWindow(QMainWindow):
         self.camera_control_stack.addWidget(self._create_color_panel())
         self.camera_control_stack.addWidget(self._create_image_panel())  # Includes Advanced features
         self.camera_control_stack.addWidget(self._create_operations_panel())
+        self.camera_control_stack.addWidget(self._create_multi_camera_panel())
         
         layout.addWidget(self.camera_control_stack)
         
@@ -3194,6 +3332,226 @@ class MainWindow(QMainWindow):
         return scroll
     
     
+    def _create_multi_camera_panel(self) -> QWidget:
+        """Create Multi-Camera Presets Configuration panel"""
+        scroll = TouchScrollArea()
+        scroll.setWidgetResizable(True)
+
+        container, main_layout, left_layout, right_layout = self._create_two_column_layout()
+
+        # LEFT COLUMN - Camera Selection
+        cameras_label = self._create_section_header("CAMERA SELECTION")
+        left_layout.addWidget(cameras_label)
+
+        # Instructions
+        instructions = QLabel("Select cameras to include in the multi-camera preset view.\nEach camera can have a different preset grid layout.")
+        instructions.setStyleSheet(f"color: {COLORS['text_dim']}; font-size: 12px; padding: 8px 0;")
+        instructions.setWordWrap(True)
+        left_layout.addWidget(instructions)
+
+        # Camera checkboxes container
+        cameras_frame = QFrame()
+        cameras_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        cameras_layout = QVBoxLayout(cameras_frame)
+        cameras_layout.setContentsMargins(12, 12, 12, 12)
+        cameras_layout.setSpacing(8)
+
+        # Store checkboxes for later access
+        self.multi_camera_checkboxes = {}
+        self.multi_camera_layout_combos = {}
+
+        for camera in self.settings.cameras:
+            # Camera row container
+            camera_row = QHBoxLayout()
+            camera_row.setSpacing(12)
+
+            # Checkbox
+            checkbox = QCheckBox(f"📹 {camera.name}")
+            checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
+            checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
+            self.multi_camera_checkboxes[camera.id] = checkbox
+            camera_row.addWidget(checkbox)
+
+            # Layout combo (only enabled when checked)
+            layout_combo = QComboBox()
+            layout_combo.addItems(["4×3 (12 presets)", "1×8 (8 presets)", "4×2 (8 presets)"])
+            current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
+            layout_combo.setCurrentText(current_layout)
+            layout_combo.setEnabled(checkbox.isChecked())
+            layout_combo.currentTextChanged.connect(lambda text, cam_id=camera.id: self._on_multi_camera_layout_change(cam_id, text))
+            self.multi_camera_layout_combos[camera.id] = layout_combo
+            camera_row.addWidget(layout_combo)
+
+            camera_row.addStretch()
+            cameras_layout.addLayout(camera_row)
+
+        left_layout.addWidget(cameras_frame)
+
+        # RIGHT COLUMN - Preview and Actions
+        preview_label = self._create_section_header("PREVIEW & ACTIONS")
+        right_layout.addWidget(preview_label)
+
+        # Current configuration preview
+        preview_frame = QFrame()
+        preview_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS['surface']};
+                border: 1px solid {COLORS['border']};
+                border-radius: 8px;
+            }}
+        """)
+        preview_layout = QVBoxLayout(preview_frame)
+        preview_layout.setContentsMargins(12, 12, 12, 12)
+
+        self.multi_camera_preview_label = QLabel("No cameras selected")
+        self.multi_camera_preview_label.setStyleSheet(f"color: {COLORS['text']}; font-size: 12px;")
+        self.multi_camera_preview_label.setWordWrap(True)
+        preview_layout.addWidget(self.multi_camera_preview_label)
+
+        right_layout.addWidget(preview_frame)
+
+        # Action buttons
+        actions_layout = QVBoxLayout()
+        actions_layout.setSpacing(8)
+
+        save_btn = QPushButton("💾 Save Configuration")
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['primary']};
+                color: {COLORS['background']};
+                border: none;
+                border-radius: 6px;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['primary_dark']};
+            }}
+        """)
+        save_btn.clicked.connect(self._save_multi_camera_config)
+        actions_layout.addWidget(save_btn)
+
+        reset_btn = QPushButton("🔄 Reset to Default")
+        reset_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {COLORS['surface']};
+                color: {COLORS['text']};
+                border: 2px solid {COLORS['border']};
+                border-radius: 6px;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {COLORS['surface_hover']};
+            }}
+        """)
+        reset_btn.clicked.connect(self._reset_multi_camera_config)
+        actions_layout.addWidget(reset_btn)
+
+        right_layout.addLayout(actions_layout)
+        right_layout.addStretch()
+
+        # Update preview initially
+        self._update_multi_camera_preview()
+
+        scroll.setWidget(container)
+        return scroll
+
+    def _on_multi_camera_toggle(self, camera_id: int, state: int):
+        """Handle camera checkbox toggle"""
+        enabled = state == Qt.CheckState.Checked.value
+        self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
+        self._update_multi_camera_preview()
+
+    def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
+        """Handle layout combo change"""
+        self._update_multi_camera_preview()
+
+    def _update_multi_camera_preview(self):
+        """Update the preview of current multi-camera configuration"""
+        selected_cameras = []
+        total_presets = 0
+
+        for camera_id, checkbox in self.multi_camera_checkboxes.items():
+            if checkbox.isChecked():
+                camera = self.settings.get_camera(camera_id)
+                if camera:
+                    layout_combo = self.multi_camera_layout_combos[camera_id]
+                    layout_text = layout_combo.currentText()
+
+                    if "12 presets" in layout_text:
+                        preset_count = 12
+                    elif "8 presets" in layout_text:
+                        preset_count = 8
+                    else:
+                        preset_count = 8  # Default fallback
+
+                    selected_cameras.append(f"{camera.name}: {layout_text}")
+                    total_presets += preset_count
+
+        if selected_cameras:
+            preview_text = f"Selected Cameras ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
+            preview_text += f"\n\nTotal Presets: {total_presets}/48"
+            if total_presets > 48:
+                preview_text += " ⚠️ Over limit!"
+        else:
+            preview_text = "No cameras selected"
+
+        self.multi_camera_preview_label.setText(preview_text)
+
+    def _save_multi_camera_config(self):
+        """Save the current multi-camera configuration"""
+        config = {}
+
+        for camera_id, checkbox in self.multi_camera_checkboxes.items():
+            if checkbox.isChecked():
+                layout_combo = self.multi_camera_layout_combos[camera_id]
+                layout_text = layout_combo.currentText()
+
+                # Determine preset count from layout
+                if "12 presets" in layout_text:
+                    preset_count = 12
+                elif "8 presets" in layout_text:
+                    preset_count = 8
+                else:
+                    preset_count = 8
+
+                config[str(camera_id)] = {
+                    'enabled': True,
+                    'layout': layout_text,
+                    'preset_count': preset_count
+                }
+
+        self.settings.multi_camera_presets = config
+        self.settings.save()
+
+        if hasattr(self, 'toast') and self.toast:
+            self.toast.show_message("Multi-camera configuration saved!", duration=2000)
+
+    def _reset_multi_camera_config(self):
+        """Reset multi-camera configuration to default (all disabled)"""
+        for checkbox in self.multi_camera_checkboxes.values():
+            checkbox.setChecked(False)
+
+        for combo in self.multi_camera_layout_combos.values():
+            combo.setCurrentText("4×3 (12 presets)")
+            combo.setEnabled(False)
+
+        self.settings.multi_camera_presets = {}
+        self.settings.save()
+        self._update_multi_camera_preview()
+
+        if hasattr(self, 'toast') and self.toast:
+            self.toast.show_message("Configuration reset to default", duration=2000)
+
     def _create_operations_panel(self) -> QWidget:
         """Create Camera Operations panel (Category 6) - two columns"""
         scroll = TouchScrollArea()
@@ -6095,15 +6453,58 @@ class MainWindow(QMainWindow):
             }}
         """)
     
+    def _update_bottom_menu_camera_label(self, text: str):
+        """Update the bottom menu camera label with intelligent auto-sizing"""
+        if not hasattr(self, 'bottom_menu_camera_label'):
+            return
+
+        self.bottom_menu_camera_label.setText(text)
+
+        # Calculate text length without emoji
+        text_length = len(text.replace("📹", "").strip())
+
+        # For short names (<=3 chars), always use 28px - never scale down
+        if text_length <= 3:  # C1, C2, Cam, etc.
+            font = self.bottom_menu_camera_label.font()
+            font.setWeight(QFont.Weight.Bold)
+            font.setPointSize(28)
+            self.bottom_menu_camera_label.setFont(font)
+        else:
+            # For longer names, auto-scale to fit
+            if text_length <= 6:  # Camera1, Studio, etc.
+                font_sizes = [24, 20, 18, 16, 14, 12]
+            elif text_length <= 10:  # Production, Main Stage, etc.
+                font_sizes = [20, 18, 16, 14, 12, 10]
+            else:  # Very long names
+                font_sizes = [18, 16, 14, 12, 10, 8]
+
+            # Try font sizes from largest to smallest until it fits
+            font = self.bottom_menu_camera_label.font()
+            font.setWeight(QFont.Weight.Bold)
+
+            for font_size in font_sizes:
+                font.setPointSize(font_size)
+                self.bottom_menu_camera_label.setFont(font)
+
+                # Force layout update to get accurate size
+                self.bottom_menu_camera_label.adjustSize()
+
+                # Check if it fits within our 80px width
+                if self.bottom_menu_camera_label.sizeHint().width() <= 80:
+                    break  # Found a size that fits
+
+        # Ensure center alignment for multiple lines, vertical centering for single line
+        self.bottom_menu_camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+
     def _update_camera_selection_ui(self, camera_id: int):
         """Update UI to reflect selected camera"""
         # Update bottom menu camera label (Canon-style blue accent)
         camera = self.settings.get_camera(camera_id)
         if camera and hasattr(self, 'bottom_menu_camera_label'):
-            self.bottom_menu_camera_label.setText(f"📹 {camera.name}")
+            self._update_bottom_menu_camera_label(f"📹 {camera.name}")
         elif hasattr(self, 'bottom_menu_camera_label'):
-            self.bottom_menu_camera_label.setText("📹 No Camera")
-        
+            self._update_bottom_menu_camera_label("📹 No Camera")
+
         # Uncheck all buttons first and ensure transparent background
         for btn in self.camera_buttons.values():
             btn.setChecked(False)
