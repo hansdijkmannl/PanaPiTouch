@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QSpinBox, QCheckBox,
     QGroupBox, QListWidget, QListWidgetItem,
     QMessageBox, QFrame, QApplication, QProgressBar,
-    QComboBox, QStackedWidget, QDialog, QSizePolicy, QButtonGroup
+    QComboBox, QStackedWidget, QDialog, QSizePolicy, QButtonGroup, QMenu
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QThread, pyqtSlot, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QColor, QLinearGradient
@@ -581,15 +581,11 @@ class CameraListItem(QFrame):
             if self.reorder_timer and self.reorder_timer.isActive():
                 self.reorder_timer.stop()
 
-            # If we were dragging, end the drag
-            if self.is_being_dragged:
-                self._end_drag_operation()
-
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
         """Handle mouse move - cancel long press if moved too much"""
-        if self.drag_start_pos and not self.is_being_dragged:
+        if self.drag_start_pos:
             # Check if moved too much - cancel long press
             distance = (event.pos() - self.drag_start_pos).manhattanLength()
             if distance > 10:  # 10px threshold
