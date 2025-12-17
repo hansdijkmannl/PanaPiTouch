@@ -373,17 +373,17 @@ class CameraListItem(QFrame):
         
         # Camera info
         info_layout = QVBoxLayout()
-        info_layout.setSpacing(4)
-        
-        name_row = QHBoxLayout()
+        info_layout.setSpacing(2)
+
+        # Camera name
         name_label = QLabel(f"<b>{self.camera.name}</b>")
-        name_label.setStyleSheet("font-size: 15px; font-weight: 600;")
-        # Prevent long names from forcing the whole row/page wider than the window.
+        name_label.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff;")
         name_label.setWordWrap(False)
         name_label.setMinimumWidth(0)
         name_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        name_row.addWidget(name_label)
-        
+        info_layout.addWidget(name_label)
+
+        name_row = QHBoxLayout()
         # ATEM input badge
         if self.atem_input > 0:
             atem_badge = QLabel(f"ATEM {self.atem_input}")
@@ -398,11 +398,11 @@ class CameraListItem(QFrame):
                 }
             """)
             name_row.addWidget(atem_badge)
-        
+
         name_row.addStretch()
         info_layout.addLayout(name_row)
-        
-        # IP address only
+
+        # IP address
         ip_label = QLabel(self.camera.ip_address)
         ip_label.setStyleSheet("color: #888898; font-size: 13px;")
         ip_label.setWordWrap(False)
@@ -636,21 +636,33 @@ class CameraListItem(QFrame):
 
     def _move_up(self):
         """Move this camera up in the list"""
-        parent = self.parent()
-        while parent and not hasattr(parent, '_move_camera_up'):
-            parent = parent.parent()
+        # Find the camera page by traversing up the widget hierarchy
+        widget = self.parent()
+        camera_page = None
 
-        if parent and hasattr(parent, '_move_camera_up'):
-            parent._move_camera_up(self.camera.id)
+        while widget:
+            if hasattr(widget, '_move_camera_up'):
+                camera_page = widget
+                break
+            widget = widget.parent()
+
+        if camera_page:
+            camera_page._move_camera_up(self.camera.id)
 
     def _move_down(self):
         """Move this camera down in the list"""
-        parent = self.parent()
-        while parent and not hasattr(parent, '_move_camera_down'):
-            parent = parent.parent()
+        # Find the camera page by traversing up the widget hierarchy
+        widget = self.parent()
+        camera_page = None
 
-        if parent and hasattr(parent, '_move_camera_down'):
-            parent._move_camera_down(self.camera.id)
+        while widget:
+            if hasattr(widget, '_move_camera_down'):
+                camera_page = widget
+                break
+            widget = widget.parent()
+
+        if camera_page:
+            camera_page._move_camera_down(self.camera.id)
 
     def _start_reorder_mode(self):
         """Enter reorder mode after long press"""
@@ -1992,16 +2004,7 @@ class CameraPage(QWidget):
         
         layout.addLayout(header_layout)
 
-        if compact:
-            column_header = QHBoxLayout()
-            label_left = QLabel("Configured Camera")
-            label_left.setStyleSheet("color: #888898; font-size: 12px; font-weight: 600;")
-            column_header.addWidget(label_left)
-            column_header.addStretch()
-            label_right = QLabel("Edit")
-            label_right.setStyleSheet("color: #888898; font-size: 12px; font-weight: 600;")
-            column_header.addWidget(label_right, 0, Qt.AlignmentFlag.AlignRight)
-            layout.addLayout(column_header)
+        # Removed "Configured Camera" and "Edit" subtitles
         
         # Bulk operations bar - match camera row width
         bulk_container = QWidget()
