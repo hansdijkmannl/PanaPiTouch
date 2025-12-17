@@ -2342,24 +2342,8 @@ class CameraPage(QWidget):
         if hasattr(self, 'toast') and self.toast:
             self.toast.show_message(f"Deleted camera: {camera.name}", duration=2000)
 
-    def _complete_reorder_up(self, camera_id: int):
-        """Complete the reorder operation after UI refresh"""
-        self.settings.save()
-        main_window = self.window()
-        if main_window and hasattr(main_window, '_update_camera_buttons'):
-            main_window._update_camera_buttons()
-
-    def _complete_reorder_down(self, camera_id: int):
-        """Complete the reorder operation after UI refresh"""
-        self.settings.save()
-        main_window = self.window()
-        if main_window and hasattr(main_window, '_update_camera_buttons'):
-            main_window._update_camera_buttons()
-
-
-
     def _move_camera_up(self, camera_id: int):
-        """Move camera up in the list"""
+        """Move camera up in the list - instant visual feedback"""
         camera_index = None
         for i, cam in enumerate(self.settings.cameras):
             if cam.id == camera_id:
@@ -2367,24 +2351,28 @@ class CameraPage(QWidget):
                 break
 
         if camera_index is not None and camera_index > 0:
-            # Swap with previous camera
+            # Swap in settings
             self.settings.cameras[camera_index], self.settings.cameras[camera_index - 1] = \
                 self.settings.cameras[camera_index - 1], self.settings.cameras[camera_index]
 
-            # Set sort to Custom Order so reordering is visible
+            # Set sort to Custom Order
             if hasattr(self, 'sort_combo'):
                 custom_order_index = self.sort_combo.findText("🔧 Custom Order")
                 if custom_order_index >= 0:
+                    self.sort_combo.blockSignals(True)
                     self.sort_combo.setCurrentIndex(custom_order_index)
+                    self.sort_combo.blockSignals(False)
 
-            # Refresh camera list first for immediate visual feedback
-            self._refresh_camera_list()
+            # Instant visual swap - just move the widget in layout
+            item = self.camera_list_layout.takeAt(camera_index)
+            if item and item.widget():
+                self.camera_list_layout.insertWidget(camera_index - 1, item.widget())
 
-            # Then save settings and update camera buttons
-            self._complete_reorder_up(camera_id)
+            # Save in background (don't block UI)
+            QTimer.singleShot(0, self._save_and_update_camera_bar)
 
     def _move_camera_down(self, camera_id: int):
-        """Move camera down in the list"""
+        """Move camera down in the list - instant visual feedback"""
         camera_index = None
         for i, cam in enumerate(self.settings.cameras):
             if cam.id == camera_id:
@@ -2392,21 +2380,32 @@ class CameraPage(QWidget):
                 break
 
         if camera_index is not None and camera_index < len(self.settings.cameras) - 1:
-            # Swap with next camera
+            # Swap in settings
             self.settings.cameras[camera_index], self.settings.cameras[camera_index + 1] = \
                 self.settings.cameras[camera_index + 1], self.settings.cameras[camera_index]
 
-            # Set sort to Custom Order so reordering is visible
+            # Set sort to Custom Order
             if hasattr(self, 'sort_combo'):
                 custom_order_index = self.sort_combo.findText("🔧 Custom Order")
                 if custom_order_index >= 0:
+                    self.sort_combo.blockSignals(True)
                     self.sort_combo.setCurrentIndex(custom_order_index)
+                    self.sort_combo.blockSignals(False)
 
-            # Refresh camera list first for immediate visual feedback
-            self._refresh_camera_list()
+            # Instant visual swap - just move the widget in layout
+            item = self.camera_list_layout.takeAt(camera_index)
+            if item and item.widget():
+                self.camera_list_layout.insertWidget(camera_index + 1, item.widget())
 
-            # Then save settings and update camera buttons
-            self._complete_reorder_down(camera_id)
+            # Save in background (don't block UI)
+            QTimer.singleShot(0, self._save_and_update_camera_bar)
+
+    def _save_and_update_camera_bar(self):
+        """Save settings and update camera bar in background"""
+        self.settings.save()
+        main_window = self.window()
+        if main_window and hasattr(main_window, '_update_camera_buttons'):
+            main_window._update_camera_buttons()
 
     def _cancel_edit(self):
         """Cancel camera edit"""
