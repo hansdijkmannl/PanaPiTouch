@@ -1976,37 +1976,6 @@ class CameraPage(QWidget):
         """)
         header_layout.addWidget(self.camera_count_progress)
         
-        # Sort dropdown with icon
-        header_layout.addSpacing(12)
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["🔧 Custom Order", "⇅ Name", "⇅ IP Address", "⇅ ATEM Input", "⇅ Status"])
-        self.sort_combo.setFixedHeight(24)
-        self.sort_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #242430;
-                border: 1px solid #2a2a38;
-                border-radius: 4px;
-                padding: 0px 8px;
-                font-size: 12px;
-                min-width: 140px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox::down-arrow {
-                image: none;
-                border: none;
-            }
-        """)
-        self.sort_combo.currentTextChanged.connect(self._refresh_camera_list)
-        header_layout.addWidget(self.sort_combo)
-        
-        # Hide sort in compact mode
-        # Keep sort visible for reordering functionality
-        # if compact:
-        #     self.sort_combo.hide()
-        
         header_layout.addStretch()
         
         layout.addLayout(header_layout)
@@ -2148,19 +2117,8 @@ class CameraPage(QWidget):
             item.deleteLater()
         self._camera_items.clear()
         
-        # Get cameras and sort
+        # Get cameras (use order from settings)
         cameras = list(self.settings.cameras)
-        sort_by = self.sort_combo.currentText()
-        if "Custom Order" in sort_by:
-            # Keep original order from settings
-            pass
-        elif "Name" in sort_by:
-            cameras.sort(key=lambda c: c.name.lower())
-        elif "IP Address" in sort_by:
-            cameras.sort(key=lambda c: c.ip_address)
-        elif "ATEM Input" in sort_by:
-            cameras.sort(key=lambda c: self.settings.atem.input_mapping.get(str(c.id), 0), reverse=True)
-        # Status sorting would require connection status, skip for now
         
         # Add cameras
         for camera in cameras:
@@ -2355,14 +2313,6 @@ class CameraPage(QWidget):
             self.settings.cameras[camera_index], self.settings.cameras[camera_index - 1] = \
                 self.settings.cameras[camera_index - 1], self.settings.cameras[camera_index]
 
-            # Set sort to Custom Order
-            if hasattr(self, 'sort_combo'):
-                custom_order_index = self.sort_combo.findText("🔧 Custom Order")
-                if custom_order_index >= 0:
-                    self.sort_combo.blockSignals(True)
-                    self.sort_combo.setCurrentIndex(custom_order_index)
-                    self.sort_combo.blockSignals(False)
-
             # Instant visual swap - just move the widget in layout
             item = self.camera_list_layout.takeAt(camera_index)
             if item and item.widget():
@@ -2383,14 +2333,6 @@ class CameraPage(QWidget):
             # Swap in settings
             self.settings.cameras[camera_index], self.settings.cameras[camera_index + 1] = \
                 self.settings.cameras[camera_index + 1], self.settings.cameras[camera_index]
-
-            # Set sort to Custom Order
-            if hasattr(self, 'sort_combo'):
-                custom_order_index = self.sort_combo.findText("🔧 Custom Order")
-                if custom_order_index >= 0:
-                    self.sort_combo.blockSignals(True)
-                    self.sort_combo.setCurrentIndex(custom_order_index)
-                    self.sort_combo.blockSignals(False)
 
             # Instant visual swap - just move the widget in layout
             item = self.camera_list_layout.takeAt(camera_index)
