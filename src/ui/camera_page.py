@@ -301,6 +301,11 @@ class CameraListItem(QFrame):
         self.compact = compact
         self.connection_status = "unknown"  # "online", "offline", "unknown", "testing"
         self.last_test_result = None
+        self.delete_confirm_timer = None
+        self.is_in_delete_confirm = False
+        self.reorder_timer = None
+        self.is_being_dragged = False
+        self.drag_start_pos = None
         self._setup_ui()
     
     def _setup_ui(self):
@@ -416,29 +421,61 @@ class CameraListItem(QFrame):
         layout.addLayout(info_layout, stretch=1)
 
         # Delete button - centered vertically
-        delete_btn = QPushButton("Delete")
-        delete_btn.setFixedSize(80, 40)
-        delete_btn.setStyleSheet("""
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setFixedSize(80, 40)
+        self._update_delete_button_style()
+        self.delete_btn.setToolTip("Delete this camera")
+        self.delete_btn.clicked.connect(self._handle_delete_click)
+        layout.addWidget(self.delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # Reorder buttons (hidden by default, shown on hover)
+        self.up_btn = QPushButton("↑")
+        self.up_btn.setFixedSize(30, 40)
+        self.up_btn.setStyleSheet("""
             QPushButton {
-                background-color: #e74c3c;
+                background-color: #27ae60;
                 border: none;
-                border-radius: 6px;
+                border-radius: 4px;
                 color: #ffffff;
-                font-size: 13px;
-                font-weight: 600;
+                font-size: 14px;
+                font-weight: 700;
                 padding: 0px;
                 margin: 0px;
             }
             QPushButton:hover {
-                background-color: #c0392b;
+                background-color: #229954;
             }
             QPushButton:pressed {
-                background-color: #a93226;
+                background-color: #1e8449;
             }
         """)
-        delete_btn.setToolTip("Delete this camera")
-        delete_btn.clicked.connect(self._confirm_delete_camera)
-        layout.addWidget(delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.up_btn.clicked.connect(self._move_up)
+        self.up_btn.hide()  # Hidden by default
+        layout.addWidget(self.up_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        self.down_btn = QPushButton("↓")
+        self.down_btn.setFixedSize(30, 40)
+        self.down_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                border: none;
+                border-radius: 4px;
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 0px;
+                margin: 0px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:pressed {
+                background-color: #1e8449;
+            }
+        """)
+        self.down_btn.clicked.connect(self._move_down)
+        self.down_btn.hide()  # Hidden by default
+        layout.addWidget(self.down_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Edit button - centered vertically
         edit_btn = QPushButton("Edit")
@@ -467,24 +504,170 @@ class CameraListItem(QFrame):
             }
         """)
 
-    def _confirm_delete_camera(self):
-        """Show confirmation dialog and delete camera if confirmed"""
-        reply = QMessageBox.question(
-            self,
-            "Delete Camera",
-            f"Are you sure you want to delete camera '{self.camera.name}'?\n\nThis action cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
+    def _update_delete_button_style(self):
+        """Update delete button appearance based on confirm state"""
+        if self.is_in_delete_confirm:
+            self.delete_btn.setText("Confirm?")
+            self.delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #8b0000;
+                    border: 2px solid #ff4444;
+                    border-radius: 6px;
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 700;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #a00000;
+                }
+                QPushButton:pressed {
+                    background-color: #600000;
+                }
+            """)
+        else:
+            self.delete_btn.setText("Delete")
+            self.delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e74c3c;
+                    border: none;
+                    border-radius: 6px;
+                    color: #ffffff;
+                    font-size: 13px;
+                    font-weight: 600;
+                    padding: 0px;
+                    margin: 0px;
+                }
+                QPushButton:hover {
+                    background-color: #c0392b;
+                }
+                QPushButton:pressed {
+                    background-color: #a93226;
+                }
+            """)
 
-        if reply == QMessageBox.StandardButton.Yes:
-            # Find the parent camera page and call delete
-            parent = self.parent()
-            while parent and not hasattr(parent, '_delete_camera'):
-                parent = parent.parent()
+    def _handle_delete_click(self):
+        """Handle delete button clicks - two-step confirmation"""
+        if self.is_in_delete_confirm:
+            # Second click - actually delete
+            self._perform_delete()
+        else:
+            # First click - enter confirm mode
+            self.is_in_delete_confirm = True
+            self._update_delete_button_style()
 
-            if parent and hasattr(parent, '_delete_camera'):
-                parent._delete_camera(self.camera.id)
+            # Auto-revert after 3 seconds
+            if self.delete_confirm_timer:
+                self.delete_confirm_timer.stop()
+            self.delete_confirm_timer = QTimer(self)
+            self.delete_confirm_timer.setSingleShot(True)
+            self.delete_confirm_timer.timeout.connect(self._cancel_delete_confirm)
+            self.delete_confirm_timer.start(3000)
+
+    def _cancel_delete_confirm(self):
+        """Cancel delete confirmation and revert button"""
+        self.is_in_delete_confirm = False
+        self._update_delete_button_style()
+        if self.delete_confirm_timer:
+            self.delete_confirm_timer.stop()
+
+    def _perform_delete(self):
+        """Actually perform the delete operation"""
+        # Cancel the timer
+        if self.delete_confirm_timer:
+            self.delete_confirm_timer.stop()
+
+        # Find the parent camera page and call delete
+        parent = self.parent()
+        while parent and not hasattr(parent, '_delete_camera'):
+            parent = parent.parent()
+
+        if parent and hasattr(parent, '_delete_camera'):
+            parent._delete_camera(self.camera.id)
+
+    def mousePressEvent(self, event):
+        """Handle mouse press for long press detection"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_start_pos = event.pos()
+
+            # Start long press timer for reordering
+            if self.reorder_timer:
+                self.reorder_timer.stop()
+            self.reorder_timer = QTimer(self)
+            self.reorder_timer.setSingleShot(True)
+            self.reorder_timer.timeout.connect(self._start_reorder_mode)
+            self.reorder_timer.start(500)  # 500ms for long press
+
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """Handle mouse release - cancel long press if released early"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self.reorder_timer and self.reorder_timer.isActive():
+                # Short press - cancel long press timer
+                self.reorder_timer.stop()
+
+        super().mouseReleaseEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """Handle mouse move for drag detection"""
+        if self.drag_start_pos and not self.is_being_dragged:
+            # Check if moved enough to start dragging
+            distance = (event.pos() - self.drag_start_pos).manhattanLength()
+            if distance > 10:  # 10px threshold
+                if self.reorder_timer and self.reorder_timer.isActive():
+                    self.reorder_timer.stop()
+                self._start_drag_operation()
+
+        super().mouseMoveEvent(event)
+
+    def enterEvent(self, event):
+        """Show reorder buttons on hover"""
+        self.up_btn.show()
+        self.down_btn.show()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        """Hide reorder buttons when not hovering"""
+        self.up_btn.hide()
+        self.down_btn.hide()
+        super().leaveEvent(event)
+
+    def _move_up(self):
+        """Move this camera up in the list"""
+        parent = self.parent()
+        while parent and not hasattr(parent, '_move_camera_up'):
+            parent = parent.parent()
+
+        if parent and hasattr(parent, '_move_camera_up'):
+            parent._move_camera_up(self.camera.id)
+
+    def _move_down(self):
+        """Move this camera down in the list"""
+        parent = self.parent()
+        while parent and not hasattr(parent, '_move_camera_down'):
+            parent = parent.parent()
+
+        if parent and hasattr(parent, '_move_camera_down'):
+            parent._move_camera_down(self.camera.id)
+
+    def _start_reorder_mode(self):
+        """Enter reorder mode after long press"""
+        # Cancel delete confirm if active
+        if self.is_in_delete_confirm:
+            self._cancel_delete_confirm()
+
+        # Show reorder buttons
+        self.up_btn.show()
+        self.down_btn.show()
+
+    def _start_drag_operation(self):
+        """Start drag operation for reordering"""
+        self.is_being_dragged = True
+        # For now, just show reorder buttons
+        self.up_btn.show()
+        self.down_btn.show()
 
     def _create_demo_thumbnail(self):
         """Create a demo thumbnail image"""
@@ -2140,6 +2323,40 @@ class CameraPage(QWidget):
         # Show success message
         if hasattr(self, 'toast') and self.toast:
             self.toast.show_message(f"Deleted camera: {camera.name}", duration=2000)
+
+    def _move_camera_up(self, camera_id: int):
+        """Move camera up in the list"""
+        camera_index = None
+        for i, cam in enumerate(self.settings.cameras):
+            if cam.id == camera_id:
+                camera_index = i
+                break
+
+        if camera_index is not None and camera_index > 0:
+            # Swap with previous camera
+            self.settings.cameras[camera_index], self.settings.cameras[camera_index - 1] = \
+                self.settings.cameras[camera_index - 1], self.settings.cameras[camera_index]
+
+            # Save and refresh
+            self.settings.save()
+            self._refresh_camera_list()
+
+    def _move_camera_down(self, camera_id: int):
+        """Move camera down in the list"""
+        camera_index = None
+        for i, cam in enumerate(self.settings.cameras):
+            if cam.id == camera_id:
+                camera_index = i
+                break
+
+        if camera_index is not None and camera_index < len(self.settings.cameras) - 1:
+            # Swap with next camera
+            self.settings.cameras[camera_index], self.settings.cameras[camera_index + 1] = \
+                self.settings.cameras[camera_index + 1], self.settings.cameras[camera_index]
+
+            # Save and refresh
+            self.settings.save()
+            self._refresh_camera_list()
 
     def _cancel_edit(self):
         """Cancel camera edit"""
