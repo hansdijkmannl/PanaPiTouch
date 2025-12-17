@@ -416,15 +416,15 @@ class CameraListItem(QFrame):
         layout.addLayout(info_layout, stretch=1)
 
         # Delete button - centered vertically
-        delete_btn = QPushButton("🗑️")
-        delete_btn.setFixedSize(40, 40)
+        delete_btn = QPushButton("Delete")
+        delete_btn.setFixedSize(80, 40)
         delete_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
                 border: none;
                 border-radius: 6px;
                 color: #ffffff;
-                font-size: 16px;
+                font-size: 13px;
                 font-weight: 600;
                 padding: 0px;
                 margin: 0px;
