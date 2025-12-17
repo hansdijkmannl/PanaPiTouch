@@ -2013,8 +2013,9 @@ class CameraPage(QWidget):
         header_layout.addWidget(self.sort_combo)
         
         # Hide sort in compact mode
-        if compact:
-            self.sort_combo.hide()
+        # Keep sort visible for reordering functionality
+        # if compact:
+        #     self.sort_combo.hide()
         
         header_layout.addStretch()
         
@@ -2364,17 +2365,17 @@ class CameraPage(QWidget):
             self.settings.cameras[camera_index], self.settings.cameras[camera_index - 1] = \
                 self.settings.cameras[camera_index - 1], self.settings.cameras[camera_index]
 
-            # Save and refresh
-            self.settings.save()
-
             # Set sort to Custom Order so reordering is visible
             if hasattr(self, 'sort_combo'):
                 custom_order_index = self.sort_combo.findText("🔧 Custom Order")
                 if custom_order_index >= 0:
                     self.sort_combo.setCurrentIndex(custom_order_index)
 
-            # Refresh both camera list and camera buttons for instant feedback
+            # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
+
+            # Then save settings and update camera buttons
+            self.settings.save()
             main_window = self.window()
             if main_window and hasattr(main_window, '_update_camera_buttons'):
                 main_window._update_camera_buttons()
@@ -2392,17 +2393,17 @@ class CameraPage(QWidget):
             self.settings.cameras[camera_index], self.settings.cameras[camera_index + 1] = \
                 self.settings.cameras[camera_index + 1], self.settings.cameras[camera_index]
 
-            # Save and refresh
-            self.settings.save()
-
             # Set sort to Custom Order so reordering is visible
             if hasattr(self, 'sort_combo'):
                 custom_order_index = self.sort_combo.findText("🔧 Custom Order")
                 if custom_order_index >= 0:
                     self.sort_combo.setCurrentIndex(custom_order_index)
 
-            # Refresh both camera list and camera buttons for instant feedback
+            # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
+
+            # Then save settings and update camera buttons
+            self.settings.save()
             main_window = self.window()
             if main_window and hasattr(main_window, '_update_camera_buttons'):
                 main_window._update_camera_buttons()
