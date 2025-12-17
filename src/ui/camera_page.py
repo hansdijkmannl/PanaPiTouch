@@ -2352,6 +2352,43 @@ class CameraPage(QWidget):
         if hasattr(self, 'toast') and self.toast:
             self.toast.show_message(f"Deleted camera: {camera.name}", duration=2000)
 
+    def _complete_reorder_up(self, camera_id: int):
+        """Complete the reorder operation after UI refresh"""
+        self.settings.save()
+        main_window = self.window()
+        if main_window and hasattr(main_window, '_update_camera_buttons'):
+            main_window._update_camera_buttons()
+
+    def _complete_reorder_down(self, camera_id: int):
+        """Complete the reorder operation after UI refresh"""
+        self.settings.save()
+        main_window = self.window()
+        if main_window and hasattr(main_window, '_update_camera_buttons'):
+            main_window._update_camera_buttons()
+
+    def _show_arrows_on_moved_camera(self, camera_id: int):
+        """Show arrows on the camera that was just moved"""
+        try:
+            if camera_id in self._camera_items:
+                item = self._camera_items[camera_id]
+                # Force show the arrows
+                item.up_btn.show()
+                item.down_btn.show()
+                # Auto-hide after 2 seconds
+                QTimer.singleShot(2000, lambda: self._hide_arrows_on_camera(camera_id))
+        except Exception as e:
+            print(f"Error showing arrows on moved camera: {e}")
+
+    def _hide_arrows_on_camera(self, camera_id: int):
+        """Hide arrows on a specific camera"""
+        try:
+            if camera_id in self._camera_items:
+                item = self._camera_items[camera_id]
+                item.up_btn.hide()
+                item.down_btn.hide()
+        except Exception as e:
+            print(f"Error hiding arrows on camera: {e}")
+
     def _move_camera_up(self, camera_id: int):
         """Move camera up in the list"""
         camera_index = None
@@ -2374,11 +2411,11 @@ class CameraPage(QWidget):
             # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
 
+            # Show arrows on the moved camera immediately after refresh
+            QTimer.singleShot(50, lambda: self._show_arrows_on_moved_camera(camera_id))
+
             # Then save settings and update camera buttons
-            self.settings.save()
-            main_window = self.window()
-            if main_window and hasattr(main_window, '_update_camera_buttons'):
-                main_window._update_camera_buttons()
+            QTimer.singleShot(10, lambda: self._complete_reorder_up(camera_id))
 
     def _move_camera_down(self, camera_id: int):
         """Move camera down in the list"""
@@ -2402,11 +2439,11 @@ class CameraPage(QWidget):
             # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
 
+            # Show arrows on the moved camera immediately after refresh
+            QTimer.singleShot(50, lambda: self._show_arrows_on_moved_camera(camera_id))
+
             # Then save settings and update camera buttons
-            self.settings.save()
-            main_window = self.window()
-            if main_window and hasattr(main_window, '_update_camera_buttons'):
-                main_window._update_camera_buttons()
+            QTimer.singleShot(10, lambda: self._complete_reorder_down(camera_id))
 
     def _cancel_edit(self):
         """Cancel camera edit"""
