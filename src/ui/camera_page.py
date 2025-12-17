@@ -1989,7 +1989,7 @@ class CameraPage(QWidget):
         # Sort dropdown with icon
         header_layout.addSpacing(12)
         self.sort_combo = QComboBox()
-        self.sort_combo.addItems(["⇅ Name", "⇅ IP Address", "⇅ ATEM Input", "⇅ Status"])
+        self.sort_combo.addItems(["🔧 Custom Order", "⇅ Name", "⇅ IP Address", "⇅ ATEM Input", "⇅ Status"])
         self.sort_combo.setFixedHeight(24)
         self.sort_combo.setStyleSheet("""
             QComboBox {
@@ -2160,7 +2160,10 @@ class CameraPage(QWidget):
         # Get cameras and sort
         cameras = list(self.settings.cameras)
         sort_by = self.sort_combo.currentText()
-        if "Name" in sort_by:
+        if "Custom Order" in sort_by:
+            # Keep original order from settings
+            pass
+        elif "Name" in sort_by:
             cameras.sort(key=lambda c: c.name.lower())
         elif "IP Address" in sort_by:
             cameras.sort(key=lambda c: c.ip_address)
@@ -2363,9 +2366,15 @@ class CameraPage(QWidget):
 
             # Save and refresh
             self.settings.save()
-            self._refresh_camera_list()
 
-            # Refresh camera buttons in main window for instant feedback
+            # Set sort to Custom Order so reordering is visible
+            if hasattr(self, 'sort_combo'):
+                custom_order_index = self.sort_combo.findText("🔧 Custom Order")
+                if custom_order_index >= 0:
+                    self.sort_combo.setCurrentIndex(custom_order_index)
+
+            # Refresh both camera list and camera buttons for instant feedback
+            self._refresh_camera_list()
             main_window = self.window()
             if main_window and hasattr(main_window, '_update_camera_buttons'):
                 main_window._update_camera_buttons()
@@ -2385,9 +2394,15 @@ class CameraPage(QWidget):
 
             # Save and refresh
             self.settings.save()
-            self._refresh_camera_list()
 
-            # Refresh camera buttons in main window for instant feedback
+            # Set sort to Custom Order so reordering is visible
+            if hasattr(self, 'sort_combo'):
+                custom_order_index = self.sort_combo.findText("🔧 Custom Order")
+                if custom_order_index >= 0:
+                    self.sort_combo.setCurrentIndex(custom_order_index)
+
+            # Refresh both camera list and camera buttons for instant feedback
+            self._refresh_camera_list()
             main_window = self.window()
             if main_window and hasattr(main_window, '_update_camera_buttons'):
                 main_window._update_camera_buttons()
