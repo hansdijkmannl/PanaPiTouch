@@ -414,7 +414,32 @@ class CameraListItem(QFrame):
         info_layout.addWidget(self.status_label)
         
         layout.addLayout(info_layout, stretch=1)
-        
+
+        # Delete button - centered vertically
+        delete_btn = QPushButton("🗑️")
+        delete_btn.setFixedSize(40, 40)
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                border: none;
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 16px;
+                font-weight: 600;
+                padding: 0px;
+                margin: 0px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+            QPushButton:pressed {
+                background-color: #a93226;
+            }
+        """)
+        delete_btn.setToolTip("Delete this camera")
+        delete_btn.clicked.connect(self._confirm_delete_camera)
+        layout.addWidget(delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
         # Edit button - centered vertically
         edit_btn = QPushButton("Edit")
         edit_btn.setFixedSize(80, 40)
@@ -441,7 +466,26 @@ class CameraListItem(QFrame):
                 padding: 0px;
             }
         """)
-    
+
+    def _confirm_delete_camera(self):
+        """Show confirmation dialog and delete camera if confirmed"""
+        reply = QMessageBox.question(
+            self,
+            "Delete Camera",
+            f"Are you sure you want to delete camera '{self.camera.name}'?\n\nThis action cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Find the parent camera page and call delete
+            parent = self.parent()
+            while parent and not hasattr(parent, '_delete_camera'):
+                parent = parent.parent()
+
+            if parent and hasattr(parent, '_delete_camera'):
+                parent._delete_camera(self.camera.id)
+
     def _create_demo_thumbnail(self):
         """Create a demo thumbnail image"""
         self._update_thumbnail_image()
@@ -2073,7 +2117,30 @@ class CameraPage(QWidget):
             
             # Show bottom sheet
             self._open_bottom_sheet("Edit Camera", panel_index=0)
-    
+
+    def _delete_camera(self, camera_id: int):
+        """Delete a camera from the configured list"""
+        camera = self.settings.get_camera(camera_id)
+        if not camera:
+            return
+
+        # Remove from settings
+        self.settings.cameras = [c for c in self.settings.cameras if c.id != camera_id]
+
+        # Remove from ATEM mapping if exists
+        if str(camera_id) in self.settings.atem.input_mapping:
+            del self.settings.atem.input_mapping[str(camera_id)]
+
+        # Save settings
+        self.settings.save()
+
+        # Refresh camera list
+        self._refresh_camera_list()
+
+        # Show success message
+        if hasattr(self, 'toast') and self.toast:
+            self.toast.show_message(f"Deleted camera: {camera.name}", duration=2000)
+
     def _cancel_edit(self):
         """Cancel camera edit"""
         if self._form_has_changes:
