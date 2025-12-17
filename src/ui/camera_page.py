@@ -594,28 +594,6 @@ class CameraListItem(QFrame):
 
         super().mouseMoveEvent(event)
 
-    def enterEvent(self, event):
-        """Show reorder buttons on hover and manage active camera"""
-        # Hide arrows on previously active camera
-        if hasattr(self.parent(), '_hide_arrows_on_previous_active'):
-            self.parent()._hide_arrows_on_previous_active(self.camera.id)
-
-        # Set this camera as active
-        if hasattr(self.parent(), 'active_camera_id'):
-            self.parent().active_camera_id = self.camera.id
-
-        # Show arrows on this camera
-        self.up_btn.show()
-        self.down_btn.show()
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        """Keep arrows visible if this is the active camera"""
-        # Don't hide arrows if this is the active camera (recently moved)
-        if not hasattr(self.parent(), 'active_camera_id') or self.parent().active_camera_id != self.camera.id:
-            self.up_btn.hide()
-            self.down_btn.hide()
-        super().leaveEvent(event)
 
     def _move_up(self):
         """Move this camera up in the list"""
@@ -2253,11 +2231,6 @@ class CameraPage(QWidget):
             self._camera_items[camera.id] = item
             self.camera_list_layout.addWidget(item)
 
-            # If this is the active camera, show its arrows
-            if hasattr(self, 'active_camera_id') and self.active_camera_id == camera.id:
-                item.up_btn.show()
-                item.down_btn.show()
-
             # Set up thumbnail stream for online cameras
             self._setup_thumbnail_stream(camera)
         
@@ -2443,40 +2416,6 @@ class CameraPage(QWidget):
         if main_window and hasattr(main_window, '_update_camera_buttons'):
             main_window._update_camera_buttons()
 
-    def _show_arrows_on_moved_camera(self, camera_id: int):
-        """Show arrows on the camera that was just moved and set as active"""
-        try:
-            # Set this camera as the active one
-            self.active_camera_id = camera_id
-
-            if camera_id in self._camera_items:
-                item = self._camera_items[camera_id]
-                # Force show the arrows
-                item.up_btn.show()
-                item.down_btn.show()
-        except Exception as e:
-            print(f"Error showing arrows on moved camera: {e}")
-
-    def _hide_arrows_on_previous_active(self, new_camera_id: int):
-        """Hide arrows on the previously active camera when a new one becomes active"""
-        try:
-            if hasattr(self, 'active_camera_id') and self.active_camera_id != new_camera_id:
-                if self.active_camera_id in self._camera_items:
-                    old_item = self._camera_items[self.active_camera_id]
-                    old_item.up_btn.hide()
-                    old_item.down_btn.hide()
-        except Exception as e:
-            print(f"Error hiding arrows on previous active camera: {e}")
-
-    def _hide_arrows_on_camera(self, camera_id: int):
-        """Hide arrows on a specific camera"""
-        try:
-            if camera_id in self._camera_items:
-                item = self._camera_items[camera_id]
-                item.up_btn.hide()
-                item.down_btn.hide()
-        except Exception as e:
-            print(f"Error hiding arrows on camera: {e}")
 
 
     def _move_camera_up(self, camera_id: int):
@@ -2500,9 +2439,6 @@ class CameraPage(QWidget):
 
             # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
-
-            # Show arrows on the moved camera immediately after refresh
-            self._show_arrows_on_moved_camera(camera_id)
 
             # Then save settings and update camera buttons
             self._complete_reorder_up(camera_id)
@@ -2528,9 +2464,6 @@ class CameraPage(QWidget):
 
             # Refresh camera list first for immediate visual feedback
             self._refresh_camera_list()
-
-            # Show arrows on the moved camera immediately after refresh
-            self._show_arrows_on_moved_camera(camera_id)
 
             # Then save settings and update camera buttons
             self._complete_reorder_down(camera_id)
