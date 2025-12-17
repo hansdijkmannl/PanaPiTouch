@@ -420,14 +420,6 @@ class CameraListItem(QFrame):
         
         layout.addLayout(info_layout, stretch=1)
 
-        # Delete button - centered vertically
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setFixedSize(80, 40)
-        self._update_delete_button_style()
-        self.delete_btn.setToolTip("Delete this camera")
-        self.delete_btn.clicked.connect(self._handle_delete_click)
-        layout.addWidget(self.delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
-
         # Reorder buttons (hidden by default, shown on hover)
         self.up_btn = QPushButton("↑")
         self.up_btn.setFixedSize(30, 40)
@@ -476,6 +468,14 @@ class CameraListItem(QFrame):
         self.down_btn.clicked.connect(self._move_down)
         self.down_btn.hide()  # Hidden by default
         layout.addWidget(self.down_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        # Delete button - centered vertically
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setFixedSize(80, 40)
+        self._update_delete_button_style()
+        self.delete_btn.setToolTip("Delete this camera")
+        self.delete_btn.clicked.connect(self._handle_delete_click)
+        layout.addWidget(self.delete_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Edit button - centered vertically
         edit_btn = QPushButton("Edit")
@@ -2320,6 +2320,11 @@ class CameraPage(QWidget):
         # Refresh camera list
         self._refresh_camera_list()
 
+        # Refresh camera buttons in main window for instant feedback
+        main_window = self.window()
+        if main_window and hasattr(main_window, '_update_camera_buttons'):
+            main_window._update_camera_buttons()
+
         # Show success message
         if hasattr(self, 'toast') and self.toast:
             self.toast.show_message(f"Deleted camera: {camera.name}", duration=2000)
@@ -2341,6 +2346,11 @@ class CameraPage(QWidget):
             self.settings.save()
             self._refresh_camera_list()
 
+            # Refresh camera buttons in main window for instant feedback
+            main_window = self.window()
+            if main_window and hasattr(main_window, '_update_camera_buttons'):
+                main_window._update_camera_buttons()
+
     def _move_camera_down(self, camera_id: int):
         """Move camera down in the list"""
         camera_index = None
@@ -2357,6 +2367,11 @@ class CameraPage(QWidget):
             # Save and refresh
             self.settings.save()
             self._refresh_camera_list()
+
+            # Refresh camera buttons in main window for instant feedback
+            main_window = self.window()
+            if main_window and hasattr(main_window, '_update_camera_buttons'):
+                main_window._update_camera_buttons()
 
     def _cancel_edit(self):
         """Cancel camera edit"""
