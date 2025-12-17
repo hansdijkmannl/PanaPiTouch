@@ -1759,8 +1759,8 @@ class MainWindow(QMainWindow):
 
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(8)
 
         # Get configured cameras
         configured_cameras = []
@@ -1801,23 +1801,85 @@ class MainWindow(QMainWindow):
             layout.addStretch()
 
         else:
-            # Create 2-column grid layout for cameras
-            cameras_grid = QGridLayout()
-            cameras_grid.setSpacing(8)
-            cameras_grid.setVerticalSpacing(8)
+            # Separate cameras by layout type
+            grid_cameras = []  # 4×3 and 4×2 go in 2-column grid
+            row_cameras = []   # 1×8 go in full-width rows
+            
+            for cam_config in configured_cameras:
+                if "1×8" in cam_config['layout']:
+                    row_cameras.append(cam_config)
+                else:
+                    grid_cameras.append(cam_config)
 
-            # Arrange cameras in 2 columns
-            for i, cam_config in enumerate(configured_cameras):
+            # Create 2-column grid for 4×3 and 4×2 cameras
+            if grid_cameras:
+                cameras_grid = QGridLayout()
+                cameras_grid.setSpacing(8)
+                cameras_grid.setVerticalSpacing(8)
+
+                for i, cam_config in enumerate(grid_cameras):
+                    camera = cam_config['camera']
+                    layout_type = cam_config['layout']
+                    preset_count = cam_config['preset_count']
+
+                    row = i // 2
+                    col = i % 2
+
+                    # Camera module container
+                    camera_frame = QFrame()
+                    camera_frame.setStyleSheet(f"""
+                        QFrame {{
+                            background-color: {COLORS['surface']};
+                            border: 1px solid {COLORS['border']};
+                            border-radius: 8px;
+                        }}
+                    """)
+                    camera_layout_inner = QVBoxLayout(camera_frame)
+                    camera_layout_inner.setContentsMargins(8, 6, 8, 8)
+                    camera_layout_inner.setSpacing(6)
+
+                    # Simple camera title
+                    camera_label = QLabel(camera.name)
+                    camera_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                    camera_label.setStyleSheet(f"""
+                        QLabel {{
+                            color: {COLORS['text_dim']};
+                            font-size: 11px;
+                            font-weight: 500;
+                            padding: 0px;
+                        }}
+                    """)
+                    camera_layout_inner.addWidget(camera_label)
+
+                    # Preset grid
+                    preset_grid = QGridLayout()
+                    preset_grid.setSpacing(6)
+
+                    if "4×3" in layout_type:
+                        grid_cols = 4
+                    elif "4×2" in layout_type:
+                        grid_cols = 4
+                    else:
+                        grid_cols = 4
+
+                    for preset_num in range(1, preset_count + 1):
+                        p_row = (preset_num - 1) // grid_cols
+                        p_col = (preset_num - 1) % grid_cols
+                        preset_btn = self._create_multi_camera_preset_button(preset_num, camera.id, camera.name)
+                        preset_grid.addWidget(preset_btn, p_row, p_col)
+
+                    camera_layout_inner.addLayout(preset_grid)
+                    cameras_grid.addWidget(camera_frame, row, col)
+
+                layout.addLayout(cameras_grid)
+
+            # Create full-width rows for 1×8 cameras
+            for cam_config in row_cameras:
                 camera = cam_config['camera']
-                layout_type = cam_config['layout']
                 preset_count = cam_config['preset_count']
 
-                row = i // 2  # 2 cameras per row
-                col = i % 2   # Left or right column
-
-                # Camera module container
+                # Camera row container
                 camera_frame = QFrame()
-                camera_frame.setMinimumSize(180, 140)
                 camera_frame.setStyleSheet(f"""
                     QFrame {{
                         background-color: {COLORS['surface']};
@@ -1825,81 +1887,53 @@ class MainWindow(QMainWindow):
                         border-radius: 8px;
                     }}
                 """)
-                camera_layout = QVBoxLayout(camera_frame)
-                camera_layout.setContentsMargins(6, 6, 6, 6)
-                camera_layout.setSpacing(2)
+                camera_layout_inner = QVBoxLayout(camera_frame)
+                camera_layout_inner.setContentsMargins(8, 6, 8, 8)
+                camera_layout_inner.setSpacing(6)
 
-                # Camera header
-                camera_label = QLabel(f"📹 {camera.name}")
-                camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Simple camera title
+                camera_label = QLabel(camera.name)
+                camera_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
                 camera_label.setStyleSheet(f"""
                     QLabel {{
-                        color: {COLORS['secondary']};
-                        font-size: 13px;
-                        font-weight: 600;
-                        padding: 4px 0;
+                        color: {COLORS['text_dim']};
+                        font-size: 11px;
+                        font-weight: 500;
+                        padding: 0px;
                     }}
                 """)
-                camera_layout.addWidget(camera_label)
+                camera_layout_inner.addWidget(camera_label)
 
-                # Preset grid for this camera
-                preset_grid = QGridLayout()
-                preset_grid.setSpacing(3)
-                preset_grid.setVerticalSpacing(3)
+                # Single row of presets
+                preset_row = QHBoxLayout()
+                preset_row.setSpacing(6)
 
-                # Calculate grid dimensions based on layout type
-                if "4×3" in layout_type:
-                    grid_rows, grid_cols = 3, 4  # 4 columns, 3 rows
-                elif "1×8" in layout_type:
-                    grid_rows, grid_cols = 1, 8  # 1 row, 8 columns
-                elif "4×2" in layout_type:
-                    grid_rows, grid_cols = 2, 4  # 4 columns, 2 rows
-                else:
-                    grid_rows, grid_cols = 3, 4  # Default to 4x3
-
-                # Create preset buttons with improved styling
-                for preset_num in range(1, min(preset_count, 12) + 1):
-                    p_row = (preset_num - 1) // grid_cols
-                    p_col = (preset_num - 1) % grid_cols
-
-                    # Create preset button with camera-specific styling
+                for preset_num in range(1, preset_count + 1):
                     preset_btn = self._create_multi_camera_preset_button(preset_num, camera.id, camera.name)
-                    preset_grid.addWidget(preset_btn, p_row, p_col)
+                    preset_row.addWidget(preset_btn)
 
-                camera_layout.addLayout(preset_grid)
-                cameras_grid.addWidget(camera_frame, row, col)
+                preset_row.addStretch()
+                camera_layout_inner.addLayout(preset_row)
+                layout.addWidget(camera_frame)
 
-            # Add the cameras grid to the main layout
-            layout.addLayout(cameras_grid)
-
+        layout.addStretch()
         scroll.setWidget(widget)
         return scroll
 
     def _create_multi_camera_preset_button(self, preset_num: int, camera_id: int, camera_name: str) -> QPushButton:
         """Create a preset button for multi-camera view with camera identification"""
         btn = QPushButton(str(preset_num))
-        btn.setFixedSize(45, 35)  # Smaller size for camera modules
+        btn.setFixedSize(80, 60)  # Same size as main presets
         btn.setObjectName("multiCameraPresetButton")
 
-        # Create camera-specific color (cycle through colors for different cameras)
-        camera_colors = [
-            COLORS['primary'],      # Blue
-            '#e74c3c',              # Red
-            '#27ae60',              # Green
-            '#f39c12',              # Orange
-            '#9b59b6',              # Purple
-            '#1abc9c',              # Teal
-        ]
-        camera_color = camera_colors[(camera_id - 1) % len(camera_colors)]
-
-        # Style for multi-camera preset buttons
+        # Style matching main presets page
         btn.setStyleSheet(f"""
             QPushButton#multiCameraPresetButton {{
                 background-color: {COLORS['surface']};
-                border: 2px solid {camera_color};
-                border-radius: 6px;
+                border: 2px solid {COLORS['secondary']};
+                border-radius: 8px;
                 color: {COLORS['text']};
-                font-size: 11px;
+                font-size: 16px;
                 font-weight: 600;
                 padding: 0px;
             }}
@@ -1908,8 +1942,8 @@ class MainWindow(QMainWindow):
                 border-color: {COLORS['primary']};
             }}
             QPushButton#multiCameraPresetButton:pressed {{
-                background-color: {camera_color};
-                border-color: {camera_color};
+                background-color: {COLORS['primary']};
+                border-color: {COLORS['primary']};
                 color: {COLORS['background']};
             }}
         """)
@@ -1927,7 +1961,7 @@ class MainWindow(QMainWindow):
     def _create_empty_preset_button(self) -> QPushButton:
         """Create an empty/disabled preset button for unused slots"""
         btn = QPushButton("")
-        btn.setFixedSize(45, 35)
+        btn.setFixedSize(80, 60)  # Same size as main presets
         btn.setObjectName("emptyPresetButton")
         btn.setEnabled(False)
 
@@ -1936,9 +1970,9 @@ class MainWindow(QMainWindow):
             QPushButton#emptyPresetButton {{
                 background-color: {COLORS['surface']};
                 border: 1px solid {COLORS['border']};
-                border-radius: 6px;
+                border-radius: 8px;
                 color: {COLORS['text_dim']};
-                font-size: 10px;
+                font-size: 14px;
                 font-weight: 400;
             }}
         """)
