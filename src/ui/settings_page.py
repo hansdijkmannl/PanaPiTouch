@@ -891,7 +891,7 @@ class SettingsPage(QWidget):
         self.settings.save()
 
         # Refresh multi-camera panel in main window
-        main_window = self.parent()
+        main_window = self.window()
         if main_window and hasattr(main_window, '_refresh_multi_camera_presets_panel'):
             main_window._refresh_multi_camera_presets_panel()
 
