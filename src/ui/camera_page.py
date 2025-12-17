@@ -304,9 +304,7 @@ class CameraListItem(QFrame):
         self.delete_confirm_timer = None
         self.is_in_delete_confirm = False
         self.reorder_timer = None
-        self.is_being_dragged = False
         self.drag_start_pos = None
-        self.active_camera_id = None  # Track which camera has active arrows
         self._setup_ui()
     
     def _setup_ui(self):
@@ -421,54 +419,28 @@ class CameraListItem(QFrame):
         
         layout.addLayout(info_layout, stretch=1)
 
-        # Reorder buttons (hidden by default, shown on hover)
-        self.up_btn = QPushButton("↑")
-        self.up_btn.setFixedSize(30, 40)
-        self.up_btn.setStyleSheet("""
+        # Drag handle (shown on long press)
+        self.drag_handle = QPushButton("⋮⋮")
+        self.drag_handle.setFixedSize(30, 40)
+        self.drag_handle.setStyleSheet("""
             QPushButton {
-                background-color: #27ae60;
-                border: none;
-                border-radius: 4px;
-                color: #ffffff;
+                color: #666666;
                 font-size: 14px;
-                font-weight: 700;
+                font-weight: bold;
                 padding: 0px;
                 margin: 0px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
-        self.up_btn.clicked.connect(self._move_up)
-        self.up_btn.hide()  # Hidden by default
-        layout.addWidget(self.up_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
-
-        self.down_btn = QPushButton("↓")
-        self.down_btn.setFixedSize(30, 40)
-        self.down_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
+                background-color: transparent;
                 border: none;
-                border-radius: 4px;
-                color: #ffffff;
-                font-size: 14px;
-                font-weight: 700;
-                padding: 0px;
-                margin: 0px;
             }
             QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
+                color: #3498db;
+                background-color: #2e4d6b;
+                border-radius: 4px;
             }
         """)
-        self.down_btn.clicked.connect(self._move_down)
-        self.down_btn.hide()  # Hidden by default
-        layout.addWidget(self.down_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+        self.drag_handle.clicked.connect(self._show_reorder_menu)
+        self.drag_handle.hide()  # Hidden by default
+        layout.addWidget(self.drag_handle, alignment=Qt.AlignmentFlag.AlignVCenter)
 
         # Delete button - centered vertically
         self.delete_btn = QPushButton("Delete")
@@ -597,29 +569,32 @@ class CameraListItem(QFrame):
                 self.reorder_timer.stop()
             self.reorder_timer = QTimer(self)
             self.reorder_timer.setSingleShot(True)
-            self.reorder_timer.timeout.connect(self._start_reorder_mode)
-            self.reorder_timer.start(500)  # 500ms for long press
+            self.reorder_timer.timeout.connect(self._start_reorder_drag)
+            self.reorder_timer.start(800)  # 800ms for long press (slightly longer for touch)
 
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        """Handle mouse release - cancel long press if released early"""
+        """Handle mouse release"""
         if event.button() == Qt.MouseButton.LeftButton:
+            # Cancel long press timer if it hasn't fired yet
             if self.reorder_timer and self.reorder_timer.isActive():
-                # Short press - cancel long press timer
                 self.reorder_timer.stop()
+
+            # If we were dragging, end the drag
+            if self.is_being_dragged:
+                self._end_drag_operation()
 
         super().mouseReleaseEvent(event)
 
     def mouseMoveEvent(self, event):
-        """Handle mouse move for drag detection"""
+        """Handle mouse move - cancel long press if moved too much"""
         if self.drag_start_pos and not self.is_being_dragged:
-            # Check if moved enough to start dragging
+            # Check if moved too much - cancel long press
             distance = (event.pos() - self.drag_start_pos).manhattanLength()
             if distance > 10:  # 10px threshold
                 if self.reorder_timer and self.reorder_timer.isActive():
                     self.reorder_timer.stop()
-                self._start_drag_operation()
 
         super().mouseMoveEvent(event)
 
@@ -669,6 +644,90 @@ class CameraListItem(QFrame):
             widget = widget.parent()
             depth += 1
 
+    def _show_reorder_menu(self):
+        """Show reorder menu when drag handle is clicked"""
+        menu = QMenu(self)
+
+        # Style the menu
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1a1a22;
+                border: 2px solid #2a2a38;
+                border-radius: 8px;
+                padding: 8px;
+            }
+            QMenu::item {
+                background-color: transparent;
+                padding: 12px 16px;
+                border-radius: 4px;
+                color: #ffffff;
+            }
+            QMenu::item:selected {
+                background-color: #3498db;
+                color: #ffffff;
+            }
+        """)
+
+        # Add move up action
+        move_up_action = menu.addAction("⬆️ Move Up")
+        move_up_action.triggered.connect(self._move_up)
+
+        # Add move down action
+        move_down_action = menu.addAction("⬇️ Move Down")
+        move_down_action.triggered.connect(self._move_down)
+
+        # Add separator
+        menu.addSeparator()
+
+        # Add cancel action
+        cancel_action = menu.addAction("❌ Cancel")
+        cancel_action.triggered.connect(self._cancel_reorder)
+
+        # Show menu below the drag handle
+        handle_pos = self.drag_handle.mapToGlobal(self.drag_handle.rect().bottomLeft())
+        menu.exec(handle_pos)
+
+    def _cancel_reorder(self):
+        """Cancel reorder mode"""
+        self._end_reorder_mode()
+
+    def _end_reorder_mode(self):
+        """End reorder mode and hide drag handle"""
+        self.drag_handle.hide()
+        self.setStyleSheet("""
+            CameraListItem {
+                background-color: #242430;
+                border: 1px solid #2a2a38;
+                border-radius: 10px;
+                padding: 0px;
+            }
+        """)
+
+    def _move_up(self):
+        """Move this camera up in the list"""
+        # Find camera page through main window
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'camera_page'):
+                    camera_page = widget.camera_page
+                    if hasattr(camera_page, '_move_camera_up'):
+                        camera_page._move_camera_up(self.camera.id)
+                        self._end_reorder_mode()
+                        return
+
+        # Fallback: traverse widget hierarchy
+        widget = self.parent()
+        depth = 0
+        while widget and depth < 10:
+            if hasattr(widget, '_move_camera_up'):
+                widget._move_camera_up(self.camera.id)
+                self._end_reorder_mode()
+                return
+            widget = widget.parent()
+            depth += 1
+
     def _move_down(self):
         """Move this camera down in the list"""
         # Find camera page through main window
@@ -680,6 +739,7 @@ class CameraListItem(QFrame):
                     camera_page = widget.camera_page
                     if hasattr(camera_page, '_move_camera_down'):
                         camera_page._move_camera_down(self.camera.id)
+                        self._end_reorder_mode()
                         return
 
         # Fallback: traverse widget hierarchy
@@ -688,26 +748,30 @@ class CameraListItem(QFrame):
         while widget and depth < 10:
             if hasattr(widget, '_move_camera_down'):
                 widget._move_camera_down(self.camera.id)
+                self._end_reorder_mode()
                 return
             widget = widget.parent()
             depth += 1
 
-    def _start_reorder_mode(self):
-        """Enter reorder mode after long press"""
+    def _start_reorder_drag(self):
+        """Start reorder mode after long press"""
         # Cancel delete confirm if active
         if self.is_in_delete_confirm:
             self._cancel_delete_confirm()
 
-        # Show reorder buttons
-        self.up_btn.show()
-        self.down_btn.show()
+        # Show drag handle
+        self.drag_handle.show()
 
-    def _start_drag_operation(self):
-        """Start drag operation for reordering"""
-        self.is_being_dragged = True
-        # For now, just show reorder buttons
-        self.up_btn.show()
-        self.down_btn.show()
+        # Visual feedback for reorder mode
+        self.setStyleSheet("""
+            CameraListItem {
+                background-color: #2e4d6b;
+                border: 2px solid #3498db;
+                border-radius: 10px;
+                padding: 0px;
+            }
+        """)
+
 
     def _create_demo_thumbnail(self):
         """Create a demo thumbnail image"""
@@ -2417,6 +2481,7 @@ class CameraPage(QWidget):
                 item.down_btn.hide()
         except Exception as e:
             print(f"Error hiding arrows on camera: {e}")
+
 
     def _move_camera_up(self, camera_id: int):
         """Move camera up in the list"""
