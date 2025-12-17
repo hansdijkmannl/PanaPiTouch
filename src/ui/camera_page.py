@@ -636,33 +636,49 @@ class CameraListItem(QFrame):
 
     def _move_up(self):
         """Move this camera up in the list"""
-        # Find the camera page by traversing up the widget hierarchy
+        # Find camera page through main window
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'camera_page'):
+                    camera_page = widget.camera_page
+                    if hasattr(camera_page, '_move_camera_up'):
+                        camera_page._move_camera_up(self.camera.id)
+                        return
+
+        # Fallback: traverse widget hierarchy
         widget = self.parent()
-        camera_page = None
-
-        while widget:
+        depth = 0
+        while widget and depth < 10:
             if hasattr(widget, '_move_camera_up'):
-                camera_page = widget
-                break
+                widget._move_camera_up(self.camera.id)
+                return
             widget = widget.parent()
-
-        if camera_page:
-            camera_page._move_camera_up(self.camera.id)
+            depth += 1
 
     def _move_down(self):
         """Move this camera down in the list"""
-        # Find the camera page by traversing up the widget hierarchy
+        # Find camera page through main window
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        if app:
+            for widget in app.topLevelWidgets():
+                if hasattr(widget, 'camera_page'):
+                    camera_page = widget.camera_page
+                    if hasattr(camera_page, '_move_camera_down'):
+                        camera_page._move_camera_down(self.camera.id)
+                        return
+
+        # Fallback: traverse widget hierarchy
         widget = self.parent()
-        camera_page = None
-
-        while widget:
+        depth = 0
+        while widget and depth < 10:
             if hasattr(widget, '_move_camera_down'):
-                camera_page = widget
-                break
+                widget._move_camera_down(self.camera.id)
+                return
             widget = widget.parent()
-
-        if camera_page:
-            camera_page._move_camera_down(self.camera.id)
+            depth += 1
 
     def _start_reorder_mode(self):
         """Enter reorder mode after long press"""
