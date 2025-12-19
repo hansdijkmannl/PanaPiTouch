@@ -828,8 +828,47 @@ class CameraPage(QWidget):
         # Initialize badge count
         QTimer.singleShot(100, self._update_configured_badge)
         
-        # Start thumbnail update timer (update every 2 minutes)
-        self._thumbnail_timer.start(120000)
+        # Thumbnail timer interval (start only when page is visible)
+        self._thumbnail_timer_interval = 120000
+        self._thumbnails_active = False
+    
+    def showEvent(self, event):
+        """Start thumbnail streams when page becomes visible"""
+        super().showEvent(event)
+        self._start_thumbnail_streams()
+    
+    def hideEvent(self, event):
+        """Stop thumbnail streams when page is hidden to save CPU"""
+        super().hideEvent(event)
+        self._stop_thumbnail_streams()
+    
+    def _start_thumbnail_streams(self):
+        """Resume thumbnail streams and timer"""
+        if self._thumbnails_active:
+            return
+        self._thumbnails_active = True
+        self._thumbnail_timer.start(self._thumbnail_timer_interval)
+        # Resume all paused streams
+        for stream in self._thumbnail_streams.values():
+            try:
+                if hasattr(stream, 'resume'):
+                    stream.resume()
+            except Exception:
+                pass
+        # Refresh thumbnails immediately
+        self._update_all_thumbnails()
+    
+    def _stop_thumbnail_streams(self):
+        """Pause all thumbnail streams and timer to save CPU"""
+        self._thumbnails_active = False
+        self._thumbnail_timer.stop()
+        # Pause all active streams (don't stop them to avoid thread issues)
+        for stream in self._thumbnail_streams.values():
+            try:
+                if hasattr(stream, 'pause'):
+                    stream.pause()
+            except Exception:
+                pass
     
     def resizeEvent(self, event):
         """Handle window resize to reposition badge"""

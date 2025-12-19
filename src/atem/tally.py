@@ -104,10 +104,10 @@ class ATEMTallyController:
                     # Get input names
                     self._update_input_names()
                     
-                    # Monitor tally state
+                    # Monitor tally state (reduced from 50ms to 200ms to save CPU)
                     while self._running and self._atem.connected:
                         self._update_tally_state()
-                        time.sleep(0.05)  # 50ms polling
+                        time.sleep(0.2)  # 200ms polling
                     
                     self._connected = False
                     

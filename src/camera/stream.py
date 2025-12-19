@@ -84,6 +84,18 @@ class CameraStream:
     def error_message(self) -> str:
         return self._error_message
     
+    def pause(self):
+        """Pause the stream to save CPU (stops processing frames but keeps connection)"""
+        self._paused = True
+    
+    def resume(self):
+        """Resume the stream after pausing"""
+        self._paused = False
+    
+    @property
+    def is_paused(self) -> bool:
+        return getattr(self, '_paused', False)
+    
     def get_rtsp_url(self, stream_number: Optional[int] = None) -> str:
         """
         Get RTSP stream URL for H.264/H.265 streaming.
@@ -213,6 +225,11 @@ class CameraStream:
                 target_w, target_h = self.config.resolution
                 
                 while self._running:
+                    # Skip frame processing when paused to save CPU
+                    if getattr(self, '_paused', False):
+                        time.sleep(0.1)
+                        continue
+                    
                     ret, frame = cap.read()
                     
                     if not ret:
@@ -305,6 +322,11 @@ class CameraStream:
                 max_consecutive_failures = 30  # ~1 second at 30fps
                 
                 while self._running:
+                    # Skip frame processing when paused to save CPU
+                    if getattr(self, '_paused', False):
+                        time.sleep(0.1)
+                        continue
+                    
                     ret, frame = cap.read()
                     
                     if not ret:
@@ -376,6 +398,11 @@ class CameraStream:
         auth = (self.config.username, self.config.password) if self.config.username else None
         
         while self._running:
+            # Skip frame processing when paused to save CPU
+            if getattr(self, '_paused', False):
+                time.sleep(0.1)
+                continue
+            
             try:
                 request_start = time.time()
                 response = requests.get(snapshot_url, timeout=1, auth=auth, stream=False)  # Reduced timeout and removed stream=True for faster response

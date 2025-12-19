@@ -5652,6 +5652,10 @@ class MainWindow(QMainWindow):
         start_time = time.time()
         
         while self._demo_running:
+            # Pause demo when not on Live page (page 0) to save CPU
+            if hasattr(self, 'page_stack') and self.page_stack.currentIndex() != 0:
+                time.sleep(0.5)  # Sleep longer when paused
+                continue
             # Create test pattern frame
             frame = np.zeros((height, width, 3), dtype=np.uint8)
             
@@ -5709,8 +5713,8 @@ class MainWindow(QMainWindow):
             
             frame_count += 1
             
-            # Target 30fps
-            time.sleep(0.033)
+            # Target 15fps (reduced from 30fps to save CPU)
+            time.sleep(0.066)
     
     def _setup_connections(self):
         """Setup signal connections"""
@@ -5726,10 +5730,10 @@ class MainWindow(QMainWindow):
         self.status_timer.timeout.connect(self._update_status)
         self.status_timer.start(1000)
         
-        # FPS update timer
+        # FPS update timer (reduced from 500ms to 1000ms to save CPU)
         self.fps_timer = QTimer()
         self.fps_timer.timeout.connect(self._update_fps)
-        self.fps_timer.start(500)
+        self.fps_timer.start(1000)
 
         # Page change - show/hide OSK based on page
         self.page_stack.currentChanged.connect(self._on_page_changed)
@@ -6083,8 +6087,12 @@ class MainWindow(QMainWindow):
 
     
     def _on_page_changed(self, index: int):
-        """Handle page change - hide OSK if on Live page"""
+        """Handle page change - manage OSK and pause/resume streams"""
+        # Pause/resume camera streams based on page to save CPU
         if index == 0:  # Live/Preview page
+            # Resume camera stream if we have one
+            self._resume_camera_streams()
+            
             if self.osk:
                 # Only hide if the currently targeted field is NOT explicitly allowed on Live page
                 target = getattr(self.osk, "_target_widget", None)
@@ -6094,7 +6102,11 @@ class MainWindow(QMainWindow):
                 self._undock_osk_from_companion()
                 # Ensure OSK is not docked when leaving Cameras
                 self._undock_osk_from_camera_page()
-        elif index == 2:  # Companion page
+        else:
+            # Pause camera streams when not on Live page to save CPU
+            self._pause_camera_streams()
+        
+        if index == 2:  # Companion page
             # Always show OSK docked at the bottom of Companion page.
             self._dock_osk_to_companion()
             # Target the web view by default
@@ -6420,6 +6432,36 @@ class MainWindow(QMainWindow):
                 stream.stop()
         except Exception as e:
             logger.warning(f"Error stopping previous stream {camera_id}: {e}")
+    
+    def _pause_camera_streams(self):
+        """Pause all camera streams to save CPU when not on Live page"""
+        try:
+            for camera_id, stream in self.camera_streams.items():
+                if hasattr(stream, 'pause'):
+                    stream.pause()
+                else:
+                    # If no pause method, just remove callback
+                    stream.remove_frame_callback(self._on_frame_received)
+            self._streams_paused = True
+        except Exception as e:
+            logger.warning(f"Error pausing camera streams: {e}")
+    
+    def _resume_camera_streams(self):
+        """Resume camera streams when returning to Live page"""
+        try:
+            if not getattr(self, '_streams_paused', False):
+                return
+            
+            # Re-add callback to current stream
+            if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
+                stream = self.camera_streams[self.current_camera_id]
+                if hasattr(stream, 'resume'):
+                    stream.resume()
+                stream.add_frame_callback(self._on_frame_received)
+            
+            self._streams_paused = False
+        except Exception as e:
+            logger.warning(f"Error resuming camera streams: {e}")
     
     def _on_frame_received(self, frame):
         """Handle received frame from camera (error-handled)"""
