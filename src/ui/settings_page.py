@@ -210,7 +210,7 @@ class SettingsPage(QWidget):
         """Background check for Companion update availability (Option C)."""
         self._companion_timer = QTimer(self)
         self._companion_timer.timeout.connect(self._check_companion_update_background)
-        self._companion_timer.start(10000)  # every 10s
+        self._companion_timer.start(30000)  # every 30s (reduced frequency)
         QTimer.singleShot(500, self._check_companion_update_background)
 
     def _check_companion_update_background(self):
@@ -1689,11 +1689,11 @@ class SettingsPage(QWidget):
             self.osk_preset_inputs.append(preset_input)
             grid.addWidget(cell, row, col)
         
-        # Save button
-        save_btn = QPushButton("💾 Save Presets")
-        save_btn.setStyleSheet(self._get_button_style(True))
-        save_btn.clicked.connect(self._save_osk_presets)
-        preset_layout.addWidget(save_btn)
+        # Save button with reference for visual feedback
+        self.osk_save_btn = QPushButton("💾 Save Presets")
+        self.osk_save_btn.setStyleSheet(self._get_button_style(True))
+        self.osk_save_btn.clicked.connect(self._save_osk_presets)
+        preset_layout.addWidget(self.osk_save_btn)
         
         layout.addWidget(preset_frame)
         
@@ -1706,25 +1706,60 @@ class SettingsPage(QWidget):
         return wrapper
     
     def _save_osk_presets(self):
-        """Save OSK preset texts and update OSK immediately"""
+        """Save OSK preset texts and update OSK immediately with visual confirmation"""
+        from PyQt6.QtCore import QTimer
+
+        # Visual feedback: Change button to show saving state
+        original_text = self.osk_save_btn.text()
+        self.osk_save_btn.setText("✓ Saved!")
+        self.osk_save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ecc71;
+                color: white;
+                border: none;
+                padding: 16px 24px;
+                border-radius: 8px;
+                font-size: 16px;
+                font-weight: 600;
+            }
+        """)
+
         # Update settings
         if not hasattr(self.settings, 'osk_presets'):
             self.settings.osk_presets = ["", "", "", "", "", ""]
-        self.settings.osk_presets = [inp.text() for inp in self.osk_preset_inputs]
+
+        # Get preset texts from inputs
+        new_presets = [inp.text() for inp in self.osk_preset_inputs]
+        self.settings.osk_presets = new_presets
         self.settings.save()
-        
+
+        print(f"[DEBUG] Saved OSK presets: {new_presets}")
+
         # Update OSK widget if it exists in main window
         main_window = self.parent()
         if main_window and hasattr(main_window, 'osk') and main_window.osk:
-            # Update preset texts - this rebuilds the buttons
-            main_window.osk._preset_texts = self.settings.osk_presets.copy()
-            main_window.osk._build_preset_buttons()
-        
+            print(f"[DEBUG] Updating OSK widget with presets: {new_presets}")
+            # Use the proper method to update preset buttons
+            main_window.osk.set_preset_texts(new_presets)
+            # Force immediate repaint
+            main_window.osk.update()
+            main_window.osk.repaint()
+            print("[DEBUG] OSK widget updated and repainted")
+        else:
+            print("[DEBUG] OSK widget not found or not initialized")
+
         self.settings_changed.emit()
-        
+
         # Show confirmation toast if available
         if main_window and hasattr(main_window, 'toast'):
             main_window.toast.show("Keyboard presets saved", duration=2000)
+
+        # Reset button after 1.5 seconds
+        def reset_button():
+            self.osk_save_btn.setText(original_text)
+            self.osk_save_btn.setStyleSheet(self._get_button_style(True))
+
+        QTimer.singleShot(1500, reset_button)
     
     def _create_system_panel(self) -> QWidget:
         """Create system information panel"""

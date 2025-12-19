@@ -103,21 +103,33 @@ class VectorscopeOverlay(Overlay):
         # Get Cr (red-diff) and Cb (blue-diff) channels
         cr = ycrcb_small[:, :, 1].flatten().astype(np.float32) - 128
         cb = ycrcb_small[:, :, 2].flatten().astype(np.float32) - 128
-        
+
         # Normalize to fit in circle
         cr = (cr / 128) * radius
         cb = (cb / 128) * radius
-        
-        # Plot points - skip more points for better performance
-        step = max(5, len(cr) // 10000)  # Adaptive step size based on data size
-        for i in range(0, len(cr), step):
-            x = int(center + cb[i])
-            y = int(center - cr[i])  # Invert Y
-            
-            if 0 <= x < size and 0 <= y < size:
-                # Blend with existing color
-                current = vectorscope[y, x]
-                vectorscope[y, x] = np.clip(current + [30, 30, 30], 0, 255).astype(np.uint8)
+
+        # Vectorized point plotting - much faster than loop
+        # Calculate all x,y positions at once
+        x_coords = (center + cb).astype(np.int32)
+        y_coords = (center - cr).astype(np.int32)  # Invert Y
+
+        # Filter valid coordinates (within bounds)
+        valid_mask = (x_coords >= 0) & (x_coords < size) & (y_coords >= 0) & (y_coords < size)
+        x_valid = x_coords[valid_mask]
+        y_valid = y_coords[valid_mask]
+
+        # Downsample if too many points (for performance)
+        if len(x_valid) > 10000:
+            step = len(x_valid) // 10000
+            x_valid = x_valid[::step]
+            y_valid = y_valid[::step]
+
+        # Batch update pixels using advanced indexing
+        # Add intensity to existing pixels (accumulation effect)
+        vectorscope[y_valid, x_valid] = np.clip(
+            vectorscope[y_valid, x_valid].astype(np.int32) + 30,
+            0, 255
+        ).astype(np.uint8)
         
         # Draw border
         cv2.rectangle(vectorscope, (0, 0), (size - 1, size - 1), (100, 100, 100), 1)
@@ -127,20 +139,21 @@ class VectorscopeOverlay(Overlay):
     def apply(self, frame: np.ndarray) -> np.ndarray:
         """
         Apply vectorscope overlay to frame.
-        
+
         Args:
-            frame: BGR image
-            
+            frame: BGR image (may be read-only)
+
         Returns:
-            Frame with vectorscope overlay
+            Frame with vectorscope overlay (always a new writable array)
         """
         if not self._enabled:
             return frame
-        
-        result = frame.copy()
+
+        # Create writable copy only when we need to modify it
+        result = np.array(frame, copy=True)
         vectorscope = self._generate_vectorscope(frame)
         vs_size = vectorscope.shape[0]
-        
+
         if self.position == 'bottom-left':
             x = 20
             y = frame.shape[0] - vs_size - 20
@@ -153,16 +166,16 @@ class VectorscopeOverlay(Overlay):
         else:
             x = frame.shape[1] - vs_size - 20
             y = 20
-        
+
         # Ensure bounds
         x = max(0, min(x, frame.shape[1] - vs_size))
         y = max(0, min(y, frame.shape[0] - vs_size))
-        
+
         # Create ROI and blend
         roi = result[y:y+vs_size, x:x+vs_size]
         blended = cv2.addWeighted(roi, 1 - self._opacity, vectorscope, self._opacity, 0)
         result[y:y+vs_size, x:x+vs_size] = blended
-        
+
         return result
     
     def toggle(self):

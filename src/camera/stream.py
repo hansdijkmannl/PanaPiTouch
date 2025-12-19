@@ -65,14 +65,17 @@ class CameraStream:
     
     @property
     def current_frame(self) -> Optional[np.ndarray]:
-        """Get current frame (returns copy for thread safety)"""
+        """Get current frame (returns read-only view for thread safety)"""
         try:
             with self._frame_lock:
-                # Return a copy to prevent external modification
+                # Return a read-only view to prevent external modification without copying
+                # This eliminates the 6MB copy overhead for 1920x1080 BGR frames
                 if self._current_frame is not None:
-                    return self._current_frame.copy()
+                    frame_view = self._current_frame.view()
+                    frame_view.flags.writeable = False
+                    return frame_view
                 return None
-        except Exception:
+        except (RuntimeError, ValueError):
             # Lock might fail if stream is being destroyed
             return None
     

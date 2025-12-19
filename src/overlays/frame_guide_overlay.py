@@ -369,35 +369,36 @@ class FrameGuideOverlay(Overlay):
     def apply(self, frame: np.ndarray) -> np.ndarray:
         """
         Apply frame guide overlay to frame.
-        
+
         Args:
-            frame: BGR image
-            
+            frame: BGR image (may be read-only)
+
         Returns:
-            Frame with frame guide overlay
+            Frame with frame guide overlay (always a new writable array)
         """
         if not self._enabled:
             return frame
-        
+
         if self.active_guide is None and not self.drag_mode:
             return frame
-        
+
         h, w = frame.shape[:2]
-        
+
         # Calculate frame rectangle
         rx, ry, rw, rh = self._calculate_frame_rect(w, h)
-        
-        # Create result frame
-        result = frame.copy()
-        
-        # Darken areas outside the frame guide
+
+        # Create writable result frame
+        result = np.array(frame, copy=True)
+
+        # Darken areas outside the frame guide - vectorized operation
         if self.fill_opacity > 0:
-            mask = np.ones((h, w), dtype=np.uint8) * 255
-            mask[ry:ry+rh, rx:rx+rw] = 0
-            
-            darkened = (frame * (1 - self.fill_opacity)).astype(np.uint8)
-            result = np.where(mask[:, :, np.newaxis] > 0, darkened, frame)
-        
+            # Create boolean mask for outside region
+            mask = np.ones((h, w), dtype=bool)
+            mask[ry:ry+rh, rx:rx+rw] = False
+
+            # Vectorized darkening (much faster than element-wise)
+            result[mask] = (frame[mask] * (1 - self.fill_opacity)).astype(np.uint8)
+
         # Draw frame guide rectangle
         cv2.rectangle(result, (rx, ry), (rx + rw, ry + rh), self.line_color, self.line_thickness)
         

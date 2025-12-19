@@ -369,9 +369,6 @@ class MainWindow(QMainWindow):
         self.camera_streams: dict = {}
         self.current_camera_id = None
         
-        # Demo mode state
-        self._demo_running = False
-        self._demo_thread = None
         
         # Multiview manager
         self.multiview_manager = MultiviewManager(output_size=(1920, 1080))
@@ -402,13 +399,6 @@ class MainWindow(QMainWindow):
         if self.settings.atem.enabled and self.settings.atem.ip_address:
             self.atem_controller.connect(self.settings.atem.ip_address)
         
-        # Start with demo mode to give services time to initialize
-        # This ensures all system services are ready before connecting to cameras
-        # Delay ensures UI is fully set up before starting demo
-        QTimer.singleShot(500, self._start_demo_on_init)
-        
-        # Stay in demo mode - don't automatically switch to camera
-        # Comment out auto-switch to camera: QTimer.singleShot(3000, lambda: self._switch_from_demo_to_camera(self.settings.cameras[0].id))
     
     def _setup_window(self):
         """Setup window properties"""
@@ -451,16 +441,17 @@ class MainWindow(QMainWindow):
         # Create pages
         self.preview_page = self._create_preview_page()
         self.camera_page = CameraPage(self.settings)
+        # Create companion page (it's lightweight until web view is created)
         self.companion_page = CompanionPage(self.settings.companion_url)
         self.companion_page.update_available.connect(self._on_companion_update_available)
         self.companion_page.update_cleared.connect(self._on_companion_update_cleared)
         self.settings_page = SettingsPage(self.settings, parent=self)
-        
+
         self.page_stack.addWidget(self.preview_page)       # 0
         self.page_stack.addWidget(self.camera_page)        # 1
         self.page_stack.addWidget(self.companion_page)     # 2
         self.page_stack.addWidget(self.settings_page)      # 3
-        
+
         main_layout.addWidget(self.page_stack, stretch=1)
         
     
@@ -5420,30 +5411,6 @@ class MainWindow(QMainWindow):
         # Center all buttons
         layout.addStretch()
         
-        # Demo button (25% bigger: 70*1.25=88, 50*1.25=63)
-        self.demo_btn = QPushButton("D")
-        self.demo_btn.setObjectName("demoButton")
-        self.demo_btn.setCheckable(True)
-        self.demo_btn.setFixedSize(88, 80)
-        self.demo_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                border: 3px solid {COLORS['border']};
-                border-radius: 10px;
-                padding: 4px;
-                color: {COLORS['text']};
-                font-weight: 600;
-                font-size: 12px;
-            }}
-            QPushButton:checked {{
-                background-color: #FF9500;
-                border-color: #FF9500;
-                color: white;
-            }}
-        """)
-        self.demo_btn.setToolTip("Demo Video")
-        self.demo_btn.clicked.connect(self._toggle_demo_mode)
-        layout.addWidget(self.demo_btn)
         
         # Camera buttons container (no scroll area here, bar itself scrolls)
         self.camera_buttons_container = QWidget()
@@ -5524,197 +5491,6 @@ class MainWindow(QMainWindow):
             else:
                 self.camera_buttons_layout.addWidget(btn)
     
-    def _toggle_demo_mode(self):
-        """Toggle demo video mode"""
-        if self.demo_btn.isChecked():
-            try:
-                # Stop multiview if running
-                if self._multiview_active:
-                    self._stop_multiview()
-                
-                # Stop current camera stream and remove callbacks
-                if self.current_camera_id is not None:
-                    if self.current_camera_id in self.camera_streams:
-                        stream = self.camera_streams[self.current_camera_id]
-                        stream.remove_frame_callback(self._on_frame_received)
-                        stream.stop()
-                
-                # Uncheck all camera buttons
-                checked_btn = self.camera_button_group.checkedButton()
-                if checked_btn:
-                    self.camera_button_group.setExclusive(False)
-                    checked_btn.setChecked(False)
-                    self._set_camera_button_unchecked_style(checked_btn)
-                    checked_btn.update()
-                    self.camera_button_group.setExclusive(True)
-                
-                self.current_camera_id = None
-                
-                # Small delay to ensure camera streams are fully stopped
-                QTimer.singleShot(100, self._start_demo_video)
-            except Exception as e:
-                logger.error(f"Error starting demo mode: {e}", exc_info=True)
-                self.demo_btn.setChecked(False)
-        else:
-            # Stop demo mode
-            try:
-                self._stop_demo_video()
-            except Exception as e:
-                logger.error(f"Error stopping demo mode: {e}", exc_info=True)
-    
-    def _start_demo_video(self):
-        """Start playing demo video with test pattern"""
-        import threading
-        
-        # Ensure demo is not already running
-        if self._demo_running:
-            logger.warning("Demo mode already running, skipping start")
-            return
-        
-        # Ensure preview widget exists
-        if not hasattr(self, 'preview_widget') or self.preview_widget is None:
-            logger.warning("Preview widget not available, cannot start demo")
-            return
-        
-        try:
-            self._demo_running = True
-            self._demo_thread = threading.Thread(target=self._demo_video_loop, daemon=True)
-            self._demo_thread.start()
-        except Exception as e:
-            logger.error(f"Error starting demo video thread: {e}", exc_info=True)
-            self._demo_running = False
-            self._demo_thread = None
-            if hasattr(self, 'demo_btn'):
-                self.demo_btn.setChecked(False)
-    
-    def _start_demo_on_init(self):
-        """Start demo mode on initialization (called with delay to ensure UI is ready)"""
-        try:
-            # Ensure preview widget exists before starting demo
-            if not hasattr(self, 'preview_widget') or self.preview_widget is None:
-                logger.warning("Preview widget not ready, skipping demo mode start")
-                return
-            
-            # Set demo button to checked state
-            if hasattr(self, 'demo_btn'):
-                self.demo_btn.setChecked(True)
-            # Start demo video
-            self._start_demo_video()
-        except Exception as e:
-            logger.error(f"Error starting demo mode on init: {e}", exc_info=True)
-            # Don't crash - just skip demo mode
-    
-    def _switch_from_demo_to_camera(self, camera_id: int):
-        """Switch from demo mode to a camera (called after initialization delay)"""
-        try:
-            # Stop demo mode if running
-            if self._demo_running:
-                self._stop_demo_video()
-                if hasattr(self, 'demo_btn'):
-                    self.demo_btn.setChecked(False)
-            # Select the camera
-            self._select_camera(camera_id)
-        except Exception as e:
-            logger.error(f"Error switching from demo to camera {camera_id}: {e}", exc_info=True)
-            # Don't crash - camera selection will happen later if user manually selects
-    
-    def _stop_demo_video(self):
-        """Stop demo video (thread-safe)"""
-        # Set flag first to stop the loop
-        self._demo_running = False
-        
-        # Wait for thread to finish (with timeout)
-        if hasattr(self, '_demo_thread') and self._demo_thread:
-            try:
-                if self._demo_thread.is_alive():
-                    self._demo_thread.join(timeout=2)  # Increased timeout
-            except Exception as e:
-                logger.warning(f"Error joining demo thread: {e}")
-            finally:
-                self._demo_thread = None
-        
-        # Clear preview after thread is stopped
-        if hasattr(self, 'preview_widget') and self.preview_widget is not None:
-            try:
-                self.preview_widget.clear_frame()
-            except Exception as e:
-                logger.warning(f"Error clearing preview frame: {e}")
-    
-    def _demo_video_loop(self):
-        """Generate demo video frames with test pattern"""
-        import cv2
-        import numpy as np
-        import time
-        import math
-        
-        width, height = 1920, 1080
-        frame_count = 0
-        start_time = time.time()
-        
-        while self._demo_running:
-            # Pause demo when not on Live page (page 0) to save CPU
-            if hasattr(self, 'page_stack') and self.page_stack.currentIndex() != 0:
-                time.sleep(0.5)  # Sleep longer when paused
-                continue
-            # Create test pattern frame
-            frame = np.zeros((height, width, 3), dtype=np.uint8)
-            
-            # Color bars (top 2/3)
-            bar_height = int(height * 0.67)
-            bar_width = width // 8
-            colors = [
-                (192, 192, 192),  # White/Gray
-                (0, 192, 192),    # Yellow
-                (192, 192, 0),    # Cyan
-                (0, 192, 0),      # Green
-                (192, 0, 192),    # Magenta
-                (0, 0, 192),      # Red
-                (192, 0, 0),      # Blue
-                (16, 16, 16),     # Black
-            ]
-            for i, color in enumerate(colors):
-                x1 = i * bar_width
-                x2 = (i + 1) * bar_width
-                frame[0:bar_height, x1:x2] = color
-            
-            # Moving gradient bar (bottom 1/3)
-            t = time.time() - start_time
-            offset = int((t * 100) % width)
-            for x in range(width):
-                intensity = int(128 + 127 * math.sin((x + offset) * 0.02))
-                frame[bar_height:, x] = (intensity, intensity, intensity)
-            
-            # Add timestamp and info text
-            timestamp = time.strftime("%H:%M:%S")
-            fps_text = f"DEMO MODE | {timestamp} | Frame: {frame_count}"
-            
-            # Text background
-            cv2.rectangle(frame, (50, height - 80), (600, height - 30), (0, 0, 0), -1)
-            
-            # Text
-            cv2.putText(frame, fps_text, (60, height - 45), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
-            
-            # PanaPiTouch logo text
-            cv2.putText(frame, "PanaPiTouch", (width // 2 - 200, height // 2), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 2.5, (255, 255, 255), 4)
-            cv2.putText(frame, "Demo Video", (width // 2 - 150, height // 2 + 60), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 255), 2)
-            
-            # Send frame to preview (safety check - only if demo is still running)
-            if self._demo_running and hasattr(self, 'preview_widget') and self.preview_widget is not None:
-                try:
-                    self.preview_widget.update_frame(frame)
-                except Exception as e:
-                    # If preview widget is destroyed or in bad state, stop demo
-                    logger.warning(f"Error updating preview in demo mode: {e}")
-                    self._demo_running = False
-                    break
-            
-            frame_count += 1
-            
-            # Target 15fps (reduced from 30fps to save CPU)
-            time.sleep(0.066)
     
     def _setup_connections(self):
         """Setup signal connections"""
@@ -5726,14 +5502,15 @@ class MainWindow(QMainWindow):
         self.atem_controller.add_tally_callback(self._on_tally_changed)
         
         # Status update timer
+        # Status update timer - only when cameras are active
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self._update_status)
-        self.status_timer.start(1000)
-        
-        # FPS update timer (reduced from 500ms to 1000ms to save CPU)
+        # Timer will be started/stopped based on camera activity
+
+        # FPS update timer - only when cameras are active
         self.fps_timer = QTimer()
         self.fps_timer.timeout.connect(self._update_fps)
-        self.fps_timer.start(1000)
+        # Timer will be started/stopped based on camera activity
 
         # Page change - show/hide OSK based on page
         self.page_stack.currentChanged.connect(self._on_page_changed)
@@ -6088,6 +5865,10 @@ class MainWindow(QMainWindow):
     
     def _on_page_changed(self, index: int):
         """Handle page change - manage OSK and pause/resume streams"""
+        # Trigger lazy loading of companion web view if switching to it
+        if index == 2:  # Companion page
+            self.companion_page._create_web_view()
+
         # Pause/resume camera streams based on page to save CPU
         if index == 0:  # Live/Preview page
             # Resume camera stream if we have one
@@ -6172,10 +5953,6 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_camera_button_clicked(self, button_id: int):
         """Handle camera button click"""
-        # Stop demo mode if running
-        if self._demo_running:
-            self._stop_demo_video()
-            self.demo_btn.setChecked(False)
         
         # Stop multiview if running
         if self._multiview_active:
@@ -6249,10 +6026,6 @@ class MainWindow(QMainWindow):
             if self.current_camera_id in self.camera_streams:
                 self.camera_streams[self.current_camera_id].stop()
         
-        # Stop demo if running
-        if self._demo_running:
-            self._stop_demo_video()
-            self.demo_btn.setChecked(False)
         
         # Uncheck camera buttons
         checked_btn = self.camera_button_group.checkedButton()
@@ -6296,6 +6069,13 @@ class MainWindow(QMainWindow):
         
         # Clear preview
         self.preview_widget.clear_frame()
+        self.preview_widget.stop_frame_updates()
+
+        # Stop status and FPS timers when multiview is stopped
+        if self.status_timer.isActive():
+            self.status_timer.stop()
+        if self.fps_timer.isActive():
+            self.fps_timer.stop()
         
         print("Stopped multiview")
     
@@ -6326,6 +6106,13 @@ class MainWindow(QMainWindow):
             self.current_camera_id = None
             if hasattr(self, 'preview_widget') and self.preview_widget is not None:
                 self.preview_widget.clear_frame()
+                self.preview_widget.stop_frame_updates()
+
+            # Stop status and FPS timers when no camera is active
+            if self.status_timer.isActive():
+                self.status_timer.stop()
+            if self.fps_timer.isActive():
+                self.fps_timer.stop()
             logger.warning(f"Camera {camera_id} not found")
             if hasattr(self, 'toast'):
                 self.toast.show_message("Camera not found", duration=2000, error=True)
@@ -6334,11 +6121,6 @@ class MainWindow(QMainWindow):
         try:
             logger.info(f"Selecting camera: {camera.name} ({camera.ip_address})")
             
-            # Stop demo mode if running (must be done before starting camera)
-            if self._demo_running:
-                self._stop_demo_video()
-                if hasattr(self, 'demo_btn'):
-                    self.demo_btn.setChecked(False)
             
             # Stop multiview if running
             if self._multiview_active:
@@ -6382,6 +6164,11 @@ class MainWindow(QMainWindow):
             # Ensure consistent streaming method - use RTSP with MJPEG fallback (not snapshot)
             try:
                 stream.start(use_rtsp=True, use_snapshot=False, force_mjpeg=False)
+                # Start status and FPS timers now that we have an active camera
+                if not self.status_timer.isActive():
+                    self.status_timer.start(2000)  # Reduced frequency: every 2 seconds
+                if not self.fps_timer.isActive():
+                    self.fps_timer.start(2000)  # Reduced frequency: every 2 seconds
             except Exception as e:
                 logger.error(f"Error starting stream: {e}", exc_info=True)
                 self.toast.show_message(f"Error starting {camera.name}", duration=2000, error=True)
@@ -7170,9 +6957,6 @@ class MainWindow(QMainWindow):
             if clicked == save_btn:
                 self.settings.save()
         
-        # Stop demo mode if running
-        if self._demo_running:
-            self._stop_demo_video()
         
         # Stop multiview if running
         if self._multiview_active:

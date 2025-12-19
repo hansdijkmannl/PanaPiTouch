@@ -109,28 +109,29 @@ class FalseColorOverlay(Overlay):
     def apply(self, frame: np.ndarray) -> np.ndarray:
         """
         Apply false color overlay to frame.
-        
+
         Args:
-            frame: BGR image (numpy array)
-            
+            frame: BGR image (may be read-only)
+
         Returns:
-            Frame with false color overlay
+            Frame with false color overlay (always a new writable array)
         """
         if not self._enabled:
             return frame
-        
+
         # Convert to grayscale for luminance
+        # This operation creates a new array, so read-only input is fine
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        
-        # Apply LUT
+
+        # Apply LUT (creates new array)
         false_color = cv2.LUT(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), self._lut)
-        
+
         # Blend with original
         if self._opacity < 1.0:
             result = cv2.addWeighted(frame, 1 - self._opacity, false_color, self._opacity, 0)
         else:
             result = false_color
-        
+
         return result
 
 

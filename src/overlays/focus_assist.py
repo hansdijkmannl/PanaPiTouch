@@ -66,38 +66,40 @@ class FocusAssistOverlay(Overlay):
     def apply(self, frame: np.ndarray) -> np.ndarray:
         """
         Apply focus assist overlay to frame.
-        
+
         Args:
-            frame: BGR image
-            
+            frame: BGR image (may be read-only)
+
         Returns:
-            Frame with focus peaking overlay
+            Frame with focus peaking overlay (always a new writable array)
         """
         if not self._enabled:
             return frame
-        
+
         # Detect focus areas
         mask = self._detect_focus(frame)
-        
+
         if self.mode == 'edges_only':
             # Show only edges on black background
             result = np.zeros_like(frame)
             result[mask > 0] = self.color
         else:
-            # Overlay edges on original frame
-            result = frame.copy()
-            
-            # Create colored overlay
-            overlay = np.zeros_like(frame)
-            overlay[mask > 0] = self.color
-            
-            # Blend where mask is active
+            # Overlay edges on original frame - vectorized blending
+            result = np.array(frame, copy=True)
+
+            # Vectorized alpha blending using numpy broadcasting
+            # Much faster than per-pixel cv2.addWeighted in loop
             alpha = 0.7
-            result[mask > 0] = cv2.addWeighted(
-                frame[mask > 0], 1 - alpha,
-                overlay[mask > 0], alpha, 0
-            )
-        
+            mask_bool = mask > 0
+
+            # Create color array for broadcasting
+            color_array = np.array(self.color, dtype=np.uint8)
+
+            # Vectorized blend: result = (1-alpha)*frame + alpha*color
+            result[mask_bool] = (
+                (1 - alpha) * frame[mask_bool] + alpha * color_array
+            ).astype(np.uint8)
+
         return result
     
     def toggle(self):

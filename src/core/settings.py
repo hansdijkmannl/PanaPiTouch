@@ -64,12 +64,17 @@ class ATEMConfig(BaseModel):
 
 
 class Settings(BaseModel):
-    """Main application settings with Pydantic validation"""
+    """Main application settings with Pydantic validation and dirty flag optimization"""
     cameras: List[CameraConfig] = Field(default_factory=list)
     atem: ATEMConfig = Field(default_factory=ATEMConfig)
     selected_camera: int = Field(default=0, ge=0)
     companion_url: str = Field(default="http://localhost:8000")
-    
+
+    # Companion integration settings
+    companion_enabled: bool = Field(default=False)
+    companion_control_mode: str = Field(default="hybrid")  # "direct", "companion", or "hybrid"
+    companion_page: int = Field(default=1, ge=1, le=99)  # Companion page for camera controls
+
     # Display settings
     fullscreen: bool = Field(default=False)
     display_width: int = Field(default=1600, ge=640)
@@ -78,6 +83,22 @@ class Settings(BaseModel):
     native_height: int = Field(default=1600, ge=480)
     preview_width: int = Field(default=1920, ge=640)
     preview_height: int = Field(default=1080, ge=480)
+
+    # Dirty flag tracking (not serialized)
+    class Config:
+        arbitrary_types_allowed = True
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._dirty = False  # Track if settings changed since last save
+
+    def mark_dirty(self):
+        """Mark settings as modified (need to save)"""
+        self._dirty = True
+
+    def is_dirty(self) -> bool:
+        """Check if settings have unsaved changes"""
+        return getattr(self, '_dirty', False)
     
     @classmethod
     def get_config_path(cls) -> Path:
@@ -105,6 +126,9 @@ class Settings(BaseModel):
                     atem=atem,
                     selected_camera=data.get('selected_camera', 0),
                     companion_url=data.get('companion_url', 'http://localhost:8000'),
+                    companion_enabled=data.get('companion_enabled', False),
+                    companion_control_mode=data.get('companion_control_mode', 'hybrid'),
+                    companion_page=data.get('companion_page', 1),
                     fullscreen=data.get('fullscreen', False),
                     display_width=data.get('display_width', 1600),
                     display_height=data.get('display_height', 1000),
@@ -121,15 +145,27 @@ class Settings(BaseModel):
         # Return default settings
         return cls()
     
-    def save(self):
-        """Save settings to file"""
+    def save(self, force: bool = False):
+        """
+        Save settings to file (only if dirty or forced).
+
+        Args:
+            force: Force save even if not dirty
+        """
+        # Skip save if not dirty (optimization)
+        if not force and not self.is_dirty():
+            return
+
         config_path = self.get_config_path()
-        
+
         data = {
             'cameras': [cam.model_dump() for cam in self.cameras],
             'atem': self.atem.model_dump(),
             'selected_camera': self.selected_camera,
             'companion_url': self.companion_url,
+            'companion_enabled': self.companion_enabled,
+            'companion_control_mode': self.companion_control_mode,
+            'companion_page': self.companion_page,
             'fullscreen': self.fullscreen,
             'display_width': self.display_width,
             'display_height': self.display_height,
@@ -138,9 +174,11 @@ class Settings(BaseModel):
             'preview_width': self.preview_width,
             'preview_height': self.preview_height,
         }
-        
+
         with open(config_path, 'w') as f:
             yaml.dump(data, f, default_flow_style=False)
+
+        self._dirty = False  # Clear dirty flag after successful save
     
     def get_camera(self, camera_id: int) -> Optional[CameraConfig]:
         """Get camera by ID"""
@@ -150,21 +188,24 @@ class Settings(BaseModel):
         return None
     
     def add_camera(self, camera: CameraConfig):
-        """Add a camera"""
+        """Add a camera and mark dirty"""
         if len(self.cameras) < 30:
             self.cameras.append(camera)
+            self.mark_dirty()
             self.save()
-    
+
     def remove_camera(self, camera_id: int):
-        """Remove a camera"""
+        """Remove a camera and mark dirty"""
         self.cameras = [c for c in self.cameras if c.id != camera_id]
+        self.mark_dirty()
         self.save()
-    
+
     def update_camera(self, camera: CameraConfig):
-        """Update a camera"""
+        """Update a camera and mark dirty"""
         for i, cam in enumerate(self.cameras):
             if cam.id == camera.id:
                 self.cameras[i] = camera
+                self.mark_dirty()
                 self.save()
                 return
     
@@ -175,6 +216,9 @@ class Settings(BaseModel):
             'atem': self.atem.model_dump(),
             'selected_camera': self.selected_camera,
             'companion_url': self.companion_url,
+            'companion_enabled': self.companion_enabled,
+            'companion_control_mode': self.companion_control_mode,
+            'companion_page': self.companion_page,
             'fullscreen': self.fullscreen,
             'display_width': self.display_width,
             'display_height': self.display_height,
@@ -193,6 +237,9 @@ class Settings(BaseModel):
         self.atem = atem
         self.selected_camera = data.get('selected_camera', 0)
         self.companion_url = data.get('companion_url', 'http://localhost:8000')
+        self.companion_enabled = data.get('companion_enabled', False)
+        self.companion_control_mode = data.get('companion_control_mode', 'hybrid')
+        self.companion_page = data.get('companion_page', 1)
         self.fullscreen = data.get('fullscreen', False)
         self.display_width = data.get('display_width', 1600)
         self.display_height = data.get('display_height', 1000)

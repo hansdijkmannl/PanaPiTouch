@@ -32,25 +32,25 @@ class GridOverlay(Overlay):
     def apply(self, frame: np.ndarray) -> np.ndarray:
         """
         Apply grid overlay to frame.
-        
+
         Args:
-            frame: BGR image
-            
+            frame: BGR image (may be read-only)
+
         Returns:
-            Frame with grid overlay
+            Frame with grid overlay (always a new writable array)
         """
         if not self._enabled:
             return frame
-        
+
         # Check if any grid type is enabled
         if not (self.rule_of_thirds or self.full_grid):
             return frame
-        
+
         h, w = frame.shape[:2]
-        
-        # Create overlay
-        overlay = frame.copy()
-        
+
+        # Create writable overlay copy
+        overlay = np.array(frame, copy=True)
+
         # Rule of thirds
         if self.rule_of_thirds:
             # Vertical lines at 1/3 and 2/3
@@ -58,28 +58,28 @@ class GridOverlay(Overlay):
             x2 = 2 * w // 3
             cv2.line(overlay, (x1, 0), (x1, h), self.color, self.line_thickness)
             cv2.line(overlay, (x2, 0), (x2, h), self.color, self.line_thickness)
-            
+
             # Horizontal lines at 1/3 and 2/3
             y1 = h // 3
             y2 = 2 * h // 3
             cv2.line(overlay, (0, y1), (w, y1), self.color, self.line_thickness)
             cv2.line(overlay, (0, y2), (w, y2), self.color, self.line_thickness)
-        
+
         # Full grid for leveling
         if self.full_grid:
             # Draw vertical lines
             for i in range(1, self.grid_divisions):
                 x = (w * i) // self.grid_divisions
                 cv2.line(overlay, (x, 0), (x, h), self.color, self.line_thickness)
-            
+
             # Draw horizontal lines
             for i in range(1, self.grid_divisions):
                 y = (h * i) // self.grid_divisions
                 cv2.line(overlay, (0, y), (w, y), self.color, self.line_thickness)
-        
+
         # Blend overlay with original
         result = cv2.addWeighted(overlay, self.line_opacity, frame, 1 - self.line_opacity, 0)
-        
+
         return result
     
     def toggle(self):

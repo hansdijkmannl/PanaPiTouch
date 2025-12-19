@@ -16,6 +16,7 @@ from ..overlays import (
 )
 from ..core.video_pipeline import FrameWorker
 from ..atem.tally import TallyState
+from ..core.frame_utils import compute_frame_hash
 
 
 class PreviewWidget(QWidget):
@@ -70,6 +71,7 @@ class PreviewWidget(QWidget):
         self._current_frame: np.ndarray = None
         self._display_frame: np.ndarray = None
         self._frame_dirty = False
+        self._last_frame_hash = 0  # Track frame changes for optimization
         
         self._setup_ui()
         
@@ -77,9 +79,10 @@ class PreviewWidget(QWidget):
         # Lower frequency reduces CPU load while maintaining smooth playback
         self._update_timer = QTimer()
         self._update_timer.timeout.connect(self._update_display)
-        self._update_timer.start(40)  # 25fps - good balance for Pi
+        # Timer will be started when frames start coming in
         
         # Frame rate limiting - track last update time
+        self._resize_cache = {}  # Cache resized frames
         self._last_update_time = 0
         self._min_update_interval = 0.04  # 25fps max
     
@@ -190,6 +193,9 @@ class PreviewWidget(QWidget):
                 try:
                     self.frame_worker.start_processing()
                     self._worker_started = True
+                    # Start update timer when we start receiving frames
+                    if not self._update_timer.isActive():
+                        self._update_timer.start(40)
                 except Exception as e:
                     # Worker might already be running or destroyed
                     pass
@@ -235,7 +241,15 @@ class PreviewWidget(QWidget):
             except Exception as e:
                 # Widget might be destroyed - ignore errors
                 pass
-    
+
+    def stop_frame_updates(self):
+        """Stop frame update timer when no frames are being processed"""
+        try:
+            if self._update_timer.isActive():
+                self._update_timer.stop()
+        except Exception:
+            pass
+
     def set_tally_state(self, state: TallyState):
         """Set tally state (affects border color) (error-handled)"""
         try:

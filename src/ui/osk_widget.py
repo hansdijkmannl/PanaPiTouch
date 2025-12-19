@@ -51,18 +51,24 @@ class OSKWidget(QWidget):
     
     def set_preset_texts(self, texts: list):
         """Update preset button texts"""
+        print(f"[OSK DEBUG] set_preset_texts called with: {texts}")
         if len(texts) >= 6:
             self._preset_texts = texts[:6]
+            print(f"[OSK DEBUG] Updated _preset_texts to: {self._preset_texts}")
             self._update_preset_buttons()
         else:
             # Pad with empty strings if less than 6
             self._preset_texts = (texts + [""] * (6 - len(texts)))[:6]
+            print(f"[OSK DEBUG] Padded _preset_texts to: {self._preset_texts}")
             self._update_preset_buttons()
     
     def _update_preset_buttons(self):
         """Update preset button labels"""
+        print(f"[OSK DEBUG] _update_preset_buttons called")
         if not hasattr(self, '_preset_buttons') or not self._preset_buttons:
+            print(f"[OSK DEBUG] No preset buttons found!")
             return
+        print(f"[OSK DEBUG] Updating {len(self._preset_buttons)} preset buttons")
         for i, btn in enumerate(self._preset_buttons):
             if i < len(self._preset_texts):
                 text = self._preset_texts[i] if self._preset_texts[i] else ""
@@ -70,10 +76,17 @@ class OSKWidget(QWidget):
                 if text:
                     display_text = text[:15]  # Show text (6 buttons fit in 12 columns)
                     btn.setText(display_text)
+                    print(f"[OSK DEBUG] Button {i+1} set to: '{display_text}'")
                 else:
                     btn.setText("(empty)")
-                # Force button to repaint
+                    print(f"[OSK DEBUG] Button {i+1} set to: '(empty)'")
+                # Force button to repaint immediately
                 btn.update()
+                btn.repaint()
+        # Also force repaint of the parent widget to ensure immediate visual update
+        self.update()
+        self.repaint()
+        print(f"[OSK DEBUG] All buttons updated and repainted")
     
     def _setup_ui(self):
         """Setup keyboard UI"""

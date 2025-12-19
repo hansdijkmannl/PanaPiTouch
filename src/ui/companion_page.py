@@ -3,7 +3,7 @@ Bitfocus Companion Page
 
 Embedded web view for Bitfocus Companion configuration with update detection.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QFrame
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QFrame, QLabel
 from PyQt6.QtCore import QUrl, QTimer, pyqtSignal, QProcess, Qt, QEvent
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEngineSettings, QWebEngineScript
@@ -61,32 +61,33 @@ class CompanionPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # Web view with touch support
-        self.web_view = TouchWebEngineView()
-        # Install OSK bridge script (runs in all frames) for reliable text injection.
-        # Must be installed BEFORE navigation starts so it injects on initial load.
-        self._install_osk_bridge_script()
-        self.web_view.setUrl(QUrl(self.companion_url))
-        
-        # Set zoom factor to 75% (0.75) to scale down the display
-        self.web_view.setZoomFactor(0.75)
-        
-        # Configure settings
-        settings = self.web_view.settings()
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
-        # Enable touch scrolling and touch features
-        settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
-        # Enable smooth scrolling
-        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
-        
-        # Connect signals
-        self.web_view.loadFinished.connect(self._on_load_finished)
-        
-        layout.addWidget(self.web_view, 1)
+
+        # Placeholder widget - web view will be created lazily
+        self.placeholder = QWidget()
+        self.placeholder.setStyleSheet(f"""
+            QWidget {{
+                background-color: {self.parent().settings.theme.surface if hasattr(self.parent(), 'settings') else '#1a1a24'};
+                border: 1px solid {self.parent().settings.theme.border if hasattr(self.parent(), 'settings') else '#2a2a38'};
+                border-radius: 8px;
+            }}
+        """)
+
+        # Add loading text
+        placeholder_layout = QVBoxLayout(self.placeholder)
+        loading_label = QLabel("Loading Companion...")
+        loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        loading_label.setStyleSheet(f"""
+            QLabel {{
+                color: {self.parent().settings.theme.text if hasattr(self.parent(), 'settings') else '#ffffff'};
+                font-size: 16px;
+                font-weight: 600;
+            }}
+        """)
+        placeholder_layout.addWidget(loading_label)
+        layout.addWidget(self.placeholder)
+
+        # Web view will be created lazily when page becomes visible
+        self.web_view = None
 
         # Reserved slot for docked OSK (MainWindow will reparent OSK into here on Companion page)
         self.osk_slot = QFrame()
@@ -96,8 +97,72 @@ class CompanionPage(QWidget):
         self.osk_slot.setFixedHeight(430)
         layout.addWidget(self.osk_slot, 0)
 
+    def _create_web_view(self):
+        """Create web view lazily when page becomes visible"""
+        if self.web_view is not None:
+            return  # Already created
+
+        try:
+            # Remove placeholder
+            if hasattr(self, 'placeholder') and self.placeholder is not None:
+                self.layout().removeWidget(self.placeholder)
+                self.placeholder.hide()
+
+            # Create web view
+            self.web_view = TouchWebEngineView()
+
+            # Install OSK bridge script (runs in all frames) for reliable text injection.
+            # Must be installed BEFORE navigation starts so it injects on initial load.
+            self._install_osk_bridge_script()
+            self.web_view.setUrl(QUrl(self.companion_url))
+
+            # Set zoom factor to 75% (0.75) to scale down the display
+            self.web_view.setZoomFactor(0.75)
+
+            # Configure settings
+            settings = self.web_view.settings()
+            settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
+            settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
+
+            # Connect signals
+            self.web_view.loadFinished.connect(self._on_load_finished)
+
+            # Add to layout
+            self.layout().addWidget(self.web_view, 1)
+
+            # Ensure the web view is visible
+            self.web_view.show()
+            self.update()  # Force a repaint
+
+            # Start update detection now that web view is ready
+            self._start_update_detection()
+
+        except Exception as e:
+            print(f"Error creating web view: {e}")
+            import traceback
+            traceback.print_exc()
+
+            # Fallback: show error message
+            error_label = QLabel(f"Failed to load Companion web interface.\nError: {e}\nURL: {self.companion_url}")
+            error_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            error_label.setStyleSheet("QLabel { color: red; font-size: 14px; }")
+            self.layout().addWidget(error_label, 1)
+
+    def showEvent(self, event):
+        """Handle page becoming visible"""
+        super().showEvent(event)
+        # Create web view lazily when page becomes visible
+        self._create_web_view()
+
     def _install_osk_bridge_script(self):
         """Install a JS bridge that receives OSK keystrokes via postMessage."""
+        if self.web_view is None:
+            return  # Web view not created yet
+
         try:
             page = self.web_view.page()
             scripts = page.scripts()
@@ -324,12 +389,17 @@ class CompanionPage(QWidget):
     
     def _start_update_detection(self):
         """Start periodic check for update notifications in the page"""
+        if hasattr(self, '_update_check_timer') and self._update_check_timer is not None:
+            return  # Already started
+
         self._update_check_timer = QTimer(self)
         self._update_check_timer.timeout.connect(self._check_for_updates)
         self._update_check_timer.start(5000)  # Check every 5 seconds
     
     def _check_for_updates(self):
         """Inject JavaScript to detect update notification in the page"""
+        if self.web_view is None:
+            return  # Web view not created yet
         # JavaScript to find update notification text
         js_code = """
         (function() {
@@ -594,6 +664,8 @@ exit 1
     
     def _inject_touch_support(self):
         """Inject JavaScript for touch/mouse drag scrolling support"""
+        if self.web_view is None:
+            return  # Web view not created yet
         js_code = """
         (function() {
             function setupScrolling(win) {

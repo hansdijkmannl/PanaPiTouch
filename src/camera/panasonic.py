@@ -2,7 +2,7 @@
 Panasonic PTZ Camera Implementation
 
 Implements the Camera interface for Panasonic PTZ cameras.
-Handles camera control via HTTP/CGI API.
+Handles camera control via HTTP/CGI API with optional Companion integration.
 """
 import requests
 import numpy as np
@@ -12,6 +12,7 @@ import yaml
 
 from .base import Camera
 from .stream import CameraStream, StreamConfig
+from ..companion import CompanionAPI, CompanionControlMode, HybridCameraControl
 
 
 class PanasonicCamera(Camera):
@@ -23,12 +24,13 @@ class PanasonicCamera(Camera):
     - /cgi-bin/aw_ptz?cmd=... (PTZ control)
     """
     
-    def __init__(self, camera_id: int, name: str, ip_address: str, 
+    def __init__(self, camera_id: int, name: str, ip_address: str,
                  port: int = 80, username: str = "admin", password: str = "admin",
-                 model: str = "UE150"):
+                 model: str = "UE150", companion_api: Optional[CompanionAPI] = None,
+                 companion_control_mode: str = "hybrid", companion_page: int = 1):
         """
-        Initialize Panasonic camera.
-        
+        Initialize Panasonic camera with optional Companion integration.
+
         Args:
             camera_id: Unique camera identifier
             name: Camera name/label
@@ -37,13 +39,16 @@ class PanasonicCamera(Camera):
             username: HTTP auth username
             password: HTTP auth password
             model: Camera model (UE150, HE40, etc.) - used for command mapping
+            companion_api: Optional CompanionAPI instance for Stream Deck integration
+            companion_control_mode: "direct", "companion", or "hybrid" (default: "hybrid")
+            companion_page: Companion page number for this camera's controls
         """
         super().__init__(camera_id, name, ip_address)
         self.port = port
         self.username = username
         self.password = password
         self.model = model
-        
+
         # Stream handler
         stream_config = StreamConfig(
             ip_address=ip_address,
@@ -52,14 +57,36 @@ class PanasonicCamera(Camera):
             password=password
         )
         self._stream = CameraStream(stream_config)
-        
+
         # Load command mappings from YAML
         self._command_map: Dict[str, Any] = {}
         self._load_command_map()
-        
+
         # State tracking
         self._streaming = False
         self._current_fps = 0.0
+
+        # Companion integration (optional)
+        self.companion_api = companion_api
+        self.companion_page = companion_page
+
+        # Setup hybrid control if Companion is provided
+        if self.companion_api:
+            mode_map = {
+                "direct": CompanionControlMode.DIRECT,
+                "companion": CompanionControlMode.COMPANION,
+                "hybrid": CompanionControlMode.HYBRID
+            }
+            mode = mode_map.get(companion_control_mode.lower(), CompanionControlMode.HYBRID)
+
+            self.hybrid_control = HybridCameraControl(
+                camera_http_sender=self._send_command_direct,
+                companion_api=self.companion_api,
+                mode=mode,
+                companion_page=self.companion_page
+            )
+        else:
+            self.hybrid_control = None
     
     def _load_command_map(self):
         """Load camera command mappings from YAML file"""
@@ -97,14 +124,14 @@ class PanasonicCamera(Camera):
             }
         }
     
-    def _send_command(self, command: str, endpoint: str = "aw_cam") -> bool:
+    def _send_command_direct(self, command: str, endpoint: str = "aw_cam") -> bool:
         """
-        Send HTTP command to camera.
-        
+        Send HTTP command directly to camera (no Companion).
+
         Args:
             command: Command string (e.g., "OSD:48:0" or "R01")
             endpoint: CGI endpoint ("aw_cam" or "aw_ptz")
-            
+
         Returns:
             True if command sent successfully
         """
@@ -115,6 +142,26 @@ class PanasonicCamera(Camera):
         except Exception as e:
             print(f"Camera command error: {e}")
             return False
+
+    def _send_command(self, command: str, endpoint: str = "aw_cam", action: Optional[str] = None) -> bool:
+        """
+        Send HTTP command to camera with optional Companion integration.
+
+        Args:
+            command: Command string (e.g., "OSD:48:0" or "R01")
+            endpoint: CGI endpoint ("aw_cam" or "aw_ptz")
+            action: Optional action name for Companion button mapping
+
+        Returns:
+            True if command sent successfully
+        """
+        # If hybrid control is available and action is provided, use it
+        if self.hybrid_control and action:
+            success, method = self.hybrid_control.execute_action(action, command)
+            return success
+
+        # Otherwise, use direct control
+        return self._send_command_direct(command, endpoint)
     
     def start_stream(self) -> bool:
         """Start video stream"""
@@ -202,22 +249,23 @@ class PanasonicCamera(Camera):
     
     def recall_preset(self, preset_number: int) -> bool:
         """
-        Recall PTZ preset.
-        
+        Recall PTZ preset with optional Companion integration.
+
         Args:
             preset_number: Preset number (1-100)
-            
+
         Returns:
             True if command sent successfully
         """
         if 'ptz' not in self._command_map:
             return False
-        
+
         ptz_map = self._command_map.get('ptz', {})
         preset_cmd = ptz_map.get('preset_recall', {}).get('command', 'R{data:02d}')
-        
+
         cmd = preset_cmd.format(data=preset_number)
-        return self._send_command(cmd, endpoint="aw_ptz")
+        action = f"preset_{preset_number}"  # Action name for Companion button mapping
+        return self._send_command(cmd, endpoint="aw_ptz", action=action)
     
     def save_preset(self, preset_number: int) -> bool:
         """
