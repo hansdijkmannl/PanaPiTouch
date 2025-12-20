@@ -56,6 +56,21 @@ class DiscoveryWorker(QThread):
         self.progress.emit(message)
 
 
+class ClickableHeader(QFrame):
+    """Clickable header frame that emits a signal when clicked"""
+    clicked = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def mouseReleaseEvent(self, event):
+        """Emit clicked signal on mouse release"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+
 class DiscoveredCameraCard(QFrame):
     """Enhanced card widget for discovered cameras with status, identify, and preview"""
     
@@ -290,10 +305,10 @@ class DiscoveredCameraCard(QFrame):
 
 class CameraListItem(QFrame):
     """Enhanced camera list item with status indicators and actions"""
-    
+
     edit_clicked = pyqtSignal(int)
     selection_changed = pyqtSignal(int, bool)  # camera_id, selected
-    
+
     def __init__(self, camera: CameraConfig, atem_input: int, compact: bool = False, parent=None):
         super().__init__(parent)
         self.camera = camera
@@ -314,7 +329,7 @@ class CameraListItem(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 12, 20, 12)  # Add right margin to avoid scroll bar overlapping edit button
         layout.setSpacing(16)  # Increased spacing between elements
-        
+
         if not self.compact:
             # Checkbox for bulk selection
             self.checkbox = QCheckBox()
@@ -686,7 +701,6 @@ class CameraListItem(QFrame):
             }
         """)
 
-
     def _create_demo_thumbnail(self):
         """Create a demo thumbnail image"""
         self._update_thumbnail_image()
@@ -822,20 +836,28 @@ class CameraPage(QWidget):
         self._bottom_sheet_height = 460
         self._bottom_sheet_anim = None
         
+        # Initialize configured badge (stubbed - no longer using submenu)
+        self.configured_badge = None
+        self.configured_button = None
+
         self._setup_ui()
         self._load_settings()
         
-        # Initialize badge count
-        QTimer.singleShot(100, self._update_configured_badge)
-        
         # Thumbnail timer interval (start only when page is visible)
-        self._thumbnail_timer_interval = 120000
+        # Poll every 15 seconds for real-time status updates
+        self._thumbnail_timer_interval = 15000  # 15 seconds for responsive status updates
         self._thumbnails_active = False
     
     def showEvent(self, event):
-        """Start thumbnail streams when page becomes visible"""
+        """Start thumbnail streams and auto-discover cameras when page becomes visible"""
         super().showEvent(event)
         self._start_thumbnail_streams()
+
+        # Auto-run discovery in background on first show
+        if not hasattr(self, '_auto_discovery_run'):
+            self._auto_discovery_run = True
+            # Delay by 500ms to let UI render first
+            QTimer.singleShot(500, self._auto_discover_cameras)
     
     def hideEvent(self, event):
         """Stop thumbnail streams when page is hidden to save CPU"""
@@ -877,77 +899,10 @@ class CameraPage(QWidget):
             QTimer.singleShot(10, self._update_badge_position)
     
     def _setup_ui(self):
-        """Setup the camera page UI with top submenu + content"""
+        """Setup the camera page UI with both sections on same page"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
-        # Top horizontal submenu (under MainWindow top menu)
-        submenu = QFrame()
-        submenu.setFixedHeight(60)
-        submenu.setStyleSheet("""
-            QFrame {
-                background-color: #121218;
-                border-bottom: 1px solid #2a2a38;
-            }
-        """)
-        submenu_layout = QHBoxLayout(submenu)
-        submenu_layout.setContentsMargins(20, 0, 20, 0)
-        submenu_layout.setSpacing(0)
-
-        submenu_layout.addStretch()
-
-        buttons_container = QWidget()
-        buttons_container.setStyleSheet("background: transparent;")
-        buttons_layout = QHBoxLayout(buttons_container)
-        buttons_layout.setContentsMargins(0, 0, 0, 0)
-        buttons_layout.setSpacing(0)
-
-        self.sidebar_buttons = []
-        self.configured_badge = None
-        self.configured_button = None
-
-        self.submenu_button_group = QButtonGroup(self)
-        self.submenu_button_group.setExclusive(True)
-
-        sections = [("📋 Configured", 0), ("🌐 Discover", 1)]
-        for text, idx in sections:
-            btn = QPushButton(text)
-            btn.setCheckable(True)
-            btn.setFixedHeight(60)
-            btn.setMinimumWidth(170)
-            btn.setStyleSheet(self._get_sidebar_button_style())
-            btn.clicked.connect(lambda checked, i=idx: self._on_section_clicked(i))
-            self.submenu_button_group.addButton(btn, idx)
-            self.sidebar_buttons.append(btn)
-            buttons_layout.addWidget(btn)
-
-            if idx == 0:
-                self.configured_button = btn
-                # Badge inside the Configured button
-                badge = QLabel("0", btn)
-                badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                badge.setStyleSheet("""
-                    QLabel {
-                        background-color: #ef4444;
-                        color: #ffffff;
-                        border-radius: 10px;
-                        font-size: 11px;
-                        font-weight: 700;
-                        padding: 2px 6px;
-                        min-width: 20px;
-                    }
-                """)
-                badge.setFixedSize(24, 20)
-                badge.hide()
-                badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                self.configured_badge = badge
-                QTimer.singleShot(100, self._update_badge_position)
-
-        submenu_layout.addWidget(buttons_container)
-        submenu_layout.addStretch()
-
-        main_layout.addWidget(submenu)
 
         # Right side: content + bottom sheet + OSK slot (like Live bottom panel)
         right = QWidget()
@@ -958,14 +913,24 @@ class CameraPage(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        # Content stack
-        self.content_stack = QStackedWidget()
-        self.content_stack.setStyleSheet("background-color: #121218;")
-        self.content_stack.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
-        self.content_stack.setMinimumWidth(0)
-        self.content_stack.addWidget(self._create_configured_content())
-        self.content_stack.addWidget(self._create_easyip_tools_content())
-        right_layout.addWidget(self.content_stack, 1)
+        # Main scroll area containing both sections
+        main_scroll = TouchScrollArea()
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setStyleSheet("background-color: #121218;")
+        main_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
+        main_scroll.setMinimumWidth(0)
+
+        # Container for both sections
+        content_container = QWidget()
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Add both sections with their own scroll areas
+        content_layout.addWidget(self._create_combined_content())
+
+        main_scroll.setWidget(content_container)
+        right_layout.addWidget(main_scroll, 1)
 
         # Bottom sheet container (shared across tabs)
         self.bottom_sheet = QFrame()
@@ -1071,9 +1036,6 @@ class CameraPage(QWidget):
         right_layout.addWidget(self.osk_slot, 0)
 
         main_layout.addWidget(right, 1)
-        
-        # Default selection
-        self._on_section_clicked(0)
 
     def _get_sidebar_button_style(self):
         return """
@@ -1114,7 +1076,7 @@ class CameraPage(QWidget):
     
     def _update_configured_badge(self):
         """Update the badge count on Configured button"""
-        if self.configured_badge:
+        if getattr(self, 'configured_badge', None):
             count = len(self.settings.cameras)
             self.configured_badge.setText(str(count))
             if count > 0:
@@ -1125,26 +1087,292 @@ class CameraPage(QWidget):
             QTimer.singleShot(10, self._update_badge_position)
 
     def _on_section_clicked(self, index: int):
-        self.content_stack.setCurrentIndex(index)
-        for i, btn in enumerate(getattr(self, 'sidebar_buttons', [])):
-            btn.setChecked(i == index)
-        
-        # Close bottom sheet when switching sections (like Live)
-        self._close_bottom_sheet()
-        self._editing_camera_id = None
+        """Stub - no longer using section tabs"""
+        pass
+
+    def _create_combined_content(self) -> QWidget:
+        """Combined page with Discover section (collapsible) at top and Configured section below"""
+        wrapper = QWidget()
+        layout = QVBoxLayout(wrapper)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(24)
+
+        self.content_layout = layout  # Store layout for adjusting stretch factors
+        self._discovery_expanded = False  # Track collapse/expand state
+
+        # === DISCOVER SECTION (COLLAPSIBLE) ===
+        self.discover_section = QFrame()
+        self.discover_section.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a22;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        discover_layout = QVBoxLayout(self.discover_section)
+        discover_layout.setContentsMargins(0, 0, 0, 0)
+        discover_layout.setSpacing(0)
+
+        # Discover header with integrated search button
+        discover_header_frame = QFrame()
+        discover_header_frame.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+                border-bottom: 1px solid #2a2a38;
+            }
+        """)
+
+        discover_header_layout = QHBoxLayout(discover_header_frame)
+        discover_header_layout.setContentsMargins(20, 16, 20, 16)
+        discover_header_layout.setSpacing(12)
+
+        # Clickable label area (expands/collapses section)
+        discover_label_container = ClickableHeader()
+        discover_label_container.setStyleSheet("""
+            ClickableHeader {
+                background-color: transparent;
+                border: none;
+            }
+            ClickableHeader:hover {
+                background-color: rgba(255, 149, 0, 0.1);
+                border-radius: 6px;
+            }
+        """)
+        discover_label_container.clicked.connect(self._toggle_discovery_section)
+
+        label_layout = QHBoxLayout(discover_label_container)
+        label_layout.setContentsMargins(8, 4, 8, 4)
+        label_layout.setSpacing(8)
+
+        self.discover_header_label = QLabel("🌐 Discover Cameras")
+        self.discover_header_label.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                font-weight: 600;
+                color: #ffffff;
+                background-color: transparent;
+            }
+        """)
+        label_layout.addWidget(self.discover_header_label)
+
+        # Collapse/expand indicator
+        self.discover_collapse_indicator = QLabel("▼")
+        self.discover_collapse_indicator.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                color: #888898;
+                background-color: transparent;
+            }
+        """)
+        label_layout.addWidget(self.discover_collapse_indicator)
+
+        discover_header_layout.addWidget(discover_label_container)
+        discover_header_layout.addStretch()
+
+        # Search button (triggers discovery and expands section)
+        self.discover_search_btn = QPushButton("🔍 Search")
+        self.discover_search_btn.setFixedSize(100, 40)  # Match edit/delete button size
+        self.discover_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9500;
+                border: none;
+                border-radius: 6px;
+                color: #121218;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 0px;
+                margin: 0px;
+            }
+            QPushButton:hover {
+                background-color: #CC7700;
+            }
+            QPushButton:pressed {
+                background-color: #AA6600;
+            }
+            QPushButton:disabled {
+                background-color: #2a2a38;
+                color: #888898;
+            }
+        """)
+        self.discover_search_btn.clicked.connect(self._easyip_discover_cameras)
+        discover_header_layout.addWidget(self.discover_search_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+
+        discover_layout.addWidget(discover_header_frame)
+
+        # Discover content area (collapsible)
+        self.discover_content_widget = self._create_discover_inline_content()
+        self.discover_content_widget.setVisible(False)  # Start collapsed
+        discover_layout.addWidget(self.discover_content_widget)
+
+        layout.addWidget(self.discover_section)
+
+        # === CONFIGURED CAMERAS SECTION (ALWAYS VISIBLE) ===
+        self.configured_section = QFrame()
+        self.configured_section.setStyleSheet("""
+            QFrame {
+                background-color: #1a1a22;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
+            }
+        """)
+        configured_layout = QVBoxLayout(self.configured_section)
+        configured_layout.setContentsMargins(0, 0, 0, 0)
+        configured_layout.setSpacing(0)
+
+        # Configured header
+        self.configured_section_header = QLabel("📋 Configured Cameras (0/30)")
+        self.configured_section_header.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                font-weight: 600;
+                color: #ffffff;
+                padding: 16px 20px;
+                background-color: transparent;
+                border-bottom: 1px solid #2a2a38;
+            }
+        """)
+        configured_layout.addWidget(self.configured_section_header)
+
+        # Configured cameras scroll area (inline)
+        configured_scroll = TouchScrollArea()
+        configured_scroll.setWidgetResizable(True)
+        configured_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        configured_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
+        configured_content = QWidget()
+        configured_content_layout = QVBoxLayout(configured_content)
+        configured_content_layout.setContentsMargins(0, 12, 0, 12)
+        configured_content_layout.setSpacing(12)
+
+        panel = self._create_camera_list_panel(compact=True, use_scroll=False)
+        configured_content_layout.addWidget(panel)
+
+        configured_scroll.setWidget(configured_content)
+        configured_layout.addWidget(configured_scroll)
+
+        layout.addWidget(self.configured_section, 1)  # Give configured section stretch priority
+
+        return wrapper
+
+    def _toggle_discovery_section(self):
+        """Toggle expand/collapse of discovery section"""
+        if not hasattr(self, '_discovery_expanded'):
+            self._discovery_expanded = False
+
+        self._discovery_expanded = not self._discovery_expanded
+
+        # Update visibility
+        if hasattr(self, 'discover_content_widget'):
+            self.discover_content_widget.setVisible(self._discovery_expanded)
+
+        # Update indicator arrow
+        if hasattr(self, 'discover_collapse_indicator'):
+            if self._discovery_expanded:
+                self.discover_collapse_indicator.setText("▲")
+            else:
+                self.discover_collapse_indicator.setText("▼")
+
+    def _hide_discover_results(self):
+        """Hide discover results and reset layout"""
+        if hasattr(self, 'discover_results_scroll'):
+            self.discover_results_scroll.setVisible(False)
+
+        if hasattr(self, 'easyip_hide_btn'):
+            self.easyip_hide_btn.setVisible(False)
+
+        # Reset layout stretch to favor configured section (1 vs 0)
+        if hasattr(self, 'content_layout') and hasattr(self, 'discover_section') and hasattr(self, 'configured_section'):
+            self.content_layout.setStretchFactor(self.configured_section, 1)
+            self.content_layout.setStretchFactor(self.discover_section, 0)
+
+    def _create_discover_inline_content(self) -> QWidget:
+        """Discover content with inline scrolling (no search button - moved to header)"""
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(20, 16, 20, 16)
+        wrapper_layout.setSpacing(12)
+
+        # Status label
+        self.easyip_status_label = QLabel("Ready to search for cameras")
+        self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+        wrapper_layout.addWidget(self.easyip_status_label)
+
+        # Progress bar
+        self.easyip_progress = QProgressBar()
+        self.easyip_progress.setRange(0, 100)
+        self.easyip_progress.setValue(0)
+        self.easyip_progress.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #2a2a38;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #242430;
+                height: 24px;
+            }
+            QProgressBar::chunk {
+                background-color: #FF9500;
+                border-radius: 3px;
+            }
+        """)
+        self.easyip_progress.hide()
+        wrapper_layout.addWidget(self.easyip_progress)
+
+        # Camera list scroll area (initially hidden)
+        self.discover_results_scroll = TouchScrollArea()
+        self.discover_results_scroll.setWidgetResizable(True)
+        self.discover_results_scroll.setVisible(False)  # Hidden until search
+        self.discover_results_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.discover_results_scroll.setStyleSheet("""
+            QScrollArea {
+                background-color: #242430;
+                border: 1px solid #2a2a38;
+                border-radius: 8px;
+            }
+        """)
+
+        # Container for camera cards
+        self.easyip_camera_container = QWidget()
+        self.easyip_camera_layout = QVBoxLayout(self.easyip_camera_container)
+        self.easyip_camera_layout.setSpacing(12)
+        self.easyip_camera_layout.setContentsMargins(12, 12, 12, 12)
+        self.easyip_camera_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        # Empty state
+        self.easyip_empty_label = QLabel("No cameras discovered yet.\nClick 'Search' to find Panasonic cameras.")
+        self.easyip_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.easyip_empty_label.setStyleSheet("color: #666676; font-size: 14px; padding: 40px;")
+        self.easyip_empty_label.setWordWrap(True)
+        self.easyip_camera_layout.addWidget(self.easyip_empty_label)
+
+        self.discover_results_scroll.setWidget(self.easyip_camera_container)
+        wrapper_layout.addWidget(self.discover_results_scroll)
+
+        # Initialize EasyIP discovery state
+        self._easyip_discovered_cameras = []
+        self._easyip_camera_cards = {}
+        self._easyip_discovery_worker = None
+
+        return wrapper
 
     def _create_configured_content(self) -> QWidget:
-        """Configured cameras list (edit opens bottom sheet)"""
+        """Configured cameras list (edit opens bottom sheet) - OLD METHOD NO LONGER USED"""
         wrapper = QWidget()
         layout = QVBoxLayout(wrapper)
         # Make configured list panel app-wide (no extra outer left/right inset).
         # The panel itself already has its own internal padding.
         layout.setContentsMargins(0, 20, 0, 20)
         layout.setSpacing(12)
-        
-        panel = self._create_camera_list_panel(compact=True)
+
+        # Note: use_scroll=True is the default (this method is legacy)
+        panel = self._create_camera_list_panel(compact=True, use_scroll=True)
         layout.addWidget(panel, 1)
-        
+
         return wrapper
 
     def _open_bottom_sheet(self, title: str, panel_index: int = 0):
@@ -1267,28 +1495,7 @@ class CameraPage(QWidget):
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(12)
         controls_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
-        
-        # Search input
-        self.easyip_search_input = QLineEdit()
-        self.easyip_search_input.setPlaceholderText("Search cameras...")
-        self.easyip_search_input.setFixedHeight(44)
-        self.easyip_search_input.setStyleSheet("""
-            QLineEdit {
-                background-color: #242430;
-                border: 2px solid #2a2a38;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 14px;
-                color: #FFFFFF;
-                margin: 0px;
-            }
-            QLineEdit:focus {
-                border-color: #FF9500;
-            }
-        """)
-        self.easyip_search_input.textChanged.connect(self._filter_easyip_cameras)
-        controls_layout.addWidget(self.easyip_search_input, alignment=Qt.AlignmentFlag.AlignTop)
-        
+
         # Refresh button
         self.easyip_refresh_btn = QPushButton("🔍 Search")
         self.easyip_refresh_btn.setFixedHeight(44)
@@ -1399,25 +1606,68 @@ class CameraPage(QWidget):
         
         return wrapper
     
-    def _easyip_discover_cameras(self):
-        """Discover cameras for Discover page"""
+    def _auto_discover_cameras(self):
+        """Auto-run discovery in background on page open (silent, doesn't expand section)"""
         if self._easyip_discovery_worker and self._easyip_discovery_worker.isRunning():
             return
-        
+
+        # Run discovery silently - don't clear results or update UI aggressively
+        # Just start the worker and let results populate in background
+
+        # Get network adapter IP if available
+        adapter_ip = None
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            adapter_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            pass
+
+        # Start discovery worker
+        self._easyip_discovery_worker = DiscoveryWorker(adapter_ip=adapter_ip)
+        self._easyip_discovery_worker.camera_found.connect(self._on_easyip_camera_discovered)
+        self._easyip_discovery_worker.progress.connect(self._on_easyip_discovery_progress)
+        self._easyip_discovery_worker.finished_signal.connect(self._on_easyip_discovery_finished)
+        self._easyip_discovery_worker.start()
+
+    def _easyip_discover_cameras(self):
+        """Discover cameras for Discover page (user-initiated, expands section)"""
+        if self._easyip_discovery_worker and self._easyip_discovery_worker.isRunning():
+            return
+
+        # Expand discovery section when user clicks search
+        if hasattr(self, '_discovery_expanded') and not self._discovery_expanded:
+            self._toggle_discovery_section()
+
+        # Show results area
+        if hasattr(self, 'discover_results_scroll'):
+            self.discover_results_scroll.setVisible(True)
+            # When showing results, allow Discover section to expand to share space (50/50)
+            if hasattr(self, 'content_layout') and hasattr(self, 'discover_section') and hasattr(self, 'configured_section'):
+                self.content_layout.setStretchFactor(self.configured_section, 1)
+                self.content_layout.setStretchFactor(self.discover_section, 1)
+
+        # Show hide button
+        if hasattr(self, 'easyip_hide_btn'):
+            self.easyip_hide_btn.setVisible(True)
+
         # Clear UI
         for card in list(self._easyip_camera_cards.values()):
             card.deleteLater()
         self._easyip_camera_cards.clear()
         self._easyip_discovered_cameras = []
-        
+
         # Show empty state
         self.easyip_empty_label.show()
         self.easyip_empty_label.setText("🔍 Searching network for Panasonic cameras...")
         self.easyip_empty_label.setStyleSheet("color: #FF9500; font-size: 14px; padding: 40px;")
-        
-        # Update UI
-        self.easyip_refresh_btn.setEnabled(False)
-        self.easyip_refresh_btn.setText("⏳ Scanning...")
+
+        # Update UI (header search button)
+        if hasattr(self, 'discover_search_btn'):
+            self.discover_search_btn.setEnabled(False)
+            self.discover_search_btn.setText("⏳ Scanning...")
         self.easyip_status_label.setText("🔍 Searching network for Panasonic cameras...")
         self.easyip_status_label.setStyleSheet("color: #FF9500; font-size: 12px; padding: 4px;")
         self.easyip_progress.show()
@@ -1480,8 +1730,10 @@ class CameraPage(QWidget):
     @pyqtSlot(int)
     def _on_easyip_discovery_finished(self, count: int):
         """Handle EasyIP discovery completion"""
-        self.easyip_refresh_btn.setEnabled(True)
-        self.easyip_refresh_btn.setText("🔍 Search Network")
+        # Re-enable header search button
+        if hasattr(self, 'discover_search_btn'):
+            self.discover_search_btn.setEnabled(True)
+            self.discover_search_btn.setText("🔍 Search")
         self.easyip_progress.setValue(100)
         QTimer.singleShot(1000, lambda: self.easyip_progress.hide())
         
@@ -1631,41 +1883,7 @@ class CameraPage(QWidget):
         else:
             self.easyip_status_label.setText("Ready to search for cameras")
             self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
-    
-    def _filter_easyip_cameras(self, search_text: str):
-        """Filter EasyIP camera list by search text"""
-        search_lower = search_text.lower()
-        visible_count = 0
-        
-        for ip, card in self._easyip_camera_cards.items():
-            camera = None
-            for cam in self._easyip_discovered_cameras:
-                if cam.ip_address == ip:
-                    camera = cam
-                    break
-            
-            if not camera:
-                continue
-            
-            # Check if matches search
-            matches = (
-                search_lower in camera.ip_address.lower() or
-                search_lower in (camera.name or "").lower() or
-                search_lower in (camera.model or "").lower() or
-                search_lower in (camera.mac_address or "").lower()
-            )
-            
-            card.setVisible(matches)
-            if matches:
-                visible_count += 1
-        
-        # Show/hide empty state
-        if visible_count == 0 and search_text:
-            self.easyip_empty_label.setText(f"No cameras match '{search_text}'")
-            self.easyip_empty_label.show()
-        else:
-            self.easyip_empty_label.hide()
-    
+
     def _create_edit_form_panel(self) -> QWidget:
         """Create edit form panel for bottom sheet (2-column layout)."""
         panel = QFrame()
@@ -1961,11 +2179,12 @@ class CameraPage(QWidget):
         finally:
             self._set_inline_save_in_progress(False)
     
-    def _create_camera_list_panel(self, compact: bool = False) -> QWidget:
+    def _create_camera_list_panel(self, compact: bool = False, use_scroll: bool = True) -> QWidget:
         """Create camera list panel with search and bulk operations.
-        
+
         Args:
             compact: when True, show a simple edit column header (configured page).
+            use_scroll: when True, create internal scroll area. When False, expects parent to handle scrolling.
         """
         panel = QFrame()
         panel.setStyleSheet("""
@@ -1983,42 +2202,8 @@ class CameraPage(QWidget):
         # Store compact flag for use when creating items
         self._list_compact = compact
         
-        # Header with count and progress
-        header_layout = QHBoxLayout()
+        # Header removed as per new design
         
-        self.camera_list_header = QLabel("Configured Cameras (0/30)")
-        self.camera_list_header.setStyleSheet("font-size: 18px; font-weight: 600; border: none;")
-        header_layout.addWidget(self.camera_list_header)
-        
-        header_layout.addStretch()
-        
-        # Progress bar for camera count
-        self.camera_count_progress = QProgressBar()
-        self.camera_count_progress.setRange(0, 30)
-        self.camera_count_progress.setValue(0)
-        self.camera_count_progress.setFixedWidth(120)
-        self.camera_count_progress.setFormat("%v/30")
-        self.camera_count_progress.setFixedHeight(24)
-        self.camera_count_progress.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #2a2a38;
-                border-radius: 4px;
-                text-align: center;
-                background-color: #242430;
-                height: 24px;
-                font-size: 12px;
-            }
-            QProgressBar::chunk {
-                background-color: #FF9500;
-                border-radius: 3px;
-            }
-        """)
-        header_layout.addWidget(self.camera_count_progress)
-        
-        header_layout.addStretch()
-        
-        layout.addLayout(header_layout)
-
         # Removed "Configured Camera" and "Edit" subtitles
         
         # Bulk operations bar - match camera row width
@@ -2094,41 +2279,33 @@ class CameraPage(QWidget):
         
         # Add spacing between bulk operations and camera list
         layout.addSpacing(20)
-        
-        # Frame for camera list with scroll bar on outside
-        camera_list_frame = QFrame()
-        camera_list_frame.setStyleSheet("""
-            QFrame {
-                background-color: transparent;
-                border: none;
-            }
-        """)
-        camera_list_frame_layout = QVBoxLayout(camera_list_frame)
-        camera_list_frame_layout.setContentsMargins(0, 0, 0, 0)
-        camera_list_frame_layout.setSpacing(0)
-        
-        # Scroll area for camera list with touch scrolling
-        self.camera_scroll = TouchScrollArea()
-        self.camera_scroll.setWidgetResizable(True)
-        self.camera_scroll.setStyleSheet("""
-            QScrollArea {
-                border: none;
-                background-color: transparent;
-            }
-        """)
-        
-        # Camera list widget inside frame
+
+        # Camera list widget
         self.camera_list_widget = QWidget()
         self.camera_list_widget.setStyleSheet("background-color: transparent;")
         self.camera_list_layout = QVBoxLayout(self.camera_list_widget)
         self.camera_list_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.camera_list_layout.setSpacing(10)
         self.camera_list_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.camera_scroll.setWidget(self.camera_list_widget)
-        camera_list_frame_layout.addWidget(self.camera_scroll)
-        
-        layout.addWidget(camera_list_frame)
+
+        if use_scroll:
+            # Create scroll area for camera list
+            self.camera_scroll = TouchScrollArea()
+            self.camera_scroll.setWidgetResizable(True)
+            self.camera_scroll.setStyleSheet("""
+                QScrollArea {
+                    border: none;
+                    background-color: transparent;
+                }
+            """)
+            self.camera_scroll.setWidget(self.camera_list_widget)
+            layout.addWidget(self.camera_scroll)
+        else:
+            # No internal scroll area - parent provides scrolling
+            # Add camera list widget directly to panel layout
+            layout.addWidget(self.camera_list_widget)
+            # Create dummy camera_scroll attribute to prevent AttributeError
+            self.camera_scroll = None
         
         # Empty state message
         self.empty_state_label = QLabel("No cameras configured.\nAdd cameras using discovery or manual entry.")
@@ -2173,8 +2350,8 @@ class CameraPage(QWidget):
         
         # Update count and progress
         total = len(self.settings.cameras)
-        self.camera_list_header.setText(f"Configured Cameras ({total}/30)")
-        self.camera_count_progress.setValue(total)
+        if hasattr(self, 'configured_section_header'):
+            self.configured_section_header.setText(f"📋 Configured Cameras ({total}/30)")
         
         # Update badge on Configured button
         self._update_configured_badge()
@@ -2289,10 +2466,8 @@ class CameraPage(QWidget):
             return
         
         self._editing_camera_id = camera_id
-        
-        # Switch to Configured page if not already there
-        if self.content_stack.currentIndex() != 0:
-            self._on_section_clicked(0)
+
+        # No need to switch tabs - both sections on same page now
         
         # Populate edit form
         if hasattr(self, 'edit_form_panel'):

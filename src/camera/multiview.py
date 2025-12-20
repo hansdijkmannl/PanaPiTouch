@@ -36,6 +36,9 @@ class MultiviewStream:
         self._thread: Optional[threading.Thread] = None
         self._connected = False
         self._last_frame_time = 0
+        # Exponential backoff for failed connections
+        self._connection_failures = 0
+        self._max_backoff = 30  # Maximum 30 seconds
     
     @property
     def frame(self) -> Optional[np.ndarray]:
@@ -52,72 +55,116 @@ class MultiviewStream:
         w, h = self.resolution
         # Panasonic MJPEG URL with resolution parameter
         return f"http://{self.camera.ip_address}/cgi-bin/mjpeg?resolution={w}x{h}"
+
+    def _calculate_backoff_delay(self) -> float:
+        """Calculate exponential backoff delay"""
+        if self._connection_failures == 0:
+            return 0
+        # Exponential: 2, 4, 8, 16, 30, 30...
+        return min(2 ** self._connection_failures, self._max_backoff)
+
+    def _wait_with_backoff(self):
+        """Wait with exponential backoff, checking _running to allow early exit"""
+        delay = self._calculate_backoff_delay()
+        if delay == 0:
+            return
+        end_time = time.time() + delay
+        while self._running and time.time() < end_time:
+            time.sleep(0.5)
     
     def _capture_loop(self):
         """Capture frames in background thread"""
         stream_url = self.get_stream_url()
         auth = (self.camera.username, self.camera.password)
-        
+
         while self._running:
+            # Wait with exponential backoff before retry
+            self._wait_with_backoff()
+            if not self._running:
+                break
+
             try:
-                # Try to open stream
+                # Try to open stream with timeout
                 cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000)
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)
+
                 if not cap.isOpened():
+                    self._connected = False
+                    self._connection_failures += 1
+                    cap.release()
                     # Fallback: try snapshot mode
                     self._capture_snapshot_loop(auth)
                     continue
-                
+
+                # Successfully connected
                 self._connected = True
-                
+                self._connection_failures = 0
+
                 while self._running:
                     ret, frame = cap.read()
                     if not ret:
                         self._connected = False
+                        self._connection_failures += 1
                         break
-                    
+
                     # Resize if needed
                     if frame.shape[:2] != (self.resolution[1], self.resolution[0]):
                         frame = cv2.resize(frame, self.resolution, interpolation=cv2.INTER_LINEAR)
-                    
+
                     with self._frame_lock:
                         self._current_frame = frame
                     self._last_frame_time = time.time()
-                
+
                 cap.release()
-                
+
             except Exception as e:
                 self._connected = False
+                self._connection_failures += 1
                 print(f"Multiview stream error ({self.camera.name}): {e}")
-                time.sleep(1)
     
     def _capture_snapshot_loop(self, auth):
         """Fallback to snapshot capture"""
         w, h = self.resolution
         snapshot_url = f"http://{self.camera.ip_address}/cgi-bin/camera?resolution={w}x{h}"
-        
+
+        # Snapshot mode often means camera is unreachable - use longer backoff
+        consecutive_failures = 0
+
         while self._running:
             try:
                 response = requests.get(snapshot_url, auth=auth, timeout=2)
                 if response.status_code == 200:
                     self._connected = True
+                    self._connection_failures = 0  # Reset on success
+                    consecutive_failures = 0
                     img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
                     frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-                    
+
                     if frame is not None:
                         if frame.shape[:2] != (h, w):
                             frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_LINEAR)
-                        
+
                         with self._frame_lock:
                             self._current_frame = frame
                         self._last_frame_time = time.time()
+                    time.sleep(0.05)  # 20fps for snapshots
                 else:
                     self._connected = False
+                    consecutive_failures += 1
+                    if consecutive_failures > 3:
+                        # After 3 snapshot failures, use exponential backoff
+                        self._connection_failures += 1
+                        return  # Exit snapshot loop to retry main stream
+                    time.sleep(0.2)
             except Exception:
                 self._connected = False
-            
-            time.sleep(0.05)  # 20fps for snapshots
+                consecutive_failures += 1
+                if consecutive_failures > 3:
+                    self._connection_failures += 1
+                    return
+                time.sleep(0.2)
     
     def start(self):
         """Start streaming"""

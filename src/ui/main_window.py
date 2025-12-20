@@ -1761,8 +1761,8 @@ class MainWindow(QMainWindow):
                 if camera:
                     configured_cameras.append({
                         'camera': camera,
-                        'layout': config.get('layout', '4×3 (12 presets)'),
-                        'preset_count': config.get('preset_count', 12)
+                        'layout': config.get('layout', '1×8 (8 presets)'),
+                        'preset_count': config.get('preset_count', 8)
                     })
 
         if not configured_cameras:
@@ -1792,80 +1792,8 @@ class MainWindow(QMainWindow):
             layout.addStretch()
 
         else:
-            # Separate cameras by layout type
-            grid_cameras = []  # 4×3 and 4×2 go in 2-column grid
-            row_cameras = []   # 1×8 go in full-width rows
-            
+            # Create full-width rows for 1×8 cameras (only layout option)
             for cam_config in configured_cameras:
-                if "1×8" in cam_config['layout']:
-                    row_cameras.append(cam_config)
-                else:
-                    grid_cameras.append(cam_config)
-
-            # Create 2-column grid for 4×3 and 4×2 cameras
-            if grid_cameras:
-                cameras_grid = QGridLayout()
-                cameras_grid.setSpacing(8)
-                cameras_grid.setVerticalSpacing(8)
-
-                for i, cam_config in enumerate(grid_cameras):
-                    camera = cam_config['camera']
-                    layout_type = cam_config['layout']
-                    preset_count = cam_config['preset_count']
-
-                    row = i // 2
-                    col = i % 2
-
-                    # Camera module container
-                    camera_frame = QFrame()
-                    camera_frame.setStyleSheet(f"""
-                        QFrame {{
-                            background-color: {COLORS['surface']};
-                            border: 1px solid {COLORS['border']};
-                            border-radius: 8px;
-                        }}
-                    """)
-                    camera_layout_inner = QVBoxLayout(camera_frame)
-                    camera_layout_inner.setContentsMargins(8, 6, 8, 8)
-                    camera_layout_inner.setSpacing(6)
-
-                    # Simple camera title
-                    camera_label = QLabel(camera.name)
-                    camera_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-                    camera_label.setStyleSheet(f"""
-                        QLabel {{
-                            color: {COLORS['text_dim']};
-                            font-size: 11px;
-                            font-weight: 500;
-                            padding: 0px;
-                        }}
-                    """)
-                    camera_layout_inner.addWidget(camera_label)
-
-                    # Preset grid
-                    preset_grid = QGridLayout()
-                    preset_grid.setSpacing(6)
-
-                    if "4×3" in layout_type:
-                        grid_cols = 4
-                    elif "4×2" in layout_type:
-                        grid_cols = 4
-                    else:
-                        grid_cols = 4
-
-                    for preset_num in range(1, preset_count + 1):
-                        p_row = (preset_num - 1) // grid_cols
-                        p_col = (preset_num - 1) % grid_cols
-                        preset_btn = self._create_multi_camera_preset_button(preset_num, camera.id, camera.name)
-                        preset_grid.addWidget(preset_btn, p_row, p_col)
-
-                    camera_layout_inner.addLayout(preset_grid)
-                    cameras_grid.addWidget(camera_frame, row, col)
-
-                layout.addLayout(cameras_grid)
-
-            # Create full-width rows for 1×8 cameras
-            for cam_config in row_cameras:
                 camera = cam_config['camera']
                 preset_count = cam_config['preset_count']
 
@@ -1882,28 +1810,30 @@ class MainWindow(QMainWindow):
                 camera_layout_inner.setContentsMargins(8, 6, 8, 8)
                 camera_layout_inner.setSpacing(6)
 
-                # Simple camera title
+                # Simple camera title - centered and larger
                 camera_label = QLabel(camera.name)
-                camera_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
+                camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 camera_label.setStyleSheet(f"""
                     QLabel {{
-                        color: {COLORS['text_dim']};
-                        font-size: 11px;
-                        font-weight: 500;
-                        padding: 0px;
+                        color: {COLORS['text']};
+                        font-size: 16px;
+                        font-weight: 600;
+                        padding: 4px 0px;
                     }}
                 """)
                 camera_layout_inner.addWidget(camera_label)
 
-                # Single row of presets
+                # Single row of presets - centered
                 preset_row = QHBoxLayout()
                 preset_row.setSpacing(6)
+
+                preset_row.addStretch()  # Left stretch to center
 
                 for preset_num in range(1, preset_count + 1):
                     preset_btn = self._create_multi_camera_preset_button(preset_num, camera.id, camera.name)
                     preset_row.addWidget(preset_btn)
 
-                preset_row.addStretch()
+                preset_row.addStretch()  # Right stretch to center
                 camera_layout_inner.addLayout(preset_row)
                 layout.addWidget(camera_frame)
 
@@ -2038,13 +1968,14 @@ class MainWindow(QMainWindow):
                 self.toast.show_message("Camera command failed", duration=2000, error=True)
             return False
 
-    def _query_camera_setting(self, command: str, endpoint: str = "aw_cam") -> str:
+    def _query_camera_setting(self, command: str, endpoint: str = "aw_cam", timeout: float = 0.5) -> str:
         """
         Query a camera setting via CGI command.
 
         Args:
             command: Query command (e.g., "QSH", "QGA", etc.)
             endpoint: CGI endpoint ("aw_cam" or "aw_ptz")
+            timeout: Request timeout in seconds (default: 0.5s for quick response)
 
         Returns:
             Response string, or empty string on failure
@@ -2059,14 +1990,19 @@ class MainWindow(QMainWindow):
         import requests
         try:
             url = f"http://{camera.ip_address}/cgi-bin/{endpoint}?cmd={command}&res=1"
-            response = requests.get(url, auth=(camera.username, camera.password), timeout=2.0)
+            # Reduced timeout from 2.0s to 0.5s to prevent UI stalls when camera unreachable
+            # With 10+ queries during sync, 2s timeout = 20s+ blocking on unreachable cameras
+            response = requests.get(url, auth=(camera.username, camera.password), timeout=timeout)
             if response.status_code == 200:
                 return response.text.strip()
             else:
-                logger.warning(f"Camera query failed: {command} (status {response.status_code})")
+                logger.debug(f"Camera query failed: {command} (status {response.status_code})")
                 return ""
+        except requests.exceptions.Timeout:
+            logger.debug(f"Camera query timeout: {command}")
+            return ""
         except Exception as e:
-            logger.error(f"Camera query error: {e}")
+            logger.debug(f"Camera query error: {e}")
             return ""
 
     def _sync_camera_exposure_settings(self):
@@ -2190,7 +2126,14 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            # Show sync feedback
+            # Check if camera stream is connected before syncing
+            # This avoids multiple timeout delays when camera is unreachable
+            stream = self.camera_streams.get(self.current_camera_id)
+            if stream and not stream.is_connected:
+                logger.debug(f"Skipping sync for camera {self.current_camera_id} - not connected yet")
+                return
+
+            # Show sync feedback only if we're actually syncing
             if hasattr(self, 'toast'):
                 self.toast.show_message("Syncing camera settings...", duration=1000)
 
@@ -2328,13 +2271,12 @@ class MainWindow(QMainWindow):
         self.camera_control_category_group = QButtonGroup(self)
         self.camera_control_category_group.setExclusive(True)
         
-        # Category buttons: Exposure, Color, Image, Operations, Multi-Cam
+        # Category buttons: Exposure, Color, Image, Operations
         category_buttons = [
             ("Exposure", 0),
             ("Color", 1),
             ("Image", 2),
             ("Operations", 3),
-            ("🎬 Multi-Cam", 4),
         ]
         
         for text, cat_idx in category_buttons:
@@ -2366,7 +2308,6 @@ class MainWindow(QMainWindow):
         self.camera_control_stack.addWidget(self._create_color_panel())
         self.camera_control_stack.addWidget(self._create_image_panel())  # Includes Advanced features
         self.camera_control_stack.addWidget(self._create_operations_panel())
-        self.camera_control_stack.addWidget(self._create_multi_camera_panel())
         
         layout.addWidget(self.camera_control_stack)
         
@@ -3457,29 +3398,18 @@ class MainWindow(QMainWindow):
 
         # Store checkboxes for later access
         self.multi_camera_checkboxes = {}
-        self.multi_camera_layout_combos = {}
 
         for camera in self.settings.cameras:
             # Camera row container
             camera_row = QHBoxLayout()
             camera_row.setSpacing(12)
 
-            # Checkbox
-            checkbox = QCheckBox(f"📹 {camera.name}")
+            # Checkbox - simplified (8 presets always)
+            checkbox = QCheckBox(f"📹 {camera.name} (8 presets)")
             checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
             checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
             self.multi_camera_checkboxes[camera.id] = checkbox
             camera_row.addWidget(checkbox)
-
-            # Layout combo (only enabled when checked)
-            layout_combo = QComboBox()
-            layout_combo.addItems(["4×3 (12 presets)", "1×8 (8 presets)", "4×2 (8 presets)"])
-            current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
-            layout_combo.setCurrentText(current_layout)
-            layout_combo.setEnabled(checkbox.isChecked())
-            layout_combo.currentTextChanged.connect(lambda text, cam_id=camera.id: self._on_multi_camera_layout_change(cam_id, text))
-            self.multi_camera_layout_combos[camera.id] = layout_combo
-            camera_row.addWidget(layout_combo)
 
             camera_row.addStretch()
             cameras_layout.addLayout(camera_row)
@@ -3560,13 +3490,13 @@ class MainWindow(QMainWindow):
 
     def _on_multi_camera_toggle(self, camera_id: int, state: int):
         """Handle camera checkbox toggle"""
-        enabled = state == Qt.CheckState.Checked.value
-        self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
-        self._update_multi_camera_preview()
+        # Nothing to do - simplified UI
+        pass
 
     def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
         """Handle layout combo change"""
-        self._update_multi_camera_preview()
+        # Nothing to do - no layout combos anymore
+        pass
 
     def _update_multi_camera_preview(self):
         """Update the preview of current multi-camera configuration"""
@@ -3577,15 +3507,9 @@ class MainWindow(QMainWindow):
             if checkbox.isChecked():
                 camera = self.settings.get_camera(camera_id)
                 if camera:
-                    layout_combo = self.multi_camera_layout_combos[camera_id]
-                    layout_text = layout_combo.currentText()
-
-                    if "12 presets" in layout_text:
-                        preset_count = 12
-                    elif "8 presets" in layout_text:
-                        preset_count = 8
-                    else:
-                        preset_count = 8  # Default fallback
+                    # Only one layout now: 1×8 (8 presets)
+                    layout_text = "1×8 (8 presets)"
+                    preset_count = 8
 
                     selected_cameras.append(f"{camera.name}: {layout_text}")
                     total_presets += preset_count
@@ -3606,16 +3530,9 @@ class MainWindow(QMainWindow):
 
         for camera_id, checkbox in self.multi_camera_checkboxes.items():
             if checkbox.isChecked():
-                layout_combo = self.multi_camera_layout_combos[camera_id]
-                layout_text = layout_combo.currentText()
-
-                # Determine preset count from layout
-                if "12 presets" in layout_text:
-                    preset_count = 12
-                elif "8 presets" in layout_text:
-                    preset_count = 8
-                else:
-                    preset_count = 8
+                # Only one layout option now: 1×8 (8 presets)
+                layout_text = "1×8 (8 presets)"
+                preset_count = 8
 
                 config[str(camera_id)] = {
                     'enabled': True,
@@ -3633,10 +3550,6 @@ class MainWindow(QMainWindow):
         """Reset multi-camera configuration to default (all disabled)"""
         for checkbox in self.multi_camera_checkboxes.values():
             checkbox.setChecked(False)
-
-        for combo in self.multi_camera_layout_combos.values():
-            combo.setCurrentText("4×3 (12 presets)")
-            combo.setEnabled(False)
 
         self.settings.multi_camera_presets = {}
         self.settings.save()
@@ -6185,7 +6098,7 @@ class MainWindow(QMainWindow):
                 self._update_camera_selection_ui(camera_id)
             except Exception as e:
                 logger.warning(f"Error updating camera selection UI: {e}")
-            
+
             # Update tally state for preview
             try:
                 self._update_preview_tally()
@@ -6193,10 +6106,14 @@ class MainWindow(QMainWindow):
                 logger.warning(f"Error updating preview tally: {e}")
 
             # Sync camera control panels with current camera settings
+            # DEFERRED: Do this in background to avoid blocking UI when camera is unreachable
+            # This prevents 10+ second stalls when switching to offline cameras
             try:
-                self._sync_camera_controls_with_current_camera()
+                from PyQt6.QtCore import QTimer
+                # Delay sync by 500ms to let UI update first, and run in background
+                QTimer.singleShot(500, self._sync_camera_controls_with_current_camera)
             except Exception as e:
-                logger.warning(f"Error syncing camera controls: {e}")
+                logger.warning(f"Error scheduling camera controls sync: {e}")
 
             # Show visual feedback
             try:

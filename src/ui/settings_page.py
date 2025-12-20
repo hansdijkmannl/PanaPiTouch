@@ -644,242 +644,128 @@ class SettingsPage(QWidget):
         """)
         cameras_layout = QVBoxLayout(cameras_frame)
         cameras_layout.setContentsMargins(12, 12, 12, 12)
-        cameras_layout.setSpacing(8)
+        cameras_layout.setSpacing(12)
 
         # Store references for later use
         self.multi_camera_checkboxes = {}
-        self.multi_camera_layout_combos = {}
 
-        # Add camera selection for each configured camera
-        for camera in self.settings.cameras:
-            # Camera section
-            camera_group = QGroupBox(f"📹 {camera.name}")
-            camera_group.setStyleSheet("""
-                QGroupBox {
+        # Create grid layout for radio buttons (4 per row, max 40 cameras)
+        from PyQt6.QtWidgets import QGridLayout, QRadioButton, QButtonGroup
+
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(8)
+        grid_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.multi_camera_button_group = QButtonGroup()
+        self.multi_camera_button_group.setExclusive(False)  # Allow multiple selections
+
+        row = 0
+        col = 0
+        max_cameras = 40
+
+        # Add radio buttons for each configured camera (max 40)
+        for camera in self.settings.cameras[:max_cameras]:
+            radio_btn = QRadioButton(f"📹 {camera.name}")
+            radio_btn.setStyleSheet("""
+                QRadioButton {
                     font-size: 13px;
-                    font-weight: bold;
                     color: #ffffff;
-                    border: 2px solid #2a2a38;
-                    border-radius: 6px;
-                    margin-top: 6px;
-                    padding-top: 8px;
+                    padding: 8px;
+                    spacing: 6px;
                 }
-                QGroupBox::title {
-                    subcontrol-origin: margin;
-                    left: 8px;
-                    padding: 0 4px 0 4px;
+                QRadioButton::indicator {
+                    width: 18px;
+                    height: 18px;
+                }
+                QRadioButton::indicator:unchecked {
+                    border: 2px solid #404050;
+                    border-radius: 9px;
+                    background-color: #1e1e28;
+                }
+                QRadioButton::indicator:checked {
+                    border: 2px solid #3498db;
+                    border-radius: 9px;
+                    background-color: #3498db;
                 }
             """)
+            radio_btn.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
 
-            camera_layout = QVBoxLayout(camera_group)
-            camera_layout.setSpacing(8)
+            self.multi_camera_checkboxes[camera.id] = radio_btn
+            self.multi_camera_button_group.addButton(radio_btn)
 
-            # Enable checkbox
-            enable_layout = QHBoxLayout()
-            enable_checkbox = QCheckBox("Include in Multi-Camera View")
-            enable_checkbox.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
-            enable_checkbox.stateChanged.connect(lambda state, cam_id=camera.id: self._on_multi_camera_toggle(cam_id, state))
-            self.multi_camera_checkboxes[camera.id] = enable_checkbox
-            enable_layout.addWidget(enable_checkbox)
-            enable_layout.addStretch()
-            camera_layout.addLayout(enable_layout)
+            grid_layout.addWidget(radio_btn, row, col)
 
-            # Layout selection - horizontal radio buttons
-            layout_row = QHBoxLayout()
-            layout_row.setSpacing(12)
+            col += 1
+            if col >= 4:  # 4 per row
+                col = 0
+                row += 1
 
-            layout_label = QLabel("Presets:")
-            layout_label.setStyleSheet("color: #b0b0b0; font-size: 12px; font-weight: 500;")
-            layout_row.addWidget(layout_label)
-
-            # Radio button group for layout selection
-            layout_group = QButtonGroup(camera_group)
-            self.multi_camera_layout_combos[camera.id] = layout_group
-
-            current_layout = self.settings.multi_camera_presets.get(str(camera.id), {}).get('layout', '4×3 (12 presets)')
-
-            # Layout options - just numbers now
-            layouts = [
-                ("12", "4×3 (12 presets)"),
-                ("8", "1×8 (8 presets)"),
-                ("8", "4×2 (8 presets)")
-            ]
-
-            for layout_name, layout_value in layouts:
-                radio_btn = QRadioButton(layout_name)
-                radio_btn.setChecked(layout_value == current_layout)
-                radio_btn.setEnabled(enable_checkbox.isChecked())
-                layout_group.addButton(radio_btn)
-                radio_btn.clicked.connect(lambda checked, cam_id=camera.id, val=layout_value: self._on_multi_camera_layout_change(cam_id, val))
-
-                layout_row.addWidget(radio_btn)
-
-            layout_row.addStretch()
-            camera_layout.addLayout(layout_row)
-
-            cameras_layout.addWidget(camera_group)
-
+        cameras_layout.addLayout(grid_layout)
         multi_layout.addWidget(cameras_frame)
 
-        # Preview and actions
-        actions_layout = QHBoxLayout()
-        actions_layout.setSpacing(12)
+        # Action buttons - horizontal layout
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
 
-        # Preview label
-        self.multi_camera_preview_label = QLabel("No cameras selected")
-        self.multi_camera_preview_label.setStyleSheet("color: #ffffff; font-size: 12px;")
-        self.multi_camera_preview_label.setWordWrap(True)
-        actions_layout.addWidget(self.multi_camera_preview_label)
-
-        actions_layout.addStretch()
-
-        # Action buttons
-        button_layout = QVBoxLayout()
-        button_layout.setSpacing(8)
-
-        save_btn = QPushButton("💾 Save")
-        save_btn.setStyleSheet("""
+        self.multi_cam_save_btn = QPushButton("💾 Save")
+        self.multi_cam_save_btn.setStyleSheet("""
             QPushButton {
                 background-color: #3498db;
                 color: #121218;
                 border: none;
                 border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 12px;
+                padding: 10px 20px;
+                font-size: 13px;
                 font-weight: 600;
             }
             QPushButton:hover {
                 background-color: #2980b9;
             }
         """)
-        save_btn.clicked.connect(self._save_multi_camera_config)
-        button_layout.addWidget(save_btn)
+        self.multi_cam_save_btn.clicked.connect(self._save_multi_camera_config)
+        button_layout.addWidget(self.multi_cam_save_btn)
 
-        reset_btn = QPushButton("🔄 Reset")
-        reset_btn.setStyleSheet("""
+        self.multi_cam_reset_btn = QPushButton("🔄 Reset")
+        self.multi_cam_reset_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2a38;
                 color: #ffffff;
                 border: 1px solid #404040;
                 border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 12px;
+                padding: 10px 20px;
+                font-size: 13px;
                 font-weight: 600;
             }
             QPushButton:hover {
                 background-color: #404040;
             }
         """)
-        reset_btn.clicked.connect(self._reset_multi_camera_config)
-        button_layout.addWidget(reset_btn)
+        self.multi_cam_reset_btn.clicked.connect(self._reset_multi_camera_config)
+        button_layout.addWidget(self.multi_cam_reset_btn)
 
-        actions_layout.addLayout(button_layout)
-        multi_layout.addLayout(actions_layout)
+        button_layout.addStretch()
+        multi_layout.addLayout(button_layout)
 
         layout.addWidget(multi_cam_group)
         layout.addStretch()
-
-        # Update preview initially
-        self._update_multi_camera_preview()
 
         return wrapper
 
     def _on_multi_camera_toggle(self, camera_id: int, state: int):
         """Handle camera checkbox toggle"""
-        try:
-            enabled = state == 2  # Qt.CheckState.Checked.value
-            if hasattr(self, 'multi_camera_layout_combos') and camera_id in self.multi_camera_layout_combos:
-                self.multi_camera_layout_combos[camera_id].setEnabled(enabled)
-            self._update_multi_camera_preview()
-        except Exception as e:
-            print(f"Error in camera toggle: {e}")
-            # Don't crash, just continue
+        # Nothing to do - checkboxes work independently now
+        pass
 
-    def _on_multi_camera_layout_change(self, camera_id: int, layout_text: str):
-        """Handle layout radio button change"""
-        try:
-            self._update_multi_camera_preview()
-        except Exception as e:
-            print(f"Error in layout change: {e}")
-            # Don't crash, just continue
-
-    def _update_multi_camera_preview(self):
-        """Update the preview of current multi-camera configuration"""
-        try:
-            if not hasattr(self, 'multi_camera_checkboxes') or not hasattr(self, 'multi_camera_preview_label'):
-                return  # UI not initialized yet
-
-            selected_cameras = []
-            total_presets = 0
-
-            for camera_id, checkbox in self.multi_camera_checkboxes.items():
-                if checkbox.isChecked():
-                    camera = self.settings.get_camera(camera_id)
-                    if camera:
-                        layout_group = self.multi_camera_layout_combos.get(camera_id)
-                        if layout_group:
-                            # Find checked radio button
-                            layout_text = "4×3 (12 presets)"  # Default
-                            for button in layout_group.buttons():
-                                if button.isChecked():
-                                    if "12" in button.text():
-                                        layout_text = "4×3 (12 presets)"
-                                    elif "8" in button.text():
-                                        layout_text = "1×8 (8 presets)" if "1×8" in layout_text else "4×2 (8 presets)"
-                                    break
-
-                            if "12 presets" in layout_text:
-                                preset_count = 12
-                            elif "8 presets" in layout_text:
-                                preset_count = 8
-                            else:
-                                preset_count = 8
-
-                            selected_cameras.append(f"{camera.name}: {layout_text}")
-                            total_presets += preset_count
-
-            if selected_cameras:
-                preview_text = f"Selected ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
-                preview_text += f"\n\nTotal: {total_presets}/48 presets"
-                if total_presets > 48:
-                    preview_text += " ⚠️ Over limit!"
-            else:
-                preview_text = "No cameras selected"
-
-            self.multi_camera_preview_label.setText(preview_text)
-        except Exception as e:
-            print(f"Error updating preview: {e}")
-            if hasattr(self, 'multi_camera_preview_label'):
-                self.multi_camera_preview_label.setText("Error loading preview")
 
     def _save_multi_camera_config(self):
         """Save the current multi-camera configuration"""
         config = {}
 
-        for camera_id, checkbox in self.multi_camera_checkboxes.items():
-            if checkbox.isChecked():
-                layout_group = self.multi_camera_layout_combos[camera_id]
-
-                # Find checked radio button
-                layout_text = "4×3 (12 presets)"  # Default
-                for button in layout_group.buttons():
-                    if button.isChecked():
-                        # Map button index to layout value (first button = 12, second = 8, third = 8)
-                        button_index = layout_group.buttons().index(button)
-                        if button_index == 0:  # First button (12)
-                            layout_text = "4×3 (12 presets)"
-                        elif button_index == 1:  # Second button (8) - default to 1x8
-                            layout_text = "1×8 (8 presets)"
-                        elif button_index == 2:  # Third button (8) - use 4x2
-                            layout_text = "4×2 (8 presets)"
-                        break
-
-                if "12 presets" in layout_text:
-                    preset_count = 12
-                elif "8 presets" in layout_text:
-                    preset_count = 8
-                else:
-                    preset_count = 8
+        for camera_id, radio_btn in self.multi_camera_checkboxes.items():
+            if radio_btn.isChecked():
+                # Only one layout option now: 1×8 (8 presets)
+                layout_text = "1×8 (8 presets)"
+                preset_count = 8
 
                 config[str(camera_id)] = {
                     'enabled': True,
@@ -895,98 +781,91 @@ class SettingsPage(QWidget):
         if main_window and hasattr(main_window, '_refresh_multi_camera_presets_panel'):
             main_window._refresh_multi_camera_presets_panel()
 
-        # Show success message
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Icon.Information)
-        msg.setWindowTitle("Configuration Saved")
-        msg.setText("Multi-camera configuration has been saved successfully!")
-        msg.setStyleSheet("""
-            QMessageBox {
-                background-color: #1a1a22;
-                color: #ffffff;
-            }
-            QMessageBox QLabel {
-                color: #ffffff;
-            }
+        # Inline button confirmation (no popup)
+        from PyQt6.QtCore import QTimer
+        original_text = self.multi_cam_save_btn.text()
+        self.multi_cam_save_btn.setText("✓ Saved!")
+        self.multi_cam_save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
-                color: #121218;
+                background-color: #2ecc71;
+                color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 10px 20px;
+                font-size: 13px;
                 font-weight: 600;
             }
         """)
-        msg.exec()
 
-    def _create_layout_preview_4x3(self):
-        """Create visual preview for 4×3 layout"""
-        preview = QWidget()
-        preview.setFixedSize(60, 45)
-        layout = QGridLayout(preview)
-        layout.setSpacing(1)
-        layout.setContentsMargins(2, 2, 2, 2)
+        def reset_button():
+            self.multi_cam_save_btn.setText(original_text)
+            self.multi_cam_save_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498db;
+                    color: #121218;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 10px 20px;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #2980b9;
+                }
+            """)
 
-        for i in range(12):
-            dot = QLabel("●")
-            dot.setStyleSheet("color: #3498db; font-size: 6px;")
-            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            row = i // 4
-            col = i % 4
-            layout.addWidget(dot, row, col)
-
-        return preview
-
-    def _create_layout_preview_1x8(self):
-        """Create visual preview for 1×8 layout"""
-        preview = QWidget()
-        preview.setFixedSize(60, 15)
-        layout = QHBoxLayout(preview)
-        layout.setSpacing(1)
-        layout.setContentsMargins(2, 2, 2, 2)
-
-        for i in range(8):
-            dot = QLabel("●")
-            dot.setStyleSheet("color: #3498db; font-size: 6px;")
-            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(dot)
-
-        return preview
-
-    def _create_layout_preview_4x2(self):
-        """Create visual preview for 4×2 layout"""
-        preview = QWidget()
-        preview.setFixedSize(60, 30)
-        layout = QGridLayout(preview)
-        layout.setSpacing(1)
-        layout.setContentsMargins(2, 2, 2, 2)
-
-        for i in range(8):
-            dot = QLabel("●")
-            dot.setStyleSheet("color: #3498db; font-size: 6px;")
-            dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            row = i // 4
-            col = i % 4
-            layout.addWidget(dot, row, col)
-
-        return preview
+        QTimer.singleShot(1500, reset_button)
 
     def _reset_multi_camera_config(self):
         """Reset multi-camera configuration to default"""
-        try:
-            for checkbox in self.multi_camera_checkboxes.values():
-                checkbox.setChecked(False)
+        from PyQt6.QtCore import QTimer
 
-            # Reset radio button groups - be more careful about button access
-            for group in self.multi_camera_layout_combos.values():
-                buttons = group.buttons()
-                if buttons and len(buttons) > 0:
-                    # Check the first button (should be "12" presets - 4x3)
-                    buttons[0].setChecked(True)
+        try:
+            for radio_btn in self.multi_camera_checkboxes.values():
+                radio_btn.setChecked(False)
 
             self.settings.multi_camera_presets = {}
             self.settings.save()
-            self._update_multi_camera_preview()
+
+            # Refresh multi-camera panel
+            main_window = self.window()
+            if main_window and hasattr(main_window, '_refresh_multi_camera_presets_panel'):
+                main_window._refresh_multi_camera_presets_panel()
+
+            # Inline button confirmation
+            original_text = self.multi_cam_reset_btn.text()
+            self.multi_cam_reset_btn.setText("✓ Reset!")
+            self.multi_cam_reset_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e67e22;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 10px 20px;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+            """)
+
+            def reset_button():
+                self.multi_cam_reset_btn.setText(original_text)
+                self.multi_cam_reset_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2a2a38;
+                        color: #ffffff;
+                        border: 1px solid #404040;
+                        border-radius: 4px;
+                        padding: 10px 20px;
+                        font-size: 13px;
+                        font-weight: 600;
+                    }
+                    QPushButton:hover {
+                        background-color: #404040;
+                    }
+                """)
+
+            QTimer.singleShot(1500, reset_button)
+
         except Exception as e:
             print(f"Error in reset: {e}")
             # Fallback - just clear settings

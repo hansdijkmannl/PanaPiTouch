@@ -58,6 +58,11 @@ class CameraStream:
         self._stream_type: Optional[str] = None  # 'rtsp', 'mjpeg', or 'snapshot'
         self._rtsp_attempts = 0
         self._max_rtsp_attempts = 3  # Try RTSP 3 times before falling back
+
+        # Exponential backoff for failed connections (reduces CPU when cameras unreachable)
+        self._connection_failures = 0
+        self._max_backoff = 30  # Maximum 30 seconds between retries
+        self._last_connection_attempt = 0
     
     @property
     def is_connected(self) -> bool:
@@ -98,6 +103,41 @@ class CameraStream:
     @property
     def is_paused(self) -> bool:
         return getattr(self, '_paused', False)
+
+    def _calculate_backoff_delay(self) -> float:
+        """
+        Calculate exponential backoff delay based on connection failures.
+
+        Returns delay in seconds: 2, 4, 8, 16, 30, 30, ...
+        This dramatically reduces CPU usage when cameras are unreachable.
+        """
+        if self._connection_failures == 0:
+            return 0  # No delay on first attempt
+
+        # Exponential backoff: 2^n seconds, capped at max_backoff
+        delay = min(2 ** self._connection_failures, self._max_backoff)
+        return delay
+
+    def _wait_with_backoff(self):
+        """Wait with exponential backoff, checking _running flag to allow early exit"""
+        delay = self._calculate_backoff_delay()
+        if delay == 0:
+            return
+
+        # Sleep in small increments to allow quick shutdown
+        end_time = time.time() + delay
+        while self._running and time.time() < end_time:
+            time.sleep(0.5)  # Check every 500ms if we should stop
+
+    def _reset_backoff(self):
+        """Reset backoff on successful connection"""
+        self._connection_failures = 0
+
+    def _increment_backoff(self):
+        """Increment backoff on connection failure"""
+        self._connection_failures += 1
+        current_delay = self._calculate_backoff_delay()
+        print(f"Connection failed. Will retry in {current_delay}s (attempt {self._connection_failures})")
     
     def get_rtsp_url(self, stream_number: Optional[int] = None) -> str:
         """
@@ -195,32 +235,43 @@ class CameraStream:
         """Capture frames from MJPEG stream - optimized for Raspberry Pi"""
         if self._stream_type != 'mjpeg':
             self._stream_type = 'mjpeg'
-        
+
         stream_url = self.get_stream_url()
         print(f"Using MJPEG stream: {stream_url}")
-        
+
         while self._running:
+            # Wait with exponential backoff if previous connection failed
+            self._wait_with_backoff()
+            if not self._running:
+                break
+
             try:
                 # Create video capture with MJPEG stream
+                # Set timeout to avoid long blocking when camera unreachable
                 cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
-                
+
                 # Optimize capture settings for performance
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
                 cap.set(cv2.CAP_PROP_FPS, 25)  # Request 25fps (common camera frame rate)
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000)  # 3 second timeout for open
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)  # 3 second timeout for read
                 # Try to use hardware acceleration if available
                 try:
                     cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
                 except:
                     pass
-                
+
                 if not cap.isOpened():
                     self._connected = False
                     self._error_message = "Failed to open stream"
-                    time.sleep(2)
+                    self._increment_backoff()
+                    cap.release()
                     continue
-                
+
+                # Successfully connected - reset backoff
                 self._connected = True
                 self._error_message = ""
+                self._reset_backoff()
                 frame_count = 0
                 start_time = time.time()
                 
@@ -238,6 +289,7 @@ class CameraStream:
                     if not ret:
                         self._connected = False
                         self._error_message = "Stream disconnected"
+                        self._increment_backoff()
                         break
                     
                     # Early downscaling for performance - resize immediately if frame is larger than target
@@ -266,56 +318,65 @@ class CameraStream:
                     self._notify_callbacks(frame)
                 
                 cap.release()
-                
+
             except Exception as e:
                 self._connected = False
                 self._error_message = str(e)
-                print(f"Stream error: {e}")
-                time.sleep(2)
+                print(f"MJPEG stream error: {e}")
+                self._increment_backoff()
     
     def _capture_rtsp(self):
         """
         Capture frames from RTSP stream (H.264/H.265).
-        
+
         Uses standard RTSP → RTP protocol as used by Panasonic PTZ Control Center.
         OpenCV's VideoCapture handles RTSP negotiation and RTP packet reception.
-        
+
         Falls back to MJPEG if RTSP fails after multiple attempts.
         """
         rtsp_url = self.get_rtsp_url()
         self._stream_type = 'rtsp'
         self._rtsp_attempts = 0
-        
+
         print(f"Attempting RTSP stream: {rtsp_url}")
-        
+
         while self._running:
+            # Wait with exponential backoff if previous connection failed
+            self._wait_with_backoff()
+            if not self._running:
+                break
+
             try:
                 self._rtsp_attempts += 1
-                
+
                 # Open RTSP stream using OpenCV (which handles RTSP/RTP internally)
                 cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
-                
-                # Optimize capture settings
+
+                # Optimize capture settings with timeouts
                 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for low latency
                 cap.set(cv2.CAP_PROP_FPS, 25)  # Request 25fps (common camera frame rate)
-                
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 3000)  # 3 second timeout for open
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000)  # 3 second timeout for read
+
                 if not cap.isOpened():
                     self._connected = False
                     self._error_message = "Failed to open RTSP stream"
-                    
+                    self._increment_backoff()
+                    cap.release()
+
                     if self._rtsp_attempts >= self._max_rtsp_attempts:
                         print(f"RTSP failed after {self._max_rtsp_attempts} attempts, falling back to MJPEG...")
                         self._fallback_to_mjpeg()
                         return
-                    
+
                     print(f"RTSP connection attempt {self._rtsp_attempts}/{self._max_rtsp_attempts} failed, retrying...")
-                    time.sleep(2)
                     continue
-                
+
                 # Successfully opened RTSP stream
                 self._connected = True
                 self._error_message = ""
                 self._rtsp_attempts = 0  # Reset counter on success
+                self._reset_backoff()  # Reset exponential backoff
                 print(f"RTSP stream connected successfully")
                 
                 frame_count = 0
@@ -337,6 +398,7 @@ class CameraStream:
                         if consecutive_failures >= max_consecutive_failures:
                             self._connected = False
                             self._error_message = "RTSP stream disconnected"
+                            self._increment_backoff()
                             print("RTSP stream disconnected, falling back to MJPEG...")
                             cap.release()
                             self._fallback_to_mjpeg()
@@ -374,13 +436,12 @@ class CameraStream:
                 self._connected = False
                 self._error_message = str(e)
                 print(f"RTSP stream error: {e}")
-                
+                self._increment_backoff()
+
                 if self._rtsp_attempts >= self._max_rtsp_attempts:
                     print(f"RTSP failed after {self._max_rtsp_attempts} attempts, falling back to MJPEG...")
                     self._fallback_to_mjpeg()
                     return
-                
-                time.sleep(2)
     
     def _fallback_to_mjpeg(self):
         """Fallback to MJPEG streaming when RTSP fails"""
@@ -399,20 +460,21 @@ class CameraStream:
         """Capture frames via repeated snapshots (fallback)"""
         snapshot_url = self.get_snapshot_url()
         auth = (self.config.username, self.config.password) if self.config.username else None
-        
+
         while self._running:
             # Skip frame processing when paused to save CPU
             if getattr(self, '_paused', False):
                 time.sleep(0.1)
                 continue
-            
+
             try:
                 request_start = time.time()
-                response = requests.get(snapshot_url, timeout=1, auth=auth, stream=False)  # Reduced timeout and removed stream=True for faster response
-                
+                response = requests.get(snapshot_url, timeout=2, auth=auth, stream=False)  # 2 second timeout
+
                 if response.status_code == 200:
                     self._connected = True
                     self._error_message = ""
+                    self._reset_backoff()  # Reset on successful connection
                     
                     # Decode JPEG image
                     img_array = np.asarray(bytearray(response.content), dtype=np.uint8)
@@ -427,23 +489,26 @@ class CameraStream:
                             self._current_frame = frame
                         
                         self._notify_callbacks(frame)
-                        
+
                         # Calculate actual frame time and adjust sleep to maintain ~25fps
                         request_time = time.time() - request_start
                         target_frame_time = 1.0 / 25.0  # 25fps = 40ms per frame
                         sleep_time = max(0.01, target_frame_time - request_time)  # Ensure at least 10ms sleep
                         time.sleep(sleep_time)
                     else:
+                        self._increment_backoff()
                         time.sleep(0.04)  # Default 25fps if decode fails
                 else:
                     self._connected = False
                     self._error_message = f"HTTP {response.status_code}"
-                    time.sleep(0.2)  # Longer sleep on error
-                    
+                    self._increment_backoff()
+                    self._wait_with_backoff()
+
             except Exception as e:
                 self._connected = False
                 self._error_message = str(e)
-                time.sleep(0.2)  # Longer sleep on exception
+                self._increment_backoff()
+                self._wait_with_backoff()
     
     def start(self, use_rtsp: bool = True, use_snapshot: bool = False, force_mjpeg: bool = False):
         """

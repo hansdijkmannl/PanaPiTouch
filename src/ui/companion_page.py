@@ -61,7 +61,7 @@ class CompanionPage(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
+        
         # Placeholder widget - web view will be created lazily
         self.placeholder = QWidget()
         self.placeholder.setStyleSheet(f"""
@@ -115,10 +115,10 @@ class CompanionPage(QWidget):
             # Must be installed BEFORE navigation starts so it injects on initial load.
             self._install_osk_bridge_script()
             self.web_view.setUrl(QUrl(self.companion_url))
-
+            
             # Set zoom factor to 75% (0.75) to scale down the display
             self.web_view.setZoomFactor(0.75)
-
+            
             # Configure settings
             settings = self.web_view.settings()
             settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -127,10 +127,10 @@ class CompanionPage(QWidget):
             settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
             settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
             settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
-
+            
             # Connect signals
             self.web_view.loadFinished.connect(self._on_load_finished)
-
+            
             # Add to layout
             self.layout().addWidget(self.web_view, 1)
 

@@ -248,8 +248,8 @@ class PreviewWidget(QWidget):
             if self._update_timer.isActive():
                 self._update_timer.stop()
         except Exception:
-            pass
-
+                pass
+    
     def set_tally_state(self, state: TallyState):
         """Set tally state (affects border color) (error-handled)"""
         try:
