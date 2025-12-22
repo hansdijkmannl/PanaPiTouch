@@ -36,44 +36,44 @@ class NetworkFixDialog(QDialog):
         
         # Title
         title = QLabel("Fix Camera Network Settings")
-        title.setStyleSheet("font-size: 18px; font-weight: 600; color: #ffffff;")
+        title.setStyleSheet("font-size: 18px; font-weight: 600; color: #E9E9E9;")
         layout.addWidget(title)
-        
+
         # Info label
         info = QLabel(f"Camera: {self.camera.name or self.camera.model or 'Unknown'}\n"
                      f"Current IP: {self.camera.ip_address}")
-        info.setStyleSheet("font-size: 12px; color: #888898; padding: 8px 0;")
+        info.setStyleSheet("font-size: 12px; color: #B9BCC1; padding: 8px 0;")
         layout.addWidget(info)
         
         # Current settings (read-only)
         current_frame = QFrame()
         current_frame.setStyleSheet("""
             QFrame {
-                background-color: #242430;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
             }
         """)
         current_layout = QVBoxLayout(current_frame)
         current_layout.setContentsMargins(16, 12, 16, 12)
         current_layout.setSpacing(8)
-        
+
         current_title = QLabel("Current Settings (Read-only)")
-        current_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff;")
+        current_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #E9E9E9;")
         current_layout.addWidget(current_title)
-        
+
         self.current_ip_label = QLabel(f"IP: {self.camera.ip_address}")
-        self.current_ip_label.setStyleSheet("font-size: 11px; color: #888898;")
+        self.current_ip_label.setStyleSheet("font-size: 11px; color: #B9BCC1;")
         current_layout.addWidget(self.current_ip_label)
-        
+
         subnet = getattr(self.camera, 'subnet_mask', 'Unknown')
         self.current_subnet_label = QLabel(f"Subnet: {subnet}")
-        self.current_subnet_label.setStyleSheet("font-size: 11px; color: #888898;")
+        self.current_subnet_label.setStyleSheet("font-size: 11px; color: #B9BCC1;")
         current_layout.addWidget(self.current_subnet_label)
-        
+
         gateway = getattr(self.camera, 'gateway', 'Unknown')
         self.current_gateway_label = QLabel(f"Gateway: {gateway}")
-        self.current_gateway_label.setStyleSheet("font-size: 11px; color: #888898;")
+        self.current_gateway_label.setStyleSheet("font-size: 11px; color: #B9BCC1;")
         current_layout.addWidget(self.current_gateway_label)
         
         layout.addWidget(current_frame)
@@ -82,38 +82,38 @@ class NetworkFixDialog(QDialog):
         new_frame = QFrame()
         new_frame.setStyleSheet("""
             QFrame {
-                background-color: #1a1a22;
-                border: 1px solid #2a2a38;
-                border-radius: 8px;
+                background-color: #1E2126;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
             }
         """)
         new_layout = QVBoxLayout(new_frame)
         new_layout.setContentsMargins(16, 16, 16, 16)
         new_layout.setSpacing(12)
-        
+
         new_title = QLabel("New Settings")
-        new_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #ffffff;")
+        new_title.setStyleSheet("font-size: 13px; font-weight: 600; color: #E9E9E9;")
         new_layout.addWidget(new_title)
-        
+
         # IP Address
         ip_layout = QVBoxLayout()
         ip_layout.setSpacing(4)
         ip_label = QLabel("IP Address:")
-        ip_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: 500;")
+        ip_label.setStyleSheet("color: #E9E9E9; font-size: 12px; font-weight: 500;")
         ip_layout.addWidget(ip_label)
         self.new_ip_input = QLineEdit()
         self.new_ip_input.setFixedHeight(40)
         self.new_ip_input.setStyleSheet("""
             QLineEdit {
-                background-color: #242430;
-                border: 2px solid #2a2a38;
-                border-radius: 6px;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
                 padding: 8px 12px;
                 font-size: 13px;
-                color: #FFFFFF;
+                color: #E9E9E9;
             }
             QLineEdit:focus {
-                border-color: #FF9500;
+                border: 2.5px solid #D9A042;
             }
         """)
         ip_layout.addWidget(self.new_ip_input)
@@ -123,7 +123,7 @@ class NetworkFixDialog(QDialog):
         subnet_layout = QVBoxLayout()
         subnet_layout.setSpacing(4)
         subnet_label = QLabel("Subnet Mask:")
-        subnet_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: 500;")
+        subnet_label.setStyleSheet("color: #E9E9E9; font-size: 12px; font-weight: 500;")
         subnet_layout.addWidget(subnet_label)
         self.new_subnet_input = QComboBox()
         self.new_subnet_input.setEditable(True)
@@ -141,21 +141,24 @@ class NetworkFixDialog(QDialog):
         ])
         self.new_subnet_input.setStyleSheet("""
             QComboBox {
-                background-color: #242430;
-                border: 2px solid #2a2a38;
-                border-radius: 6px;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
                 padding: 8px 12px;
                 font-size: 13px;
-                color: #FFFFFF;
+                color: #E9E9E9;
             }
             QComboBox:focus {
-                border-color: #FF9500;
+                border: 2.5px solid #D9A042;
+            }
+            QComboBox:hover {
+                border-color: #2B2F36;
             }
             QComboBox QAbstractItemView {
-                background-color: #242430;
-                border: 2px solid #2a2a38;
-                selection-background-color: #FF9500;
-                color: #FFFFFF;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                selection-background-color: #20C7C7;
+                color: #E9E9E9;
             }
         """)
         subnet_layout.addWidget(self.new_subnet_input)
@@ -165,33 +168,39 @@ class NetworkFixDialog(QDialog):
         gateway_layout = QVBoxLayout()
         gateway_layout.setSpacing(4)
         gateway_label = QLabel("Gateway (optional):")
-        gateway_label.setStyleSheet("color: #ffffff; font-size: 12px; font-weight: 500;")
+        gateway_label.setStyleSheet("color: #E9E9E9; font-size: 12px; font-weight: 500;")
         gateway_layout.addWidget(gateway_label)
         self.new_gateway_input = QLineEdit()
         self.new_gateway_input.setFixedHeight(40)
         self.new_gateway_input.setStyleSheet(self.new_ip_input.styleSheet())
         gateway_layout.addWidget(self.new_gateway_input)
         new_layout.addLayout(gateway_layout)
-        
+
         # DHCP Toggle
         dhcp_layout = QHBoxLayout()
         dhcp_layout.setSpacing(12)
         self.dhcp_checkbox = QCheckBox("Enable DHCP (auto-assign IP)")
         self.dhcp_checkbox.setStyleSheet("""
             QCheckBox {
-                color: #ffffff;
+                color: #E9E9E9;
                 font-size: 12px;
             }
             QCheckBox::indicator {
                 width: 20px;
                 height: 20px;
-                border: 2px solid #2a2a38;
-                border-radius: 4px;
-                background-color: #242430;
+                border: 1.5px solid #3D4450;
+                border-radius: 6px;
+                background-color: #262A32;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #2B2F36;
             }
             QCheckBox::indicator:checked {
-                background-color: #FF9500;
-                border-color: #FF9500;
+                background-color: #20C7C7;
+                border: 2.5px solid #20C7C7;
+            }
+            QCheckBox::indicator:focus {
+                border: 2.5px solid #D9A042;
             }
         """)
         self.dhcp_checkbox.toggled.connect(self._on_dhcp_toggled)
@@ -207,47 +216,56 @@ class NetworkFixDialog(QDialog):
         self.warning_label.setWordWrap(True)
         self.warning_label.hide()
         layout.addWidget(self.warning_label)
-        
+
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(12)
-        
+
         cancel_btn = QPushButton("Cancel")
         cancel_btn.setFixedHeight(44)
         cancel_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2a2a38;
-                border: 2px solid #3a3a48;
-                border-radius: 8px;
-                color: #ffffff;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
+                color: #E9E9E9;
                 font-size: 14px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #3a3a48;
-                border-color: #FF9500;
+                background-color: #2e2e3a;
+                border-color: #2B2F36;
             }
         """)
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
-        
+
         self.apply_btn = QPushButton("Apply Network Settings")
         self.apply_btn.setFixedHeight(44)
         self.apply_btn.setStyleSheet("""
             QPushButton {
-                background-color: #FF9500;
-                border: none;
-                border-radius: 8px;
-                color: #121218;
+                background-color: #20C7C7;
+                border: 2.5px solid #20C7C7;
+                border-radius: 12px;
+                color: #17191C;
                 font-size: 14px;
                 font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #FFAA33;
+                background-color: #2DD4D4;
+                border-color: #2DD4D4;
+            }
+            QPushButton:pressed {
+                background-color: #17A5A5;
+                border-color: #17A5A5;
+            }
+            QPushButton:focus {
+                border: 2.5px solid #D9A042;
             }
             QPushButton:disabled {
-                background-color: #2a2a38;
-                color: #888898;
+                background-color: #2B2F36;
+                border-color: #3D4450;
+                color: #B9BCC1;
             }
         """)
         self.apply_btn.clicked.connect(self._apply_network_settings)
@@ -342,7 +360,7 @@ class NetworkFixDialog(QDialog):
         eth0_ip = self.network_info.get('ip', '')
         eth0_subnet = self.network_info.get('subnet', '255.255.255.0')
         if eth0_ip and not self._same_subnet(ip, eth0_ip, eth0_subnet):
-            self.warning_label.setText("⚠ Warning: IP is not in the same subnet as eth0. Camera may become unreachable.")
+            self.warning_label.setText("Warning: IP is not in the same subnet as eth0. Camera may become unreachable.")
             self.warning_label.show()
         else:
             self.warning_label.hide()

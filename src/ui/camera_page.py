@@ -112,7 +112,7 @@ class DiscoveredCameraCard(QFrame):
             }
         """)
         self._thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._thumbnail_label.setText("📷")
+        self._thumbnail_label.setText("Camera")
         layout.addWidget(self._thumbnail_label)
         
         # Center: Camera info
@@ -139,7 +139,7 @@ class DiscoveredCameraCard(QFrame):
             "Unknown": "#6b7280",       # Gray
         }
         status_color = status_colors.get(status, "#6b7280")
-        status_label = QLabel(f"● {status}")
+        status_label = QLabel(f"{status}")
         status_label.setStyleSheet(f"font-size: 9px; color: {status_color}; font-weight: 500;")
         header_layout.addWidget(status_label)
         header_layout.addStretch()
@@ -157,7 +157,7 @@ class DiscoveredCameraCard(QFrame):
         # Network status indicator (wrong subnet warning)
         self._network_status_label = None
         if self.network_info and self._is_wrong_subnet():
-            network_warning = QLabel("⚠ Wrong Subnet")
+            network_warning = QLabel("Wrong Subnet")
             network_warning.setStyleSheet("font-size: 9px; color: #ef4444; font-weight: 600;")
             ip_row.addWidget(network_warning)
             self._network_status_label = network_warning
@@ -209,7 +209,7 @@ class DiscoveredCameraCard(QFrame):
         
         # Fix Network button (if wrong subnet)
         if self.network_info and self._is_wrong_subnet():
-            fix_network_btn = QPushButton("🔧")
+            fix_network_btn = QPushButton("Fix")
             fix_network_btn.setFixedSize(32, 28)
             fix_network_btn.setToolTip("Fix network settings")
             fix_network_btn.setStyleSheet("""
@@ -357,7 +357,7 @@ class CameraListItem(QFrame):
             layout.addWidget(self.checkbox)
             
             # Status indicator (colored dot)
-            self.status_indicator = QLabel("●")
+            self.status_indicator = QLabel("•")
             self.status_indicator.setFixedSize(16, 16)
             self.status_indicator.setStyleSheet("""
                 QLabel {
@@ -916,7 +916,7 @@ class CameraPage(QWidget):
         # Main scroll area containing both sections
         main_scroll = TouchScrollArea()
         main_scroll.setWidgetResizable(True)
-        main_scroll.setStyleSheet("background-color: #121218;")
+        main_scroll.setStyleSheet("background-color: #17191C;")
         main_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
         main_scroll.setMinimumWidth(0)
 
@@ -1119,7 +1119,7 @@ class CameraPage(QWidget):
             QFrame {
                 background-color: transparent;
                 border: none;
-                border-bottom: 1px solid #2a2a38;
+                border-bottom: 1px solid #2B2F36;
             }
         """)
 
@@ -1135,7 +1135,7 @@ class CameraPage(QWidget):
                 border: none;
             }
             ClickableHeader:hover {
-                background-color: rgba(255, 149, 0, 0.1);
+                background-color: rgba(32, 199, 199, 0.1);
                 border-radius: 6px;
             }
         """)
@@ -1145,12 +1145,12 @@ class CameraPage(QWidget):
         label_layout.setContentsMargins(8, 4, 8, 4)
         label_layout.setSpacing(8)
 
-        self.discover_header_label = QLabel("🌐 Discover Cameras")
+        self.discover_header_label = QLabel("Discover Cameras")
         self.discover_header_label.setStyleSheet("""
             QLabel {
                 font-size: 20px;
                 font-weight: 600;
-                color: #ffffff;
+                color: #E9E9E9;
                 background-color: transparent;
             }
         """)
@@ -1171,28 +1171,34 @@ class CameraPage(QWidget):
         discover_header_layout.addStretch()
 
         # Search button (triggers discovery and expands section)
-        self.discover_search_btn = QPushButton("🔍 Search")
+        self.discover_search_btn = QPushButton("Search")
         self.discover_search_btn.setFixedSize(100, 40)  # Match edit/delete button size
         self.discover_search_btn.setStyleSheet("""
             QPushButton {
-                background-color: #FF9500;
-                border: none;
-                border-radius: 6px;
-                color: #121218;
+                background-color: #20C7C7;
+                border: 2.5px solid #20C7C7;
+                border-radius: 12px;
+                color: #17191C;
                 font-size: 13px;
                 font-weight: 600;
                 padding: 0px;
                 margin: 0px;
             }
             QPushButton:hover {
-                background-color: #CC7700;
+                background-color: #2DD4D4;
+                border-color: #2DD4D4;
             }
             QPushButton:pressed {
-                background-color: #AA6600;
+                background-color: #17A5A5;
+                border-color: #17A5A5;
+            }
+            QPushButton:focus {
+                border: 2.5px solid #D9A042;
             }
             QPushButton:disabled {
-                background-color: #2a2a38;
-                color: #888898;
+                background-color: #2B2F36;
+                border-color: #3D4450;
+                color: #B9BCC1;
             }
         """)
         self.discover_search_btn.clicked.connect(self._easyip_discover_cameras)
@@ -1221,15 +1227,15 @@ class CameraPage(QWidget):
         configured_layout.setSpacing(0)
 
         # Configured header
-        self.configured_section_header = QLabel("📋 Configured Cameras (0/30)")
+        self.configured_section_header = QLabel("Configured Cameras (0/30)")
         self.configured_section_header.setStyleSheet("""
             QLabel {
                 font-size: 20px;
                 font-weight: 600;
-                color: #ffffff;
+                color: #E9E9E9;
                 padding: 16px 20px;
                 background-color: transparent;
-                border-bottom: 1px solid #2a2a38;
+                border-bottom: 1px solid #2B2F36;
             }
         """)
         configured_layout.addWidget(self.configured_section_header)
@@ -1300,7 +1306,7 @@ class CameraPage(QWidget):
 
         # Status label
         self.easyip_status_label = QLabel("Ready to search for cameras")
-        self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+        self.easyip_status_label.setStyleSheet("color: #B9BCC1; font-size: 12px; padding: 4px;")
         wrapper_layout.addWidget(self.easyip_status_label)
 
         # Progress bar
@@ -1346,7 +1352,7 @@ class CameraPage(QWidget):
         # Empty state
         self.easyip_empty_label = QLabel("No cameras discovered yet.\nClick 'Search' to find Panasonic cameras.")
         self.easyip_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.easyip_empty_label.setStyleSheet("color: #666676; font-size: 14px; padding: 40px;")
+        self.easyip_empty_label.setStyleSheet("color: #B9BCC1; font-size: 14px; padding: 40px;")
         self.easyip_empty_label.setWordWrap(True)
         self.easyip_camera_layout.addWidget(self.easyip_empty_label)
 
@@ -1497,15 +1503,15 @@ class CameraPage(QWidget):
         controls_layout.setAlignment(Qt.AlignmentFlag.AlignTop)  # Align to top
 
         # Refresh button
-        self.easyip_refresh_btn = QPushButton("🔍 Search")
+        self.easyip_refresh_btn = QPushButton("Search")
         self.easyip_refresh_btn.setFixedHeight(44)
         self.easyip_refresh_btn.setFixedWidth(150)  # Fixed width, 50px wider than default
         self.easyip_refresh_btn.setStyleSheet("""
             QPushButton {
-                background-color: #FF9500;
-                border: 2px solid #FF9500;
-                border-radius: 8px;
-                color: #121218;
+                background-color: #20C7C7;
+                border: 2.5px solid #20C7C7;
+                border-radius: 12px;
+                color: #17191C;
                 font-size: 14px;
                 font-weight: 600;
                 padding: 8px 12px;
@@ -1516,25 +1522,32 @@ class CameraPage(QWidget):
                 max-height: 44px;
             }
             QPushButton:hover {
-                background-color: #CC7700;
-                border: 2px solid #CC7700;
+                background-color: #2DD4D4;
+                border-color: #2DD4D4;
                 min-width: 150px;
                 max-width: 150px;
                 min-height: 44px;
                 max-height: 44px;
             }
             QPushButton:pressed {
-                background-color: #CC7700;
-                border: 2px solid #CC7700;
+                background-color: #17A5A5;
+                border-color: #17A5A5;
+                min-width: 150px;
+                max-width: 150px;
+                min-height: 44px;
+                max-height: 44px;
+            }
+            QPushButton:focus {
+                border: 2.5px solid #D9A042;
                 min-width: 150px;
                 max-width: 150px;
                 min-height: 44px;
                 max-height: 44px;
             }
             QPushButton:disabled {
-                background-color: #2a2a38;
-                border: 2px solid #2a2a38;
-                color: #888898;
+                background-color: #2B2F36;
+                border: 1.5px solid #3D4450;
+                color: #B9BCC1;
                 min-width: 150px;
                 max-width: 150px;
                 min-height: 44px;
@@ -1548,7 +1561,7 @@ class CameraPage(QWidget):
         
         # Status label
         self.easyip_status_label = QLabel("Ready to search for cameras")
-        self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+        self.easyip_status_label.setStyleSheet("color: #B9BCC1; font-size: 12px; padding: 4px;")
         wrapper_layout.addWidget(self.easyip_status_label)
         
         # Progress bar
@@ -1592,7 +1605,7 @@ class CameraPage(QWidget):
         # Empty state
         self.easyip_empty_label = QLabel("No cameras discovered yet.\nClick 'Search' to find Panasonic cameras.")
         self.easyip_empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.easyip_empty_label.setStyleSheet("color: #666676; font-size: 14px; padding: 40px;")
+        self.easyip_empty_label.setStyleSheet("color: #B9BCC1; font-size: 14px; padding: 40px;")
         self.easyip_empty_label.setWordWrap(True)
         self.easyip_camera_layout.addWidget(self.easyip_empty_label)
         
@@ -1661,15 +1674,15 @@ class CameraPage(QWidget):
 
         # Show empty state
         self.easyip_empty_label.show()
-        self.easyip_empty_label.setText("🔍 Searching network for Panasonic cameras...")
-        self.easyip_empty_label.setStyleSheet("color: #FF9500; font-size: 14px; padding: 40px;")
+        self.easyip_empty_label.setText("Searching network for Panasonic cameras...")
+        self.easyip_empty_label.setStyleSheet("color: #20C7C7; font-size: 14px; padding: 40px;")
 
         # Update UI (header search button)
         if hasattr(self, 'discover_search_btn'):
             self.discover_search_btn.setEnabled(False)
-            self.discover_search_btn.setText("⏳ Scanning...")
-        self.easyip_status_label.setText("🔍 Searching network for Panasonic cameras...")
-        self.easyip_status_label.setStyleSheet("color: #FF9500; font-size: 12px; padding: 4px;")
+            self.discover_search_btn.setText("Scanning...")
+        self.easyip_status_label.setText("Searching network for Panasonic cameras...")
+        self.easyip_status_label.setStyleSheet("color: #20C7C7; font-size: 12px; padding: 4px;")
         self.easyip_progress.show()
         self.easyip_progress.setValue(0)
         
@@ -1733,7 +1746,7 @@ class CameraPage(QWidget):
         # Re-enable header search button
         if hasattr(self, 'discover_search_btn'):
             self.discover_search_btn.setEnabled(True)
-            self.discover_search_btn.setText("🔍 Search")
+            self.discover_search_btn.setText("Search")
         self.easyip_progress.setValue(100)
         QTimer.singleShot(1000, lambda: self.easyip_progress.hide())
         
@@ -1798,7 +1811,7 @@ class CameraPage(QWidget):
             self.easyip_status_label.setText(f"💡 Camera {ip_address} LED is blinking for 5 seconds")
             self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
         else:
-            self.easyip_status_label.setText(f"⚠️ Could not identify camera {ip_address}")
+            self.easyip_status_label.setText(f"Could not identify camera {ip_address}")
             self.easyip_status_label.setStyleSheet("color: #f97316; font-size: 12px; padding: 4px;")
         
         # Reset status after delay
@@ -1882,7 +1895,7 @@ class CameraPage(QWidget):
             self.easyip_status_label.setStyleSheet("color: #22c55e; font-size: 12px; padding: 4px;")
         else:
             self.easyip_status_label.setText("Ready to search for cameras")
-            self.easyip_status_label.setStyleSheet("color: #888898; font-size: 12px; padding: 4px;")
+            self.easyip_status_label.setStyleSheet("color: #B9BCC1; font-size: 12px; padding: 4px;")
 
     def _create_edit_form_panel(self) -> QWidget:
         """Create edit form panel for bottom sheet (2-column layout)."""
@@ -2351,7 +2364,7 @@ class CameraPage(QWidget):
         # Update count and progress
         total = len(self.settings.cameras)
         if hasattr(self, 'configured_section_header'):
-            self.configured_section_header.setText(f"📋 Configured Cameras ({total}/30)")
+            self.configured_section_header.setText(f"Configured Cameras ({total}/30)")
         
         # Update badge on Configured button
         self._update_configured_badge()
@@ -2577,7 +2590,7 @@ class CameraPage(QWidget):
         self._editing_camera_id = None
         self._clear_camera_form()
         self.cancel_edit_btn.hide()
-        self.save_camera_btn.setText("💾 Save")
+        self.save_camera_btn.setText("Save")
         self._form_has_changes = False
     
     def _on_camera_selection_changed(self, camera_id: int, selected: bool):

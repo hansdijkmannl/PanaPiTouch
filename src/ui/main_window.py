@@ -151,7 +151,7 @@ class PresetButton(QPushButton):
                         }}
                         QPushButton:pressed {{
                             border-color: {COLORS['primary']};
-                            background-color: rgba(255, 149, 0, 0.3);
+                            background-color: rgba(32, 199, 199, 0.3);
                         }}
                     """)
                     return
@@ -246,14 +246,14 @@ class PresetButton(QPushButton):
             }}
         """)
         
-        save_action = menu.addAction("💾 Save Preset")
+        save_action = menu.addAction("Save Preset")
         save_action.triggered.connect(self._save_preset)
         
         if self.has_thumbnail:
-            rename_action = menu.addAction("✏️ Rename Preset")
+            rename_action = menu.addAction("Rename Preset")
             rename_action.triggered.connect(self._rename_preset)
             
-            delete_action = menu.addAction("🗑️ Delete Preset")
+            delete_action = menu.addAction("Delete Preset")
             delete_action.triggered.connect(self._delete_preset)
         
         # Show menu below button
@@ -485,10 +485,10 @@ class MainWindow(QMainWindow):
         self.nav_button_group.setExclusive(True)
         
         nav_buttons = [
-            ("📺  Live Page", 0),
-            ("📷  Cameras", 1),
-            ("🎛️  Companion", 2),
-            ("⚙️  Settings", 3),
+            ("Live Page", 0),
+            ("Cameras", 1),
+            ("Companion", 2),
+            ("Settings", 3),
         ]
         
         for text, page_idx in nav_buttons:
@@ -1194,10 +1194,10 @@ class MainWindow(QMainWindow):
         
         # Menu buttons: Presets, Camera Control, Guides, Multi-Cam
         menu_buttons = [
-            ("🎮 Presets", 0),
-            ("⚙️ Camera Control", 1),
-            ("📐 Guides", 2),
-            ("🎬 Multi-Cam", 3),
+            ("Presets", 0),
+            ("Camera Control", 1),
+            ("Guides", 2),
+            ("Multi-Cam", 3),
         ]
         
         for text, panel_idx in menu_buttons:
@@ -3443,7 +3443,7 @@ class MainWindow(QMainWindow):
         actions_layout = QVBoxLayout()
         actions_layout.setSpacing(8)
 
-        save_btn = QPushButton("💾 Save Configuration")
+        save_btn = QPushButton("Save Configuration")
         save_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLORS['primary']};
@@ -3518,7 +3518,7 @@ class MainWindow(QMainWindow):
             preview_text = f"Selected Cameras ({len(selected_cameras)}):\n" + "\n".join(selected_cameras)
             preview_text += f"\n\nTotal Presets: {total_presets}/48"
             if total_presets > 48:
-                preview_text += " ⚠️ Over limit!"
+                preview_text += " Over limit!"
         else:
             preview_text = "No cameras selected"
 
@@ -4375,7 +4375,7 @@ class MainWindow(QMainWindow):
         status_layout.setContentsMargins(12, 10, 12, 10)
         status_layout.setSpacing(6)
         
-        self.connection_status = QLabel("CAM: ● Disconnected")
+        self.connection_status = QLabel("CAM: Not Connected")
         self.connection_status.setTextFormat(Qt.TextFormat.RichText)
         self.connection_status.setStyleSheet(f"""
             color: {COLORS['text']}; 
@@ -4389,7 +4389,7 @@ class MainWindow(QMainWindow):
         self.connection_status.setToolTip("Camera disconnected")
         status_layout.addWidget(self.connection_status)
         
-        self.atem_status = QLabel("ATEM: ● Not Configured")
+        self.atem_status = QLabel("ATEM: Not Configured")
         self.atem_status.setTextFormat(Qt.TextFormat.RichText)
         self.atem_status.setStyleSheet(f"""
             color: {COLORS['text']}; 
@@ -5620,6 +5620,7 @@ class MainWindow(QMainWindow):
             desired_h = OSKWidget.DEFAULT_HEIGHT
         desired_h = max(1, desired_h)
         slot.setFixedHeight(desired_h)
+        slot.show()  # Make slot visible when OSK is docked
 
         # Ensure slot has a layout.
         lay = slot.layout()
@@ -5656,6 +5657,8 @@ class MainWindow(QMainWindow):
             slot = getattr(self.companion_page, "osk_slot", None)
             if slot is not None and self.osk.parent() is slot and slot.layout() is not None:
                 slot.layout().removeWidget(self.osk)
+                slot.setFixedHeight(0)
+                slot.hide()
         except Exception:
             pass
 
@@ -5679,6 +5682,7 @@ class MainWindow(QMainWindow):
             desired_h = OSKWidget.DEFAULT_HEIGHT
         desired_h = max(1, desired_h)
         slot.setFixedHeight(desired_h)
+        slot.show()  # Make slot visible when OSK is docked
         # If the edit panel is open, clamp its height so the OSK remains fully visible.
         try:
             if hasattr(self.camera_page, "adjust_bottom_sheet_for_osk"):
@@ -5718,6 +5722,7 @@ class MainWindow(QMainWindow):
             if slot is not None and self.osk.parent() is slot and slot.layout() is not None:
                 slot.layout().removeWidget(self.osk)
                 slot.setFixedHeight(0)
+                slot.hide()
         except Exception:
             pass
 
@@ -5778,15 +5783,17 @@ class MainWindow(QMainWindow):
     
     def _on_page_changed(self, index: int):
         """Handle page change - manage OSK and pause/resume streams"""
+
         # Trigger lazy loading of companion web view if switching to it
         if index == 2:  # Companion page
+            print(f"Switching to Companion page, creating web view...")
             self.companion_page._create_web_view()
 
         # Pause/resume camera streams based on page to save CPU
         if index == 0:  # Live/Preview page
             # Resume camera stream if we have one
             self._resume_camera_streams()
-            
+
             if self.osk:
                 # Only hide if the currently targeted field is NOT explicitly allowed on Live page
                 target = getattr(self.osk, "_target_widget", None)
@@ -5799,15 +5806,14 @@ class MainWindow(QMainWindow):
         else:
             # Pause camera streams when not on Live page to save CPU
             self._pause_camera_streams()
-        
+
         if index == 2:  # Companion page
-            # Always show OSK docked at the bottom of Companion page.
-            self._dock_osk_to_companion()
-            # Target the web view by default
-            try:
-                self._show_osk_for_companion(getattr(self.companion_page, "web_view", None))
-            except Exception:
-                pass
+            # Ensure we stay in fullscreen mode when switching to companion page
+            if not self.isFullScreen():
+                self.showFullScreen()
+            # Dock OSK after web view is created to ensure proper layout
+            # Use a longer delay to ensure web view is fully loaded
+            QTimer.singleShot(500, lambda: self._dock_osk_to_companion())
         else:
             # Hide OSK when leaving Companion page if it was targeting the web view.
             if self.osk and index != 2:
@@ -5828,7 +5834,18 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int)
     def _on_nav_clicked(self, page_idx: int):
         """Handle navigation button click"""
-        self.page_stack.setCurrentIndex(page_idx)
+        try:
+            print(f"Navigation button clicked, switching to page {page_idx}")
+            # Ensure we maintain fullscreen state
+            was_fullscreen = self.isFullScreen()
+            self.page_stack.setCurrentIndex(page_idx)
+            # Restore fullscreen if it was lost
+            if was_fullscreen and not self.isFullScreen():
+                QTimer.singleShot(100, lambda: self.showFullScreen())
+        except Exception as e:
+            print(f"Error switching to page {page_idx}: {e}")
+            import traceback
+            traceback.print_exc()
     
     @pyqtSlot(str)
     def _on_companion_update_available(self, version: str):
@@ -6050,14 +6067,14 @@ class MainWindow(QMainWindow):
             
             # Create or reuse stream
             if camera_id not in self.camera_streams:
-                # Use 1280x720 for better performance on Raspberry Pi
-                # This reduces processing overhead by ~56% (fewer pixels to process)
+                # Use 960x540 for even better performance on Raspberry Pi with multiple cameras
+                # This reduces processing overhead while maintaining good quality
                 config = StreamConfig(
                     ip_address=camera.ip_address,
                     port=camera.port,
                     username=camera.username,
                     password=camera.password,
-                    resolution=(1280, 720)  # Reduced from 1920x1080 for better framerate
+                    resolution=(960, 540)  # Further reduced for multi-camera performance
                 )
                 stream = CameraStream(config)
                 self.camera_streams[camera_id] = stream
@@ -6075,16 +6092,62 @@ class MainWindow(QMainWindow):
             # Start new stream
             # The start() method checks if already running and returns early if so
             # Ensure consistent streaming method - use RTSP with MJPEG fallback (not snapshot)
+            stream_started = False
             try:
                 stream.start(use_rtsp=True, use_snapshot=False, force_mjpeg=False)
-                # Start status and FPS timers now that we have an active camera
-                if not self.status_timer.isActive():
-                    self.status_timer.start(2000)  # Reduced frequency: every 2 seconds
-                if not self.fps_timer.isActive():
-                    self.fps_timer.start(2000)  # Reduced frequency: every 2 seconds
+                # Wait a bit for stream to initialize and check if it's connected
+                import time
+                time.sleep(0.5)  # Give stream time to connect
+                if stream.is_connected:
+                    stream_started = True
+                    # Start status and FPS timers now that we have an active camera
+                    if not self.status_timer.isActive():
+                        self.status_timer.start(2000)  # Reduced frequency: every 2 seconds
+                    if not self.fps_timer.isActive():
+                        self.fps_timer.start(2000)  # Reduced frequency: every 2 seconds
+                    logger.info(f"Successfully started stream for {camera.name}")
+                else:
+                    logger.warning(f"Stream started but not connected for {camera.name}")
+                    stream_started = False
             except Exception as e:
                 logger.error(f"Error starting stream: {e}", exc_info=True)
-                self.toast.show_message(f"Error starting {camera.name}", duration=2000, error=True)
+                stream_started = False
+
+            if not stream_started:
+                # Stream failed to start - show error and revert camera selection
+                error_msg = f"Failed to connect to {camera.name}"
+                if hasattr(stream, 'error_message') and stream.error_message:
+                    error_msg += f": {stream.error_message}"
+                self.toast.show_message(error_msg, duration=3000, error=True)
+
+                # Revert to previous camera if possible
+                if prev_camera_id is not None and prev_camera_id in self.camera_streams:
+                    try:
+                        prev_stream = self.camera_streams[prev_camera_id]
+                        if prev_stream.is_connected:
+                            self.current_camera_id = prev_camera_id
+                            prev_stream.add_frame_callback(self._on_frame_received)
+                            logger.info(f"Reverted to previous camera {prev_camera_id}")
+                        else:
+                            self.current_camera_id = None
+                            self.preview_widget.clear_frame()
+                            self.preview_widget.stop_frame_updates()
+                    except Exception as e:
+                        logger.warning(f"Error reverting to previous camera: {e}")
+                        self.current_camera_id = None
+                        self.preview_widget.clear_frame()
+                        self.preview_widget.stop_frame_updates()
+                else:
+                    self.current_camera_id = None
+                    self.preview_widget.clear_frame()
+                    self.preview_widget.stop_frame_updates()
+
+                # Stop timers if no camera is active
+                if self.status_timer.isActive():
+                    self.status_timer.stop()
+                if self.fps_timer.isActive():
+                    self.fps_timer.stop()
+
                 return
             
             # Stop previous stream after a delay (allows new stream to start)
@@ -6134,8 +6197,44 @@ class MainWindow(QMainWindow):
                 # Remove callback before stopping
                 stream.remove_frame_callback(self._on_frame_received)
                 stream.stop()
+                logger.info(f"Stopped previous stream for camera {camera_id}")
         except Exception as e:
             logger.warning(f"Error stopping previous stream {camera_id}: {e}")
+            # If stopping fails, at least remove it from the streams dict to prevent memory leaks
+            try:
+                if camera_id in self.camera_streams:
+                    del self.camera_streams[camera_id]
+            except Exception:
+                pass
+
+    def _reconnect_camera(self, camera_id: int):
+        """Force reconnection of a specific camera"""
+        try:
+            camera = self.settings.get_camera(camera_id)
+            if not camera:
+                self.toast.show_message(f"Camera {camera_id} not found", duration=2000, error=True)
+                return
+
+            if camera_id in self.camera_streams:
+                stream = self.camera_streams[camera_id]
+                if hasattr(stream, 'force_reconnect'):
+                    stream.force_reconnect()
+                    self.toast.show_message(f"Reconnecting to {camera.name}", duration=2000)
+                else:
+                    # Recreate the stream
+                    stream.stop()
+                    del self.camera_streams[camera_id]
+                    self.toast.show_message(f"Restarting {camera.name}", duration=2000)
+            else:
+                self.toast.show_message(f"No active stream for {camera.name}", duration=2000)
+
+            # If this is the current camera, reselect it
+            if self.current_camera_id == camera_id:
+                QTimer.singleShot(500, lambda: self._select_camera(camera_id))
+
+        except Exception as e:
+            logger.error(f"Error reconnecting camera {camera_id}: {e}")
+            self.toast.show_message(f"Error reconnecting camera", duration=2000, error=True)
     
     def _pause_camera_streams(self):
         """Pause all camera streams to save CPU when not on Live page"""
@@ -6172,14 +6271,14 @@ class MainWindow(QMainWindow):
         try:
             if frame is None:
                 return
-            
+
             # Safety check - ensure preview widget exists
             if not hasattr(self, 'preview_widget') or self.preview_widget is None:
                 return
-            
+
             import cv2
             import numpy as np
-            
+
             # Handle split view if enabled
             if self._split_enabled and self._split_camera_id is not None:
                 try:
@@ -6189,7 +6288,7 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     logger.warning(f"Error in split view: {e}")
                     # Continue with main frame if split fails
-            
+
             # Update preview widget (has its own error handling)
             if hasattr(self, 'preview_widget') and self.preview_widget is not None:
                 self.preview_widget.update_frame(frame)
@@ -6514,30 +6613,30 @@ class MainWindow(QMainWindow):
             if self.current_camera_id is not None and self.current_camera_id in self.camera_streams:
                 stream = self.camera_streams[self.current_camera_id]
                 if stream.is_connected:
-                    self.connection_status.setText(f"CAM: <span style='color:{COLORS['success']}'>●</span> Connected")
+                    self.connection_status.setText(f"CAM: Connected")
                     self.connection_status.setStyleSheet(status_style)
                     self.connection_status.setToolTip("Camera connected")
                 else:
-                    self.connection_status.setText(f"CAM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
+                    self.connection_status.setText(f"CAM: Disconnected")
                     self.connection_status.setStyleSheet(status_style)
                     self.connection_status.setToolTip(f"Camera disconnected: {stream.error_message}")
             else:
-                self.connection_status.setText(f"CAM: <span style='color:{COLORS['text_dark']}'>●</span> No Camera")
+                self.connection_status.setText(f"CAM: No Camera")
                 self.connection_status.setStyleSheet(status_style_dim)
                 self.connection_status.setToolTip("No camera selected")
         
         # ATEM connection status (only if widget exists)
         if hasattr(self, 'atem_status') and self.atem_status is not None:
             if self.atem_controller.is_connected:
-                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['success']}'>●</span> Connected")
+                self.atem_status.setText(f"ATEM: Connected")
                 self.atem_status.setStyleSheet(status_style)
                 self.atem_status.setToolTip("ATEM connected")
             elif self.settings.atem.enabled:
-                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['error']}'>●</span> Disconnected")
+                self.atem_status.setText(f"ATEM: Disconnected")
                 self.atem_status.setStyleSheet(status_style)
                 self.atem_status.setToolTip("ATEM disconnected")
             else:
-                self.atem_status.setText(f"ATEM: <span style='color:{COLORS['text_dark']}'>●</span> Not Configured")
+                self.atem_status.setText(f"ATEM: Not Configured")
                 self.atem_status.setStyleSheet(status_style_dim)
                 self.atem_status.setToolTip("ATEM not configured")
     
@@ -6887,7 +6986,23 @@ class MainWindow(QMainWindow):
         self.atem_controller.disconnect()
         
         event.accept()
-    
+
+    def resizeEvent(self, event):
+        """Handle resize events - enforce fullscreen"""
+        super().resizeEvent(event)
+
+        # If we're supposed to be fullscreen but size doesn't match screen, restore fullscreen
+        if self.windowState() & Qt.WindowState.WindowFullScreen:
+            from PyQt6.QtWidgets import QApplication
+            screen = QApplication.primaryScreen()
+            if screen:
+                screen_geom = screen.geometry()
+                # If window size doesn't match screen size, force fullscreen again
+                if self.size() != screen_geom.size():
+                    from PyQt6.QtCore import QTimer
+                    # Use timer to avoid recursion
+                    QTimer.singleShot(0, lambda: self.showFullScreen())
+
     def keyPressEvent(self, event):
         """Handle key presses"""
         # F11 - Toggle fullscreen
@@ -6896,14 +7011,14 @@ class MainWindow(QMainWindow):
                 self.showNormal()
             else:
                 self.showFullScreen()
-        
+
         # Escape - Exit fullscreen or close
         elif event.key() == Qt.Key.Key_Escape:
             if self.isFullScreen():
                 self.showNormal()
             else:
                 self.close()
-        
+
         # Number keys 1-9, 0 - Select camera
         elif Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9:
             idx = event.key() - Qt.Key.Key_1
@@ -6912,7 +7027,7 @@ class MainWindow(QMainWindow):
         elif event.key() == Qt.Key.Key_0:
             if len(self.settings.cameras) >= 10:
                 self._select_camera(self.settings.cameras[9].id)
-        
+
         # F1-F4 - Toggle overlays
         elif event.key() == Qt.Key.Key_F1:
             self._toggle_overlay("false_color")

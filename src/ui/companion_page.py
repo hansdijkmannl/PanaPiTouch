@@ -57,12 +57,26 @@ class CompanionPage(QWidget):
         self._start_update_detection()
     
     def _setup_ui(self):
-        """Setup the page UI"""
+        """Setup the page UI with web view container and OSK slot"""
+        from PyQt6.QtWidgets import QSizePolicy
+
+        # Ensure page doesn't expand beyond parent
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.setMinimumSize(0, 0)
+
+        # Main vertical layout: [Web View Container] [OSK Slot]
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
-        # Placeholder widget - web view will be created lazily
+
+        # Web view container - takes all available space
+        self.web_container = QWidget()
+        self.web_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+        self.web_container_layout = QVBoxLayout(self.web_container)
+        self.web_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.web_container_layout.setSpacing(0)
+
+        # Placeholder widget - shown until web view is created
         self.placeholder = QWidget()
         self.placeholder.setStyleSheet(f"""
             QWidget {{
@@ -71,8 +85,6 @@ class CompanionPage(QWidget):
                 border-radius: 8px;
             }}
         """)
-
-        # Add loading text
         placeholder_layout = QVBoxLayout(self.placeholder)
         loading_label = QLabel("Loading Companion...")
         loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -84,41 +96,62 @@ class CompanionPage(QWidget):
             }}
         """)
         placeholder_layout.addWidget(loading_label)
-        layout.addWidget(self.placeholder)
+        self.web_container_layout.addWidget(self.placeholder)
+
+        # Add web container to main layout with stretch factor
+        layout.addWidget(self.web_container, stretch=1)
 
         # Web view will be created lazily when page becomes visible
         self.web_view = None
 
-        # Reserved slot for docked OSK (MainWindow will reparent OSK into here on Companion page)
+        # OSK slot at bottom - starts hidden, expands only when OSK is docked
         self.osk_slot = QFrame()
         self.osk_slot.setObjectName("companionOskSlot")
         self.osk_slot.setStyleSheet("QFrame#companionOskSlot { background: transparent; border: none; }")
-        # Default OSK height; MainWindow may override to match OSKWidget's configured height
-        self.osk_slot.setFixedHeight(430)
-        layout.addWidget(self.osk_slot, 0)
+        self.osk_slot.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.osk_slot.setFixedHeight(0)
+        self.osk_slot.hide()
+        # Add OSK slot with NO stretch - it only takes space when visible
+        layout.addWidget(self.osk_slot, stretch=0)
 
     def _create_web_view(self):
         """Create web view lazily when page becomes visible"""
         if self.web_view is not None:
+            print("Web view already exists, skipping creation")
             return  # Already created
 
+        print("Creating Companion web view...")
         try:
-            # Remove placeholder
+            # Check if Qt WebEngine is available
+            try:
+                from PyQt6.QtWebEngineWidgets import QWebEngineView
+            except ImportError as e:
+                print(f"Qt WebEngine not available: {e}")
+                raise Exception("Qt WebEngine not available")
+
+            # Remove placeholder from web container
             if hasattr(self, 'placeholder') and self.placeholder is not None:
-                self.layout().removeWidget(self.placeholder)
-                self.placeholder.hide()
+                self.web_container_layout.removeWidget(self.placeholder)
+                self.placeholder.deleteLater()
+                self.placeholder = None
 
             # Create web view
+            print("Instantiating TouchWebEngineView...")
             self.web_view = TouchWebEngineView()
 
-            # Install OSK bridge script (runs in all frames) for reliable text injection.
-            # Must be installed BEFORE navigation starts so it injects on initial load.
+            # Ensure web view fills container but doesn't request more space
+            from PyQt6.QtWidgets import QSizePolicy
+            self.web_view.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
+            self.web_view.setMinimumSize(0, 0)
+
+            # Install OSK bridge script (runs in all frames) for reliable text injection
+            # Must be installed BEFORE navigation starts so it injects on initial load
             self._install_osk_bridge_script()
             self.web_view.setUrl(QUrl(self.companion_url))
-            
+
             # Set zoom factor to 75% (0.75) to scale down the display
             self.web_view.setZoomFactor(0.75)
-            
+
             # Configure settings
             settings = self.web_view.settings()
             settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
@@ -127,24 +160,37 @@ class CompanionPage(QWidget):
             settings.setAttribute(QWebEngineSettings.WebAttribute.TouchIconsEnabled, True)
             settings.setAttribute(QWebEngineSettings.WebAttribute.SpatialNavigationEnabled, False)
             settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
-            
+
             # Connect signals
             self.web_view.loadFinished.connect(self._on_load_finished)
-            
-            # Add to layout
-            self.layout().addWidget(self.web_view, 1)
+
+            # Add web view to web container (NOT main layout)
+            self.web_container_layout.addWidget(self.web_view, stretch=1)
 
             # Ensure the web view is visible
             self.web_view.show()
-            self.update()  # Force a repaint
+            print("Companion web view shown")
+
+            # Connect web view to OSK if main window has the connection method
+            try:
+                if hasattr(self.parent(), '_connect_companion_webview_to_osk'):
+                    self.parent()._connect_companion_webview_to_osk(self.web_view)
+                    print("Connected web view to OSK")
+                else:
+                    print("Main window does not have OSK connection method")
+            except Exception as e:
+                print(f"Could not connect companion web view to OSK: {e}")
 
             # Start update detection now that web view is ready
             self._start_update_detection()
+            print("Companion web view creation completed successfully")
 
         except Exception as e:
             print(f"Error creating web view: {e}")
             import traceback
             traceback.print_exc()
+            # Reset web_view to None so it can be retried
+            self.web_view = None
 
             # Fallback: show error message
             error_label = QLabel(f"Failed to load Companion web interface.\nError: {e}\nURL: {self.companion_url}")
@@ -155,8 +201,11 @@ class CompanionPage(QWidget):
     def showEvent(self, event):
         """Handle page becoming visible"""
         super().showEvent(event)
-        # Create web view lazily when page becomes visible
-        self._create_web_view()
+        # Only create web view if it hasn't been created yet and we're actually visible
+        # This prevents duplicate creation that might cause UI issues
+        if self.web_view is None and self.isVisible():
+            # Use a longer delay to ensure the page switch is complete
+            QTimer.singleShot(200, self._create_web_view)
 
     def _install_osk_bridge_script(self):
         """Install a JS bridge that receives OSK keystrokes via postMessage."""

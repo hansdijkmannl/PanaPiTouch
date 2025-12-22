@@ -45,38 +45,38 @@ class StyledComboBox(QComboBox):
             if popup:
                 popup.setStyleSheet("""
                     QWidget, QFrame {
-                        background-color: #242430 !important;
-                        border: 2px solid #2a2a38;
+                        background-color: #262A32 !important;
+                        border: 1.5px solid #3D4450;
                     }
                 """)
             view.setStyleSheet("""
                 QAbstractItemView {
-                    background-color: #242430 !important;
-                    border: 2px solid #2a2a38;
-                    selection-background-color: #FF9500;
-                    color: #FFFFFF !important;
+                    background-color: #262A32 !important;
+                    border: 1.5px solid #3D4450;
+                    selection-background-color: #20C7C7;
+                    color: #E9E9E9 !important;
                     padding: 0px;
                     font-size: 16px;
                     outline: none;
                 }
                 QAbstractScrollArea, QAbstractScrollArea::viewport {
-                    background-color: #242430 !important;
+                    background-color: #262A32 !important;
                 }
                 QWidget {
-                    background-color: #242430 !important;
+                    background-color: #262A32 !important;
                 }
                 QAbstractItemView::item {
-                    background-color: #242430 !important;
+                    background-color: #262A32 !important;
                     min-height: 56px !important;
                     padding: 16px 20px;
-                    border-radius: 4px;
-                    color: #FFFFFF !important;
+                    border-radius: 12px;
+                    color: #E9E9E9 !important;
                 }
                 QAbstractItemView::item:hover {
-                    background-color: #2a2a38 !important;
+                    background-color: #2e2e3a !important;
                 }
                 QAbstractItemView::item:selected {
-                    background-color: #FF9500 !important;
+                    background-color: #20C7C7 !important;
                     color: #121218 !important;
                 }
             """)
@@ -123,17 +123,17 @@ class SettingsPage(QWidget):
         # Sidebar buttons
         self.sidebar_buttons = []
         sections = [
-            ("🌐", "Network"),
-            ("🎬", "ATEM"),
-            ("📷", "Camera Control"),
-            ("💾", "Backup"),
-            ("🎛️", "Companion"),
-            ("⌨️", "Keyboard presets"),
-            ("📊", "System"),
+            ("Network", "Network"),
+            ("ATEM", "ATEM"),
+            ("Camera Control", "Camera Control"),
+            ("Backup", "Backup"),
+            ("Companion", "Companion"),
+            ("Keyboard Presets", "Keyboard presets"),
+            ("System", "System"),
         ]
         
         for i, (icon, name) in enumerate(sections):
-            btn = QPushButton(f"{icon}\n{name}")
+            btn = QPushButton(f"{icon}")
             btn.setCheckable(True)
             btn.setMinimumHeight(80)
             btn.setStyleSheet(self._get_sidebar_button_style())
@@ -146,7 +146,7 @@ class SettingsPage(QWidget):
         
         # === RIGHT CONTENT AREA ===
         self.content_stack = QStackedWidget()
-        self.content_stack.setStyleSheet("background-color: #121218;")
+        self.content_stack.setStyleSheet("background-color: #17191C;")
         
         # Create content panels
         self.content_stack.addWidget(self._create_network_panel())
@@ -176,16 +176,16 @@ class SettingsPage(QWidget):
                 text-align: center;
             }
             QPushButton:hover {
-                background-color: #242430;
-                color: #ffffff;
+                background-color: #1A1D21;
+                color: #E9E9E9;
             }
             QPushButton:checked {
-                background-color: #FF9500;
+                background-color: #20C7C7;
                 color: #121218;
                 font-weight: 600;
             }
             QPushButton:pressed {
-                background-color: #CC7700;
+                background-color: #17A5A5;
             }
         """
     
@@ -241,12 +241,12 @@ class SettingsPage(QWidget):
             return
 
         if self._companion_update_version:
-            self.companion_status_label.setText(f"● Update available: v{self._companion_update_version}")
+            self.companion_status_label.setText(f"Update available: v{self._companion_update_version}")
             self.companion_status_label.setStyleSheet(self._get_status_style("info"))
             self.companion_update_btn.setEnabled(True)
             self.companion_update_btn.setText(f"Update Companion to v{self._companion_update_version}")
         else:
-            self.companion_status_label.setText("● No update detected")
+            self.companion_status_label.setText("No update detected")
             self.companion_status_label.setStyleSheet(self._get_status_style("success"))
             self.companion_update_btn.setEnabled(False)
             self.companion_update_btn.setText("Update Companion")
@@ -344,7 +344,7 @@ class SettingsPage(QWidget):
         self._companion_update_process.finished.connect(on_finished)
 
         # Update UI while running
-        self.companion_status_label.setText("● Updating Companion…")
+        self.companion_status_label.setText("Updating Companion…")
         self.companion_status_label.setStyleSheet(self._get_status_style("info"))
         self.companion_update_btn.setEnabled(False)
         self.companion_update_btn.setText("Updating…")
@@ -399,7 +399,7 @@ class SettingsPage(QWidget):
 
     def _create_companion_panel(self) -> QWidget:
         """Create Companion settings panel (Option B + Option C)."""
-        wrapper, layout = self._create_content_wrapper("Companion", "🎛️")
+        wrapper, layout = self._create_content_wrapper("Companion", "Companion")
 
         info_frame = self._create_info_card(
             "Manage Bitfocus Companion.\n"
@@ -407,7 +407,7 @@ class SettingsPage(QWidget):
         )
         layout.addWidget(info_frame)
 
-        self.companion_status_label = QLabel("● Checking for updates…")
+        self.companion_status_label = QLabel("Checking for updates…")
         self.companion_status_label.setStyleSheet(self._get_status_style("info"))
         layout.addWidget(self.companion_status_label)
 
@@ -417,12 +417,12 @@ class SettingsPage(QWidget):
         self.companion_update_progress.setFixedHeight(16)
         self.companion_update_progress.setStyleSheet("""
             QProgressBar {
-                background-color: #242430;
-                border: 1px solid #2a2a38;
+                background-color: #1A1D21;
+                border: 1.5px solid #3D4450;
                 border-radius: 8px;
             }
             QProgressBar::chunk {
-                background-color: #FF9500;
+                background-color: #20C7C7;
                 border-radius: 8px;
             }
         """)
@@ -445,45 +445,45 @@ class SettingsPage(QWidget):
         """Get consistent input field styling"""
         return """
             QLineEdit, QComboBox {
-                background-color: #242430;
-                border: 2px solid #2a2a38;
-                border-radius: 8px;
-                padding: 12px 14px;
-                font-size: 15px;
-                color: #FFFFFF;
-                min-height: 24px;
+                background-color: #1A1D21;
+                border: 1.5px solid #3D4450;
+                border-radius: 12px;
+                padding: 12px 16px;
+                font-size: 14px;
+                color: #E9E9E9;
+                min-height: 44px;
             }
             QLineEdit:focus, QComboBox:focus {
-                border-color: #FF9500;
+                border: 2.5px solid #D9A042;
             }
             QLineEdit::placeholder {
-                color: #666676;
+                color: #555568;
             }
             QComboBox::drop-down {
                 border: none;
                 width: 40px;
             }
             QComboBox QAbstractItemView {
-                background-color: #242430 !important;
-                border: 2px solid #2a2a38;
-                selection-background-color: #FF9500;
-                color: #FFFFFF !important;
+                background-color: #1A1D21 !important;
+                border: 2px solid #2B2F36;
+                selection-background-color: #20C7C7;
+                color: #E9E9E9 !important;
                 padding: 4px;
                 font-size: 16px;
                 outline: none;
             }
             QComboBox QAbstractItemView::item {
-                background-color: #242430 !important;
+                background-color: #1A1D21 !important;
                 min-height: 56px !important;
                 padding: 16px 20px;
                 border-radius: 4px;
-                color: #FFFFFF !important;
+                color: #E9E9E9 !important;
             }
             QComboBox QAbstractItemView::item:hover {
-                background-color: #2a2a38 !important;
+                background-color: #2e2e3a !important;
             }
             QComboBox QAbstractItemView::item:selected {
-                background-color: #FF9500 !important;
+                background-color: #20C7C7 !important;
                 color: #121218 !important;
             }
         """
@@ -493,9 +493,9 @@ class SettingsPage(QWidget):
         if primary:
             return """
                 QPushButton {
-                    background-color: #FF9500;
+                    background-color: #20C7C7;
                     border: none;
-                    border-radius: 8px;
+                    border-radius: 12px;
                     color: #121218;
                     font-size: 15px;
                     font-weight: 600;
@@ -503,31 +503,31 @@ class SettingsPage(QWidget):
                     min-height: 48px;
                 }
                 QPushButton:hover {
-                    background-color: #FFAA33;
+                    background-color: #2DD4D4;
                 }
                 QPushButton:pressed {
-                    background-color: #CC7700;
+                    background-color: #17A5A5;
                 }
             """
         else:
             return """
                 QPushButton {
-                    background-color: #2a2a38;
-                    border: 2px solid #3a3a48;
-                    border-radius: 8px;
-                    color: #ffffff;
+                    background-color: #262A32;
+                    border: 1.5px solid #3D4450;
+                    border-radius: 12px;
+                    color: #E9E9E9;
                     font-size: 15px;
                     font-weight: 500;
                     padding: 14px 24px;
                     min-height: 48px;
                 }
                 QPushButton:hover {
-                    border-color: #FF9500;
-                    background-color: #3a3a48;
+                    border-color: #2B2F36;
+                    background-color: #2e2e3a;
                 }
                 QPushButton:pressed {
-                    background-color: #FF9500;
-                    border-color: #FF9500;
+                    background-color: #20C7C7;
+                    border-color: #20C7C7;
                     color: #121218;
                 }
             """
@@ -538,26 +538,33 @@ class SettingsPage(QWidget):
             QSlider::groove:horizontal {
                 border: none;
                 height: 8px;
-                background: #2a2a38;
-                border-radius: 4px;
+                background: #262A32;
+                border-radius: 6px;
             }
             QSlider::handle:horizontal {
-                background: #FF9500;
+                background: #20C7C7;
                 border: none;
-                width: 28px;
-                height: 28px;
-                margin: -10px 0;
-                border-radius: 14px;
+                width: 20px;
+                height: 20px;
+                margin: -6px 0;
+                border-radius: 10px;
             }
             QSlider::handle:horizontal:hover {
-                background: #FFAA33;
+                background: #2DD4D4;
             }
             QSlider::handle:horizontal:pressed {
-                background: #CC7700;
+                background: #17A5A5;
+            }
+            QSlider::handle:horizontal:focus {
+                border: 2px solid #D9A042;
             }
             QSlider::sub-page:horizontal {
-                background: #FF9500;
-                border-radius: 4px;
+                background: #20C7C7;
+                border-radius: 6px;
+            }
+            QSlider::add-page:horizontal {
+                background: #262A32;
+                border-radius: 6px;
             }
         """
     
@@ -581,7 +588,7 @@ class SettingsPage(QWidget):
         header_layout.setContentsMargins(24, 0, 24, 0)
         
         title_label = QLabel(f"{icon}  {title}")
-        title_label.setStyleSheet("font-size: 22px; font-weight: 600; color: #ffffff;")
+        title_label.setStyleSheet("font-size: 22px; font-weight: 600; color: #E9E9E9;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
@@ -604,32 +611,38 @@ class SettingsPage(QWidget):
 
     def _create_camera_control_panel(self) -> QWidget:
         """Create Camera Control settings panel with Multi-Cam configuration"""
-        wrapper, layout = self._create_content_wrapper("Camera Control", "📷")
+        wrapper, layout = self._create_content_wrapper("Camera Control", "Camera Control")
 
         # Multi-Camera Presets section
-        multi_cam_group = QGroupBox("Multi-Camera Presets")
+        multi_cam_group = QFrame()
         multi_cam_group.setStyleSheet("""
-            QGroupBox {
-                font-size: 14px;
-                font-weight: bold;
-                color: #ffffff;
-                border: 2px solid #2a2a38;
-                border-radius: 8px;
-                margin-top: 8px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 8px 0 8px;
+            QFrame {
+                background-color: #1a1a22;
+                border: 1px solid #2a2a38;
+                border-radius: 12px;
             }
         """)
 
         multi_layout = QVBoxLayout(multi_cam_group)
+        multi_layout.setContentsMargins(20, 20, 20, 20)
+        multi_layout.setSpacing(16)
+
+        # Section header
+        section_header = QLabel("Multi-Camera Presets")
+        section_header.setStyleSheet("""
+            QLabel {
+                font-size: 20px;
+                font-weight: 600;
+                color: #E9E9E9;
+                background-color: transparent;
+                padding-bottom: 8px;
+            }
+        """)
+        multi_layout.addWidget(section_header)
 
         # Instructions
         instructions = QLabel("Configure which cameras to include in the multi-camera preset view. Each camera can have a different grid layout.")
-        instructions.setStyleSheet("color: #b0b0b0; font-size: 12px; padding: 8px 0;")
+        instructions.setStyleSheet("color: #888898; font-size: 13px; padding-bottom: 8px;")
         instructions.setWordWrap(True)
         multi_layout.addWidget(instructions)
 
@@ -637,13 +650,13 @@ class SettingsPage(QWidget):
         cameras_frame = QFrame()
         cameras_frame.setStyleSheet("""
             QFrame {
-                background-color: #1a1a22;
-                border: 1px solid #2a2a38;
-                border-radius: 6px;
+                background-color: #262A32;
+                border: 1.5px solid #3D4450;
+                border-radius: 8px;
             }
         """)
         cameras_layout = QVBoxLayout(cameras_frame)
-        cameras_layout.setContentsMargins(12, 12, 12, 12)
+        cameras_layout.setContentsMargins(16, 16, 16, 16)
         cameras_layout.setSpacing(12)
 
         # Store references for later use
@@ -669,23 +682,25 @@ class SettingsPage(QWidget):
             radio_btn.setStyleSheet("""
                 QRadioButton {
                     font-size: 13px;
-                    color: #ffffff;
+                    color: #E9E9E9;
                     padding: 8px;
-                    spacing: 6px;
+                    spacing: 8px;
                 }
                 QRadioButton::indicator {
-                    width: 18px;
-                    height: 18px;
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
                 }
                 QRadioButton::indicator:unchecked {
-                    border: 2px solid #404050;
-                    border-radius: 9px;
-                    background-color: #1e1e28;
+                    border: 1.5px solid #3D4450;
+                    background-color: #1A1D21;
                 }
                 QRadioButton::indicator:checked {
-                    border: 2px solid #3498db;
-                    border-radius: 9px;
-                    background-color: #3498db;
+                    border: 2.5px solid #20C7C7;
+                    background-color: #20C7C7;
+                }
+                QRadioButton::indicator:hover {
+                    border-color: #2B2F36;
                 }
             """)
             radio_btn.setChecked(self.settings.multi_camera_presets.get(str(camera.id), {}).get('enabled', False))
@@ -707,19 +722,23 @@ class SettingsPage(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)
 
-        self.multi_cam_save_btn = QPushButton("💾 Save")
+        self.multi_cam_save_btn = QPushButton("Save")
         self.multi_cam_save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
+                background-color: #20C7C7;
                 color: #121218;
                 border: none;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-size: 13px;
+                border-radius: 8px;
+                padding: 14px 24px;
+                font-size: 15px;
                 font-weight: 600;
+                min-height: 48px;
             }
             QPushButton:hover {
-                background-color: #2980b9;
+                background-color: #2DD4D4;
+            }
+            QPushButton:pressed {
+                background-color: #17A5A5;
             }
         """)
         self.multi_cam_save_btn.clicked.connect(self._save_multi_camera_config)
@@ -728,16 +747,23 @@ class SettingsPage(QWidget):
         self.multi_cam_reset_btn = QPushButton("🔄 Reset")
         self.multi_cam_reset_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2a2a38;
-                color: #ffffff;
-                border: 1px solid #404040;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-size: 13px;
-                font-weight: 600;
+                background-color: #262A32;
+                color: #E9E9E9;
+                border: 1.5px solid #3D4450;
+                border-radius: 8px;
+                padding: 14px 24px;
+                font-size: 15px;
+                font-weight: 500;
+                min-height: 48px;
             }
             QPushButton:hover {
-                background-color: #404040;
+                background-color: #2e2e3a;
+                border-color: #2B2F36;
+            }
+            QPushButton:pressed {
+                background-color: #20C7C7;
+                border-color: #20C7C7;
+                color: #121218;
             }
         """)
         self.multi_cam_reset_btn.clicked.connect(self._reset_multi_camera_config)
@@ -787,13 +813,14 @@ class SettingsPage(QWidget):
         self.multi_cam_save_btn.setText("✓ Saved!")
         self.multi_cam_save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2ecc71;
+                background-color: #22c55e;
                 color: white;
                 border: none;
-                border-radius: 4px;
-                padding: 10px 20px;
-                font-size: 13px;
+                border-radius: 8px;
+                padding: 14px 24px;
+                font-size: 15px;
                 font-weight: 600;
+                min-height: 48px;
             }
         """)
 
@@ -801,16 +828,20 @@ class SettingsPage(QWidget):
             self.multi_cam_save_btn.setText(original_text)
             self.multi_cam_save_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #3498db;
+                    background-color: #20C7C7;
                     color: #121218;
                     border: none;
-                    border-radius: 4px;
-                    padding: 10px 20px;
-                    font-size: 13px;
+                    border-radius: 8px;
+                    padding: 14px 24px;
+                    font-size: 15px;
                     font-weight: 600;
+                    min-height: 48px;
                 }
                 QPushButton:hover {
-                    background-color: #2980b9;
+                    background-color: #2DD4D4;
+                }
+                QPushButton:pressed {
+                    background-color: #17A5A5;
                 }
             """)
 
@@ -837,13 +868,14 @@ class SettingsPage(QWidget):
             self.multi_cam_reset_btn.setText("✓ Reset!")
             self.multi_cam_reset_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #e67e22;
-                    color: white;
+                    background-color: #D9A042;
+                    color: #121218;
                     border: none;
-                    border-radius: 4px;
-                    padding: 10px 20px;
-                    font-size: 13px;
+                    border-radius: 8px;
+                    padding: 14px 24px;
+                    font-size: 15px;
                     font-weight: 600;
+                    min-height: 48px;
                 }
             """)
 
@@ -851,16 +883,23 @@ class SettingsPage(QWidget):
                 self.multi_cam_reset_btn.setText(original_text)
                 self.multi_cam_reset_btn.setStyleSheet("""
                     QPushButton {
-                        background-color: #2a2a38;
-                        color: #ffffff;
-                        border: 1px solid #404040;
-                        border-radius: 4px;
-                        padding: 10px 20px;
-                        font-size: 13px;
-                        font-weight: 600;
+                        background-color: #262A32;
+                        color: #E9E9E9;
+                        border: 1.5px solid #3D4450;
+                        border-radius: 8px;
+                        padding: 14px 24px;
+                        font-size: 15px;
+                        font-weight: 500;
+                        min-height: 48px;
                     }
                     QPushButton:hover {
-                        background-color: #404040;
+                        background-color: #2e2e3a;
+                        border-color: #2B2F36;
+                    }
+                    QPushButton:pressed {
+                        background-color: #20C7C7;
+                        border-color: #20C7C7;
+                        color: #121218;
                     }
                 """)
 
@@ -874,7 +913,7 @@ class SettingsPage(QWidget):
 
     def _create_atem_panel(self) -> QWidget:
         """Create ATEM configuration panel"""
-        wrapper, layout = self._create_content_wrapper("ATEM Switcher", "🎬")
+        wrapper, layout = self._create_content_wrapper("ATEM Switcher", "ATEM Switcher")
         
         # Info card
         info_frame = self._create_info_card(
@@ -894,9 +933,9 @@ class SettingsPage(QWidget):
             QLabel {
                 padding: 14px 20px;
                 border-radius: 8px;
-                background-color: rgba(0, 180, 216, 0.15);
-                color: #FF9500;
-                border: 1px solid rgba(0, 180, 216, 0.3);
+                background-color: rgba(32, 199, 199, 0.15);
+                color: #20C7C7;
+                border: 1px solid rgba(32, 199, 199, 0.3);
                 font-size: 14px;
             }
         """)
@@ -904,7 +943,7 @@ class SettingsPage(QWidget):
         layout.addWidget(self.atem_model_label)
         
         # Status
-        self.atem_status_label = QLabel("● Not Connected")
+        self.atem_status_label = QLabel("Not Connected")
         self.atem_status_label.setStyleSheet(self._get_status_style("error"))
         layout.addWidget(self.atem_status_label)
         
@@ -929,23 +968,23 @@ class SettingsPage(QWidget):
         mapping_frame = QFrame()
         mapping_frame.setStyleSheet("""
             QFrame {
-                background-color: #242430;
+                background-color: #1a1a22;
                 border: 1px solid #2a2a38;
                 border-radius: 12px;
             }
         """)
         mapping_layout = QVBoxLayout(mapping_frame)
         mapping_layout.setContentsMargins(20, 16, 20, 16)
-        
+
         mapping_header = QLabel("💡 Tally Mapping")
-        mapping_header.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff;")
+        mapping_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #E9E9E9;")
         mapping_layout.addWidget(mapping_header)
-        
+
         mapping_info = QLabel(
             "Map cameras to ATEM inputs in the Camera page.\n"
             "🔴 RED = Program (Live)  •  🟢 GREEN = Preview"
         )
-        mapping_info.setStyleSheet("color: #888898; font-size: 13px;")
+        mapping_info.setStyleSheet("color: #B9BCC1; font-size: 13px;")
         mapping_layout.addWidget(mapping_info)
         
         layout.addWidget(mapping_frame)
@@ -955,7 +994,7 @@ class SettingsPage(QWidget):
     
     def _create_network_panel(self) -> QWidget:
         """Create network configuration panel"""
-        wrapper, layout = self._create_content_wrapper("Network Configuration", "🌐")
+        wrapper, layout = self._create_content_wrapper("Network Configuration", "Network Configuration")
         
         # Info card
         info_frame = self._create_info_card("Configure network settings for the Raspberry Pi.")
@@ -975,7 +1014,7 @@ class SettingsPage(QWidget):
         interface_layout.setSpacing(10)
         
         interface_label = QLabel("Network Interface")
-        interface_label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ffffff;")
+        interface_label.setStyleSheet("font-size: 14px; font-weight: 500; color: #E9E9E9;")
         interface_layout.addWidget(interface_label)
         
         # Radio buttons (match Camera Control radio look: orange only when selected)
@@ -988,20 +1027,23 @@ class SettingsPage(QWidget):
 
         radio_style = """
             QRadioButton {
-                color: #ffffff;
+                color: #E9E9E9;
                 font-size: 14px;
                 spacing: 10px;
             }
             QRadioButton::indicator {
                 width: 20px;
                 height: 20px;
-                border: 2px solid #2a2a38;
+                border: 1.5px solid #3D4450;
                 border-radius: 10px;
-                background-color: #121218;
+                background-color: #1A1D21;
             }
             QRadioButton::indicator:checked {
-                background-color: #FF9500;
-                border-color: #FF9500;
+                background-color: #20C7C7;
+                border-color: #20C7C7;
+            }
+            QRadioButton::indicator:hover {
+                border-color: #2B2F36;
             }
         """
 
@@ -1043,7 +1085,7 @@ class SettingsPage(QWidget):
         layout.addLayout(row)
         
         # Status
-        self.network_status_label = QLabel("● Ready")
+        self.network_status_label = QLabel("Ready")
         self.network_status_label.setStyleSheet(self._get_status_style("success"))
         layout.addWidget(self.network_status_label)
         
@@ -1069,7 +1111,7 @@ class SettingsPage(QWidget):
     
     def _create_display_panel(self) -> QWidget:
         """Create display settings panel"""
-        wrapper, layout = self._create_content_wrapper("Display Settings", "🖥️")
+        wrapper, layout = self._create_content_wrapper("Display Settings", "Display Settings")
         
         # Info card
         info_frame = self._create_info_card(
@@ -1122,7 +1164,7 @@ class SettingsPage(QWidget):
         rgb_layout.setSpacing(16)
         
         rgb_header = QLabel("RGB Balance")
-        rgb_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        rgb_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #E9E9E9;")
         rgb_layout.addWidget(rgb_header)
         
         rgb_info = QLabel("Fine-tune individual color channels")
@@ -1199,7 +1241,7 @@ class SettingsPage(QWidget):
         value.setObjectName("value_label")
         value.setFixedWidth(60)
         value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        value.setStyleSheet("font-size: 14px; color: #ffffff; font-weight: 500;")
+        value.setStyleSheet("font-size: 14px; color: #E9E9E9; font-weight: 500;")
         row_layout.addWidget(value)
         
         return row
@@ -1222,14 +1264,14 @@ class SettingsPage(QWidget):
         header_row = QHBoxLayout()
         
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        title_label.setStyleSheet("font-size: 16px; font-weight: 600; color: #E9E9E9;")
         header_row.addWidget(title_label)
         
         header_row.addStretch()
         
         value_label = QLabel(f"{default}{unit}")
         value_label.setObjectName("value_label")
-        value_label.setStyleSheet("font-size: 16px; color: #FF9500; font-weight: 600;")
+        value_label.setStyleSheet("font-size: 16px; color: #20C7C7; font-weight: 600;")
         header_row.addWidget(value_label)
         
         layout.addLayout(header_row)
@@ -1409,7 +1451,7 @@ class SettingsPage(QWidget):
     
     def _create_backup_panel(self) -> QWidget:
         """Create backup and restore panel"""
-        wrapper, layout = self._create_content_wrapper("Backup & Restore", "💾")
+        wrapper, layout = self._create_content_wrapper("Backup & Restore", "Backup & Restore")
         
         # Info card
         info_frame = self._create_info_card(
@@ -1431,7 +1473,7 @@ class SettingsPage(QWidget):
         create_layout.setSpacing(12)
         
         create_header = QLabel("Create New Backup")
-        create_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        create_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #E9E9E9;")
         create_layout.addWidget(create_header)
         
         self.backup_name_input = QLineEdit()
@@ -1460,7 +1502,7 @@ class SettingsPage(QWidget):
         restore_layout.setSpacing(12)
         
         restore_header = QLabel("Restore from Backup")
-        restore_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #ffffff;")
+        restore_header.setStyleSheet("font-size: 16px; font-weight: 600; color: #E9E9E9;")
         restore_layout.addWidget(restore_header)
         
         self.backup_combo = StyledComboBox()
@@ -1479,9 +1521,9 @@ class SettingsPage(QWidget):
         delete_btn = QPushButton("Delete")
         delete_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2a2a38;
-                border: 2px solid #ef4444;
-                border-radius: 8px;
+                background-color: #262A32;
+                border: 1.5px solid #ef4444;
+                border-radius: 12px;
                 color: #ef4444;
                 font-size: 15px;
                 font-weight: 500;
@@ -1489,10 +1531,12 @@ class SettingsPage(QWidget):
                 min-height: 48px;
             }
             QPushButton:hover {
-                background-color: rgba(239, 68, 68, 0.2);
+                background-color: rgba(239, 68, 68, 0.15);
+                border-color: #ef4444;
             }
             QPushButton:pressed {
-                background-color: rgba(239, 68, 68, 0.3);
+                background-color: #ef4444;
+                color: #121218;
             }
         """)
         delete_btn.clicked.connect(self._delete_backup)
@@ -1504,7 +1548,7 @@ class SettingsPage(QWidget):
         layout.addWidget(restore_frame)
         
         # Status
-        self.backup_status_label = QLabel("● Ready")
+        self.backup_status_label = QLabel("Ready")
         self.backup_status_label.setStyleSheet(self._get_status_style("success"))
         layout.addWidget(self.backup_status_label)
         
@@ -1517,7 +1561,7 @@ class SettingsPage(QWidget):
     
     def _create_keyboard_presets_panel(self) -> QWidget:
         """Create keyboard presets panel"""
-        wrapper, layout = self._create_content_wrapper("Keyboard Presets", "⌨️")
+        wrapper, layout = self._create_content_wrapper("Keyboard Presets", "Keyboard Presets")
         
         # Info card
         info_frame = self._create_info_card(
@@ -1557,7 +1601,7 @@ class SettingsPage(QWidget):
             cell_layout.setSpacing(8)
 
             preset_label = QLabel(f"Preset {i+1}")
-            preset_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #ffffff;")
+            preset_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #E9E9E9;")
             cell_layout.addWidget(preset_label)
 
             preset_input = QLineEdit()
@@ -1569,7 +1613,7 @@ class SettingsPage(QWidget):
             grid.addWidget(cell, row, col)
         
         # Save button with reference for visual feedback
-        self.osk_save_btn = QPushButton("💾 Save Presets")
+        self.osk_save_btn = QPushButton("Save Presets")
         self.osk_save_btn.setStyleSheet(self._get_button_style(True))
         self.osk_save_btn.clicked.connect(self._save_osk_presets)
         preset_layout.addWidget(self.osk_save_btn)
@@ -1642,7 +1686,7 @@ class SettingsPage(QWidget):
     
     def _create_system_panel(self) -> QWidget:
         """Create system information panel"""
-        wrapper, layout = self._create_content_wrapper("System Information", "📊")
+        wrapper, layout = self._create_content_wrapper("System Information", "System Information")
         
         # System info grid
         info_frame = QFrame()
@@ -1662,14 +1706,14 @@ class SettingsPage(QWidget):
         self.system_info_labels = {}
         
         info_items = [
-            ("model", "🔧 Model", 0, 0),
-            ("os", "💿 OS", 0, 2),
-            ("cpu_temp", "🌡️ CPU Temp", 1, 0),
-            ("cpu_usage", "⚡ CPU Usage", 1, 2),
-            ("memory", "🧠 Memory", 2, 0),
-            ("storage", "💾 Storage", 2, 2),
-            ("uptime", "⏱️ Uptime", 3, 0),
-            ("ip_address", "🌐 IP Address", 3, 2),
+            ("model", "Model", 0, 0),
+            ("os", "OS", 0, 2),
+            ("cpu_temp", "CPU Temp", 1, 0),
+            ("cpu_usage", "CPU Usage", 1, 2),
+            ("memory", "Memory", 2, 0),
+            ("storage", "Storage", 2, 2),
+            ("uptime", "Uptime", 3, 0),
+            ("ip_address", "IP Address", 3, 2),
         ]
         
         for key, label_text, row, col in info_items:
@@ -1678,7 +1722,7 @@ class SettingsPage(QWidget):
             info_layout.addWidget(label, row, col)
             
             value_label = QLabel("Loading...")
-            value_label.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 500;")
+            value_label.setStyleSheet("color: #E9E9E9; font-size: 15px; font-weight: 500;")
             info_layout.addWidget(value_label, row, col + 1)
             self.system_info_labels[key] = value_label
         
@@ -1712,7 +1756,7 @@ class SettingsPage(QWidget):
         temp_layout.addWidget(self.temp_bar)
         
         self.temp_value_label = QLabel("--°C")
-        self.temp_value_label.setStyleSheet("color: #ffffff; font-size: 15px; font-weight: 600; min-width: 70px;")
+        self.temp_value_label.setStyleSheet("color: #E9E9E9; font-size: 15px; font-weight: 600; min-width: 70px;")
         temp_layout.addWidget(self.temp_value_label)
         
         temp_layout.addStretch()
@@ -1737,23 +1781,23 @@ class SettingsPage(QWidget):
         frame = QFrame()
         frame.setStyleSheet("""
             QFrame {
-                background-color: rgba(255, 149, 0, 0.1);
-                border: 1px solid rgba(255, 149, 0, 0.3);
+                background-color: rgba(32, 199, 199, 0.1);
+                border: 1.5px solid rgba(32, 199, 199, 0.3);
                 border-radius: 12px;
             }
         """)
         layout = QHBoxLayout(frame)
         layout.setContentsMargins(16, 14, 16, 14)
-        
-        icon = QLabel("ℹ️")
-        icon.setStyleSheet("font-size: 18px;")
+
+        icon = QLabel("ℹ")
+        icon.setStyleSheet("font-size: 16px; color: #20C7C7;")
         layout.addWidget(icon)
-        
+
         label = QLabel(text)
-        label.setStyleSheet("color: #FF9500; font-size: 13px;")
+        label.setStyleSheet("color: #20C7C7; font-size: 13px;")
         label.setWordWrap(True)
         layout.addWidget(label, 1)
-        
+
         return frame
     
     def _create_input_group(self, title, placeholder):
@@ -1771,7 +1815,7 @@ class SettingsPage(QWidget):
         layout.setSpacing(10)
         
         label = QLabel(title)
-        label.setStyleSheet("font-size: 14px; font-weight: 500; color: #ffffff;")
+        label.setStyleSheet("font-size: 14px; font-weight: 500; color: #E9E9E9;")
         layout.addWidget(label)
         
         input_field = QLineEdit()
@@ -1786,16 +1830,16 @@ class SettingsPage(QWidget):
         colors = {
             "success": ("#22c55e", "rgba(34, 197, 94, 0.15)", "rgba(34, 197, 94, 0.3)"),
             "error": ("#ef4444", "rgba(239, 68, 68, 0.15)", "rgba(239, 68, 68, 0.3)"),
-            "info": ("#FF9500", "rgba(255, 149, 0, 0.15)", "rgba(255, 149, 0, 0.3)"),
+            "info": ("#20C7C7", "rgba(32, 199, 199, 0.15)", "rgba(32, 199, 199, 0.3)"),
         }
         text_color, bg_color, border_color = colors.get(status_type, colors["info"])
         return f"""
             QLabel {{
                 padding: 14px 20px;
-                border-radius: 8px;
+                border-radius: 12px;
                 background-color: {bg_color};
                 color: {text_color};
-                border: 1px solid {border_color};
+                border: 1.5px solid {border_color};
                 font-size: 14px;
             }}
         """
@@ -1925,7 +1969,7 @@ class SettingsPage(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to delete:\n{str(e)}")
     
     def _set_backup_status(self, text, status_type="info"):
-        self.backup_status_label.setText(f"● {text}")
+        self.backup_status_label.setText(f"{text}")
         self.backup_status_label.setStyleSheet(self._get_status_style(status_type))
     
     # === System monitor methods ===
@@ -2044,7 +2088,7 @@ class SettingsPage(QWidget):
                     self.throttle_label.setText("✓ No Throttling")
                     self.throttle_label.setStyleSheet("color: #22c55e; font-size: 13px;")
                 else:
-                    self.throttle_label.setText("⚠️ Throttling Detected")
+                    self.throttle_label.setText("Throttling Detected")
                     self.throttle_label.setStyleSheet("color: #ef4444; font-size: 13px;")
             except:
                 self.throttle_label.setText("")
@@ -2107,7 +2151,7 @@ class SettingsPage(QWidget):
             self._set_network_status("Error loading settings", "error")
     
     def _set_network_status(self, text, status_type="info"):
-        self.network_status_label.setText(f"● {text}")
+        self.network_status_label.setText(f"{text}")
         self.network_status_label.setStyleSheet(self._get_status_style(status_type))
     
     def _cidr_to_subnet(self, cidr):
@@ -2197,11 +2241,11 @@ class SettingsPage(QWidget):
     
     # === ATEM methods ===
     def _set_atem_status(self, text, status_type="info", model=None):
-        self.atem_status_label.setText(f"● {text}")
+        self.atem_status_label.setText(f"{text}")
         self.atem_status_label.setStyleSheet(self._get_status_style(status_type))
         
         if model:
-            self.atem_model_label.setText(f"🎬 {model}")
+            self.atem_model_label.setText(f"{model}")
             self.atem_model_label.show()
         else:
             self.atem_model_label.hide()

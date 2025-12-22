@@ -138,23 +138,23 @@ class PreviewWidget(QWidget):
         """Update the displayed pixmap - optimized for performance"""
         if frame is None:
             return
-        
+
         try:
             h, w = frame.shape[:2]
-            
+
             # Get target size
             label_size = self.preview_label.size()
             target_w = label_size.width()
             target_h = label_size.height()
-            
+
             if target_w <= 0 or target_h <= 0:
                 return
-            
+
             # Calculate scaled size maintaining aspect ratio
             scale = min(target_w / w, target_h / h)
             new_w = int(w * scale)
             new_h = int(h * scale)
-            
+
             # Resize frame using OpenCV (faster than Qt scaling on Pi)
             if new_w != w or new_h != h:
                 # Use INTER_AREA for downscaling (faster and better quality), INTER_LINEAR for upscaling
@@ -163,31 +163,39 @@ class PreviewWidget(QWidget):
                 else:
                     frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
                 h, w = frame.shape[:2]
-            
+
             # Convert BGR to RGB
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
+
             # Create QImage directly from buffer (QImage will make a copy internally)
             bytes_per_line = 3 * w
             q_img = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
-            
+
+            if q_img.isNull():
+                return
+
             # Create pixmap (this makes a copy, but necessary for display)
             pixmap = QPixmap.fromImage(q_img)
-            
+
+            if pixmap.isNull():
+                return
+
             self.preview_label.setPixmap(pixmap)
-        except Exception:
-            # Ignore errors during display update (widget might be destroyed)
-            pass
+        except Exception as e:
+            # Log error but don't crash - widget might be destroyed
+            print(f"Preview display error: {e}")
+            import traceback
+            traceback.print_exc()
     
     def update_frame(self, frame: np.ndarray):
         """Update the current frame from camera (error-handled)"""
         try:
             if frame is None:
                 return
-            
+
             # Store reference
             self._current_frame = frame
-            
+
             # Start worker if not already started (runs continuously)
             if not self._worker_started:
                 try:
@@ -199,7 +207,7 @@ class PreviewWidget(QWidget):
                 except Exception as e:
                     # Worker might already be running or destroyed
                     pass
-            
+
             # Send frame to worker (worker handles overlay vs pass-through internally)
             if hasattr(self, 'frame_worker') and self.frame_worker is not None:
                 self.frame_worker.update_frame(frame)
@@ -212,26 +220,27 @@ class PreviewWidget(QWidget):
         try:
             if processed_frame is None:
                 return
-            
+
             # Check if widget still exists
             if not hasattr(self, 'preview_label') or self.preview_label is None:
                 return
-            
+
             self._display_frame = processed_frame
             self._frame_dirty = True
-        except Exception:
+        except Exception as e:
             # Ignore errors (widget might be destroyed)
+            print(f"Frame processing error: {e}")
             pass
     
     def _update_display(self):
         """Update the display with current frame (rate-limited)"""
         import time
-        
+
         # Rate limiting - don't update more than 25fps
         current_time = time.time()
         if current_time - self._last_update_time < self._min_update_interval:
             return  # Skip this update
-        
+
         if self._display_frame is not None and self._frame_dirty:
             try:
                 self._frame_dirty = False
@@ -240,6 +249,7 @@ class PreviewWidget(QWidget):
                 self._last_update_time = current_time
             except Exception as e:
                 # Widget might be destroyed - ignore errors
+                print(f"Display update error: {e}")
                 pass
 
     def stop_frame_updates(self):

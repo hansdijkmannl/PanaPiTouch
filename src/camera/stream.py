@@ -132,6 +132,7 @@ class CameraStream:
     def _reset_backoff(self):
         """Reset backoff on successful connection"""
         self._connection_failures = 0
+        self._last_connection_attempt = 0
 
     def _increment_backoff(self):
         """Increment backoff on connection failure"""
@@ -599,8 +600,9 @@ class CameraStream:
         return None
     
     def test_connection(self) -> Tuple[bool, str]:
-        """Test connection to camera"""
+        """Test connection to camera with improved error handling"""
         try:
+            # Test basic HTTP connectivity
             url = f"http://{self.config.ip_address}:{self.config.port}/cgi-bin/aw_cam?cmd=QID&res=1"
             auth = (self.config.username, self.config.password) if self.config.username else None
             
@@ -610,13 +612,35 @@ class CameraStream:
                 return True, "Connected"
             elif response.status_code == 401:
                 return False, "Authentication failed"
+            elif response.status_code == 403:
+                return False, "Access forbidden"
+            elif response.status_code >= 500:
+                return False, f"Server error: HTTP {response.status_code}"
             else:
                 return False, f"HTTP {response.status_code}"
                 
         except requests.exceptions.Timeout:
             return False, "Connection timeout"
-        except requests.exceptions.ConnectionError:
-            return False, "Connection refused"
+        except requests.exceptions.ConnectionError as e:
+            if "Connection refused" in str(e):
+                return False, "Connection refused"
+            elif "Name or service not known" in str(e):
+                return False, "Host not found"
+            else:
+                return False, f"Network error: {str(e)[:50]}"
+        except requests.exceptions.RequestException as e:
+            return False, f"Request error: {str(e)[:50]}"
         except Exception as e:
-            return False, str(e)
+            return False, f"Error: {str(e)[:50]}"
+
+    def force_reconnect(self):
+        """Force reconnection by resetting connection state"""
+        try:
+            self._connected = False
+            self._connection_failures = 0
+            self._last_connection_attempt = 0
+            self._error_message = ""
+            print(f"Forced reconnect for camera at {self.config.ip_address}")
+        except Exception as e:
+            print(f"Error forcing reconnect: {e}")
 

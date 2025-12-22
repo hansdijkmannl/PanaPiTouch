@@ -60,7 +60,7 @@ class FrameWorker(QThread):
         """Start frame processing"""
         if self._running:
             return  # Already running
-        
+
         self._mutex.lock()
         try:
             self._running = True
@@ -68,7 +68,7 @@ class FrameWorker(QThread):
             self._frame_queue.clear()
         finally:
             self._mutex.unlock()
-        
+
         if not self.isRunning():
             self.start()
     

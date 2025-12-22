@@ -5,66 +5,69 @@ Canon RC-IP100 inspired dark theme with orange/blue accents.
 Optimized for touchscreen use and broadcast monitoring.
 """
 
-# Color palette - Canon RC-IP100 inspired dark theme
+# Color palette - Dark Teal/Amber theme
 COLORS = {
-    # Backgrounds - Charcoal tones (Canon-style)
-    'background': '#121218',        # Main background (charcoal)
-    'surface': '#1a1a22',           # Card/panel background
-    'surface_light': '#242430',     # Elevated surfaces
+    # Backgrounds - Dark tones
+    'background': '#17191C',        # Primary background
+    'surface': '#1A1D21',           # Secondary background
+    'panel_bg': '#1E2126',          # Panel background
+    'preview_bg': '#0C0D0F',        # Preview background
+    'surface_light': '#262A32',     # Elevated surfaces
     'surface_hover': '#2e2e3a',     # Hover state
     'surface_active': '#363644',    # Active/pressed state
-    
+
     # Borders
-    'border': '#2a2a38',            # Default border
-    'border_light': '#3a3a4a',      # Light border
-    'border_focus': '#FF9500',      # Focus border (orange)
-    
-    # Primary - Orange (Canon RC-IP100 style)
-    'primary': '#FF9500',           # Orange accent - active states
-    'primary_dark': '#CC7700',      # Darker orange for pressed
-    'primary_light': '#FFAA33',     # Lighter orange for hover
-    'primary_glow': 'rgba(255, 149, 0, 0.3)',  # Orange glow effect
-    
-    # Secondary - Blue (Canon RC-IP100 style)
-    'secondary': '#3498db',         # Blue accent - info/selection
-    'secondary_dark': '#2980b9',    # Darker blue
-    'secondary_light': '#5dade2',   # Lighter blue
-    'secondary_glow': 'rgba(52, 152, 219, 0.3)',  # Blue glow effect
-    
+    'border': '#2B2F36',            # Default border
+    'border_light': '#3D4450',      # Light border
+    'border_focus': '#D9A042',      # Focus border (amber)
+
+    # Primary - Teal accent
+    'primary': '#20C7C7',           # Teal accent - active states
+    'primary_dark': '#17A5A5',      # Darker teal for pressed
+    'primary_light': '#2DD4D4',     # Lighter teal for hover
+    'primary_glow': 'rgba(32, 199, 199, 0.3)',  # Teal glow effect
+
+    # Secondary - Amber accent
+    'secondary': '#D9A042',         # Amber accent - focus/selection
+    'secondary_dark': '#B8860B',    # Darker amber
+    'secondary_light': '#E6B85C',   # Lighter amber
+    'secondary_glow': 'rgba(217, 160, 66, 0.3)',  # Amber glow effect
+
     # Text
-    'text': '#e8e8f0',              # Primary text (white)
-    'text_dim': '#8888a0',          # Secondary text (gray)
+    'text': '#E9E9E9',              # Primary text
+    'text_dim': '#B9BCC1',          # Secondary text
     'text_dark': '#555568',         # Disabled text
-    'text_info': '#5dade2',         # Info text (blue)
-    
+    'text_info': '#2DD4D4',         # Info text (teal)
+
     # Tally indicators (broadcast standard)
     'tally_program': '#ff3333',     # Red - On Air
-    'tally_preview': '#33cc33',     # Green - Preview  
-    'tally_off': '#3a3a48',         # Off state
-    
+    'tally_preview': '#33cc33',     # Green - Preview
+    'tally_off': '#3D4450',         # Off state
+
     # Status colors
     'success': '#22c55e',           # Green
-    'warning': '#f59e0b',           # Amber
+    'warning': '#D9A042',           # Amber
     'error': '#ef4444',             # Red
-    'info': '#3498db',              # Blue
-    
+    'info': '#20C7C7',              # Teal
+
     # Button states
-    'button_active': '#FF9500',     # Orange active
-    'button_inactive': '#1a1a22',   # Inactive background
-    'button_disabled': '#2a2a38',   # Disabled state
+    'button_active': '#20C7C7',     # Teal active
+    'button_inactive': '#1A1D21',   # Inactive background
+    'button_disabled': '#2B2F36',   # Disabled state
 }
 
 # Main application stylesheet
 STYLESHEET = f"""
 /* ============================================
-   GLOBAL STYLES - Canon RC-IP100 Inspired
+   GLOBAL STYLES - Dark Teal/Amber Theme
    ============================================ */
 
 QWidget {{
     background-color: {COLORS['background']};
     color: {COLORS['text']};
-    font-family: 'Segoe UI', 'SF Pro Display', 'Helvetica Neue', sans-serif;
+    font-family: 'Inter', 'Roboto', 'Arial', sans-serif;
     font-size: 14px;
+    letter-spacing: 0.5px;
 }}
 
 QMainWindow {{
@@ -76,14 +79,14 @@ QStackedWidget {{
 }}
 
 /* ============================================
-   BUTTONS - Touch-friendly with glow effects
+   BUTTONS - Dark fill with light stroke
    ============================================ */
 
 QPushButton {{
-    background-color: {COLORS['surface']};
+    background-color: {COLORS['surface_light']};
     color: {COLORS['text']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 8px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 0px;
     margin: 0px;
     font-size: 15px;
@@ -93,19 +96,23 @@ QPushButton {{
 
 QPushButton:hover {{
     background-color: {COLORS['surface_hover']};
-    border-color: {COLORS['border_light']};
+    border-color: {COLORS['border']};
 }}
 
 QPushButton:pressed {{
     background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
     color: {COLORS['background']};
 }}
 
 QPushButton:checked {{
     background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
     color: {COLORS['background']};
+}}
+
+QPushButton:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QPushButton:disabled {{
@@ -140,7 +147,7 @@ QPushButton#infoButton:checked {{
 }}
 
 /* ============================================
-   NAVIGATION BUTTONS - Canon-style tabs
+   NAVIGATION BUTTONS - Theme tabs
    ============================================ */
 
 QPushButton#navButton {{
@@ -165,19 +172,19 @@ QPushButton#navButton:pressed {{
 }}
 
 QPushButton#navButton:checked {{
-    background-color: {COLORS['surface_light']};
+    background-color: {COLORS['panel_bg']};
     border-bottom: 3px solid {COLORS['primary']};
     color: {COLORS['primary']};
 }}
 
 /* ============================================
-   CAMERA BUTTONS - Tally-aware with glow
+   CAMERA BUTTONS - Tally-aware with theme colors
    ============================================ */
 
 QPushButton#cameraButton {{
     background-color: transparent;
     border: 3px solid {COLORS['tally_off']};
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 0px;
     margin: 0px;
     font-size: 12px;
@@ -198,7 +205,7 @@ QPushButton#cameraButton:pressed {{
 QPushButton#cameraButton:checked {{
     background-color: {COLORS['primary']};
     border-color: {COLORS['tally_off']};
-    color: white;
+    color: {COLORS['background']};
 }}
 
 /* Camera Button - Tally States */
@@ -229,9 +236,9 @@ QPushButton#cameraButton[tallyState="preview"] {{
    ============================================ */
 
 QPushButton#overlayButton {{
-    background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 8px;
+    background-color: {COLORS['surface_light']};
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 0px;
     margin: 0px;
     font-size: 12px;
@@ -241,23 +248,27 @@ QPushButton#overlayButton {{
 }}
 
 QPushButton#overlayButton:hover {{
-    border-color: {COLORS['primary']};
+    border-color: {COLORS['border']};
 }}
 
 QPushButton#overlayButton:checked {{
-    background-color: {COLORS['surface_light']};
-    border-color: {COLORS['primary']};
-    color: {COLORS['primary']};
+    background-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
+    color: {COLORS['background']};
+}}
+
+QPushButton#overlayButton:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 /* ============================================
-   PRESET BUTTONS - Canon-style grid
+   PRESET BUTTONS - Theme grid
    ============================================ */
 
 QPushButton#presetButton {{
-    background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 8px;
+    background-color: {COLORS['surface_light']};
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 4px;
     font-size: 11px;
     font-weight: 600;
@@ -265,14 +276,18 @@ QPushButton#presetButton {{
 }}
 
 QPushButton#presetButton:hover {{
-    border-color: {COLORS['primary']};
+    border-color: {COLORS['border']};
     background-color: {COLORS['surface_hover']};
 }}
 
 QPushButton#presetButton:pressed {{
     background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
     color: {COLORS['background']};
+}}
+
+QPushButton#presetButton:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QPushButton#presetButton[hasPreset="true"] {{
@@ -288,9 +303,9 @@ QPushButton#presetButton[hasPreset="true"]:hover {{
    ============================================ */
 
 QFrame#previewFrame {{
-    background-color: {COLORS['surface']};
+    background-color: {COLORS['preview_bg']};
     border: 4px solid {COLORS['border']};
-    border-radius: 4px;
+    border-radius: 12px;
 }}
 
 QFrame#previewFrame[tallyState="program"] {{
@@ -364,8 +379,8 @@ QLabel#sectionHeader {{
 
 QLineEdit {{
     background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 6px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 12px 16px;
     color: {COLORS['text']};
     font-size: 14px;
@@ -373,7 +388,7 @@ QLineEdit {{
 }}
 
 QLineEdit:focus {{
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QLineEdit:disabled {{
@@ -387,8 +402,8 @@ QLineEdit:disabled {{
 
 QSpinBox {{
     background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 6px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 8px 12px;
     color: {COLORS['text']};
     font-size: 14px;
@@ -396,7 +411,7 @@ QSpinBox {{
 }}
 
 QSpinBox:focus {{
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QSpinBox::up-button, QSpinBox::down-button {{
@@ -415,8 +430,8 @@ QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
 
 QComboBox {{
     background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 6px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     padding: 12px 16px;
     color: {COLORS['text']};
     font-size: 14px;
@@ -424,11 +439,11 @@ QComboBox {{
 }}
 
 QComboBox:focus {{
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QComboBox:hover {{
-    border-color: {COLORS['border_light']};
+    border-color: {COLORS['border']};
 }}
 
 QComboBox::drop-down {{
@@ -464,13 +479,13 @@ QComboBox QAbstractItemView::item:selected {{
 }}
 
 /* ============================================
-   SLIDERS - Canon-style with orange accent
+   SLIDERS - Theme style with teal accent
    ============================================ */
 
 QSlider::groove:horizontal {{
     background: {COLORS['surface_light']};
     height: 8px;
-    border-radius: 4px;
+    border-radius: 6px;
 }}
 
 QSlider::handle:horizontal {{
@@ -489,21 +504,25 @@ QSlider::handle:horizontal:pressed {{
     background: {COLORS['primary_dark']};
 }}
 
+QSlider::handle:horizontal:focus {{
+    border: 2px solid {COLORS['secondary']};
+}}
+
 QSlider::sub-page:horizontal {{
     background: {COLORS['primary']};
-    border-radius: 4px;
+    border-radius: 6px;
 }}
 
 QSlider::add-page:horizontal {{
     background: {COLORS['surface_light']};
-    border-radius: 4px;
+    border-radius: 6px;
 }}
 
 /* Vertical Slider */
 QSlider::groove:vertical {{
     background: {COLORS['surface_light']};
     width: 8px;
-    border-radius: 4px;
+    border-radius: 6px;
 }}
 
 QSlider::handle:vertical {{
@@ -514,14 +533,18 @@ QSlider::handle:vertical {{
     border-radius: 10px;
 }}
 
+QSlider::handle:vertical:focus {{
+    border: 2px solid {COLORS['secondary']};
+}}
+
 /* ============================================
    PROGRESS BAR
    ============================================ */
 
 QProgressBar {{
     background-color: {COLORS['surface']};
-    border: 1px solid {COLORS['border']};
-    border-radius: 4px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
     text-align: center;
     color: {COLORS['text']};
     font-size: 12px;
@@ -529,7 +552,7 @@ QProgressBar {{
 
 QProgressBar::chunk {{
     background-color: {COLORS['primary']};
-    border-radius: 3px;
+    border-radius: 10px;
 }}
 
 /* ============================================
@@ -589,8 +612,8 @@ QGroupBox {{
     font-size: 16px;
     font-weight: 600;
     color: {COLORS['text']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 8px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 15px;
     margin-top: 16px;
     padding-top: 16px;
 }}
@@ -635,16 +658,16 @@ QListWidget::item:hover {{
    ============================================ */
 
 QTabWidget::pane {{
-    border: 2px solid {COLORS['border']};
-    border-radius: 8px;
-    background-color: {COLORS['surface']};
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 12px;
+    background-color: {COLORS['panel_bg']};
 }}
 
 QTabBar::tab {{
     background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
+    border: 1.5px solid {COLORS['border_light']};
     border-bottom: none;
-    border-radius: 8px 8px 0 0;
+    border-radius: 12px 12px 0 0;
     padding: 12px 24px;
     margin-right: 4px;
     font-weight: 500;
@@ -653,6 +676,11 @@ QTabBar::tab {{
 QTabBar::tab:selected {{
     background-color: {COLORS['primary']};
     color: {COLORS['background']};
+    border: 2.5px solid {COLORS['primary']};
+}}
+
+QTabBar::tab:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 QTabBar::tab:hover:!selected {{
@@ -660,7 +688,7 @@ QTabBar::tab:hover:!selected {{
 }}
 
 /* ============================================
-   RADIO BUTTONS - Canon-style
+   RADIO BUTTONS - Theme style
    ============================================ */
 
 QRadioButton {{
@@ -672,18 +700,22 @@ QRadioButton {{
 QRadioButton::indicator {{
     width: 20px;
     height: 20px;
-    border: 2px solid {COLORS['border']};
+    border: 1.5px solid {COLORS['border_light']};
     border-radius: 10px;
     background-color: {COLORS['surface']};
 }}
 
 QRadioButton::indicator:hover {{
-    border-color: {COLORS['primary']};
+    border-color: {COLORS['border']};
 }}
 
 QRadioButton::indicator:checked {{
     background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
+}}
+
+QRadioButton::indicator:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 /* ============================================
@@ -699,18 +731,22 @@ QCheckBox {{
 QCheckBox::indicator {{
     width: 20px;
     height: 20px;
-    border: 2px solid {COLORS['border']};
-    border-radius: 4px;
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 6px;
     background-color: {COLORS['surface']};
 }}
 
 QCheckBox::indicator:hover {{
-    border-color: {COLORS['primary']};
+    border-color: {COLORS['border']};
 }}
 
 QCheckBox::indicator:checked {{
     background-color: {COLORS['primary']};
-    border-color: {COLORS['primary']};
+    border: 2.5px solid {COLORS['primary']};
+}}
+
+QCheckBox::indicator:focus {{
+    border: 2.5px solid {COLORS['secondary']};
 }}
 
 /* ============================================
@@ -750,20 +786,20 @@ QToolTip {{
    ============================================ */
 
 QFrame#panelFrame {{
-    background-color: {COLORS['surface']};
-    border: 1px solid {COLORS['border']};
-    border-radius: 8px;
+    background-color: {COLORS['panel_bg']};
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 15px;
 }}
 
 QFrame#headerFrame {{
-    background-color: {COLORS['surface_light']};
-    border-bottom: 1px solid {COLORS['border']};
+    background-color: {COLORS['panel_bg']};
+    border-bottom: 1.5px solid {COLORS['border_light']};
 }}
 
 QFrame#controlPanel {{
-    background-color: {COLORS['surface']};
-    border: 2px solid {COLORS['border']};
-    border-radius: 10px;
+    background-color: {COLORS['panel_bg']};
+    border: 1.5px solid {COLORS['border_light']};
+    border-radius: 15px;
 }}
 """
 
@@ -778,11 +814,11 @@ def get_tally_border_style(state: str) -> str:
 
 
 def get_active_button_style() -> str:
-    """Get style for active/selected buttons with glow effect"""
+    """Get style for active/selected buttons with theme colors"""
     return f"""
         QPushButton {{
             background-color: {COLORS['primary']};
-            border: 2px solid {COLORS['primary']};
+            border: 2.5px solid {COLORS['primary']};
             color: {COLORS['background']};
             font-weight: 600;
         }}
@@ -790,31 +826,33 @@ def get_active_button_style() -> str:
 
 
 def get_info_button_style() -> str:
-    """Get style for info/secondary buttons (blue accent)"""
+    """Get style for info/secondary buttons (amber accent)"""
     return f"""
         QPushButton {{
-            background-color: {COLORS['surface']};
-            border: 2px solid {COLORS['secondary']};
-            color: {COLORS['secondary']};
+            background-color: {COLORS['surface_light']};
+            border: 1.5px solid {COLORS['border_light']};
+            color: {COLORS['text']};
         }}
         QPushButton:hover {{
-            background-color: {COLORS['secondary']};
-            color: {COLORS['background']};
+            border-color: {COLORS['border']};
+        }}
+        QPushButton:focus {{
+            border: 2.5px solid {COLORS['secondary']};
         }}
     """
 
 
 def get_section_header_style() -> str:
-    """Get style for section header labels (Canon-style)"""
+    """Get style for section header labels (theme style)"""
     return f"""
         QLabel {{
             font-size: 14px;
             font-weight: bold;
             color: {COLORS['text']};
-            background-color: {COLORS['surface_light']};
-            border: 2px solid {COLORS['border_light']};
+            background-color: {COLORS['panel_bg']};
+            border: 1.5px solid {COLORS['border_light']};
             padding: 6px 10px;
-            border-radius: 4px;
+            border-radius: 12px;
         }}
     """
 
@@ -825,7 +863,7 @@ def get_control_slider_style() -> str:
         QSlider::groove:horizontal {{
             background: {COLORS['surface_light']};
             height: 8px;
-            border-radius: 4px;
+            border-radius: 6px;
         }}
         QSlider::handle:horizontal {{
             background: {COLORS['primary']};
@@ -837,8 +875,11 @@ def get_control_slider_style() -> str:
         QSlider::handle:horizontal:hover {{
             background: {COLORS['primary_light']};
         }}
+        QSlider::handle:horizontal:focus {{
+            border: 2px solid {COLORS['secondary']};
+        }}
         QSlider::sub-page:horizontal {{
             background: {COLORS['primary']};
-            border-radius: 4px;
+            border-radius: 6px;
         }}
     """
